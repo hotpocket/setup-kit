@@ -1,0 +1,8 @@
+# Printing — CUPS + GUI, OFF by default (dev VMs and headless boxes don't need it; modern printers are driverless IPP once cups is present)
+#
+cups                                        #      1.0 MB  net
+cups-filters                                #      0.9 MB  net
+cups-client                                 #      0.4 MB  net
+cups-bsd                                    #      0.1 MB  net
+system-config-printer                       #      0.9 MB  gnome
+system-config-printer-common                #      0.9 MB  gnome

@@ -60,7 +60,7 @@ case "$cmd" in
     # first interactive install: present the opt-in group menu once.
     # Defaults (already on) are the dev-on-a-VM set; this lists the rest.
     if [[ -t 0 && "$mode" == install && "$(conf_get groups_selected no)" != yes ]]; then
-      OPTIN=(media wine games dev_db dev_php dev_rust dev_go dev_r)
+      OPTIN=(media wine games printing dev_db dev_php dev_rust dev_go dev_r)
       section "optional groups (dev + GUI defaults already on)"
       i=0
       for g in "${OPTIN[@]}"; do

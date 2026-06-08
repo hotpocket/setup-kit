@@ -64,6 +64,19 @@ DROPS = {  # pkg: reason
                " causes an install/remove flap loop",
     "grub-customizer": "PPA has no 26.04 builds; bare-metal niche (extras"
                        " when it returns)",
+    # legacy vendor printer drivers — modern CUPS + driverless IPP covers
+    # almost everything; apt-install one of these only for a specific old printer
+    "printer-driver-pnm2ppa": "legacy vendor printer driver",
+    "printer-driver-m2300w": "legacy vendor printer driver",
+    "printer-driver-foo2zjs": "legacy vendor printer driver",
+    "printer-driver-splix": "legacy vendor printer driver",
+    "printer-driver-c2esp": "legacy vendor printer driver",
+    "printer-driver-min12xxw": "legacy vendor printer driver",
+    "printer-driver-pxljr": "legacy vendor printer driver",
+    "printer-driver-brlaser": "legacy vendor printer driver",
+    "printer-driver-ptouch": "legacy vendor printer driver",
+    "printer-driver-sag-gdi": "legacy vendor printer driver",
+    "bluez-cups": "Bluetooth printer backend — not needed without a BT printer",
 }
 
 # Apps that came from direct .deb downloads (no apt repo) — pulled out of
@@ -88,6 +101,11 @@ OPTIONAL = {  # group: (header, [pkgs])
                  ["rustc", "cargo"]),
     "dev-r": ("R — OFF by default (rstudio was dropped; r-base likely"
               " orphaned — confirm before ever enabling)", ["r-base"]),
+    "printing": ("Printing — CUPS + GUI, OFF by default (dev VMs and headless"
+                 " boxes don't need it; modern printers are driverless IPP"
+                 " once cups is present)",
+                 ["cups", "cups-filters", "cups-client", "cups-bsd",
+                  "system-config-printer", "system-config-printer-common"]),
     "extras": ("Niche/occasional tools — OFF by default (lean rule:"
                " defaults are only what makes stuff run). Flip"
                " group_extras=yes or install piecemeal",
@@ -112,14 +130,6 @@ CONDITIONAL = {
                    " multiverse — NOT Oracle's versioned virtualbox-7.2"
                    " (needs their repo; fails on fresh boxes)",
                    ["virtualbox"]),
-    "printer-brother": ("Brother HL-L3270CDW VENDOR driver — almost never"
-                        " needed: LAN printing is driverless (IPP/dnssd)"
-                        " once cups+avahi are in."
-                        " Manual i386 .deb, legacy edge cases only",
-                        ["hll3270cdwpdrv"]),
-    "wifi-brostrend": ("BrosTrend USB WiFi adapter dkms driver — only on"
-                       " the machine with that adapter plugged in"
-                       " (repo: brostrend.list)", ["rtl88x2bu-dkms"]),
 }
 
 # additions not in the snapshot (marked '+new' in output)

@@ -2,7 +2,7 @@
 # Cap the ZFS ARC so VMs aren't starved of memory.
 # 8 GB on a 64 GB host is the homelab consensus.
 
-SCRIPT_NAME="restore-host-03-zfs-tune"
+SCRIPT_NAME="proxmox-host-03-zfs-tune"
 source "$(dirname "$0")/../../lib.sh"
 require_root
 

@@ -50,9 +50,7 @@ gnome-screenshot                            #      1.1 MB  gnome
 remmina                                     #      1.0 MB  x11
 update-manager                              #      1.0 MB  gnome
 evince                                      #      0.9 MB  gnome
-system-config-printer                       #      0.9 MB  gnome
 gnome-calendar                              #      0.9 MB  gnome
-system-config-printer-common                #      0.9 MB  gnome
 baobab                                      #      0.8 MB  gnome
 gnome-terminal                              #      0.8 MB  gnome
 gnome-shell-extension-manager               #      0.7 MB  gnome

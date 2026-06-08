@@ -2,7 +2,7 @@
 # Enable IOMMU + reserve resources for PCI passthrough on the Proxmox host.
 # Run AFTER fresh Proxmox install, BEFORE creating the workstation VM.
 
-SCRIPT_NAME="restore-host-01-grub-iommu"
+SCRIPT_NAME="proxmox-host-01-grub-iommu"
 source "$(dirname "$0")/../../lib.sh"
 require_root
 

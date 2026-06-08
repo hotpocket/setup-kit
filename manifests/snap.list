@@ -10,7 +10,6 @@ chromium @apps
 # firefox @apps          # dropped — unused (chromium covers browser/headless)
 # thunderbird @apps      # dropped — unused
 evince @apps
-cups @apps                              # printing is driverless IPP once cups present
 snap-store @desktop
 multipass @apps                         # VM manager — pointless inside a VM
 # --- dropped / flagged ---

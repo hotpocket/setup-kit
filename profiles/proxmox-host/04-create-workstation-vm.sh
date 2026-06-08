@@ -2,15 +2,15 @@
 # Create the workstation VM in Proxmox via `qm`.
 # Run AFTER 01-grub-iommu, 02-vfio-bind, and a reboot.
 
-SCRIPT_NAME="restore-host-04-create-workstation-vm"
+SCRIPT_NAME="proxmox-host-04-create-workstation-vm"
 source "$(dirname "$0")/../../lib.sh"
 require_root
 
-# --- Tunables ---
+# --- Tunables (edit for your host) ---
 VMID=100
-VM_NAME="LinuxBeast"        # Keep current hostname for continuity
-CORES=14                    # 16 phys cores; leave 2 for host
-MEMORY_MB=49152             # 48 GB; leaves 16 GB for host + ARC
+VM_NAME="workstation"       # name for the VM
+CORES=14                    # leave a couple of cores for the host
+MEMORY_MB=49152             # leave headroom for the host + ZFS ARC
 DISK_GB=400                 # Workstation VM root + /home, on rpool
 ISO_PATH="local:iso/ubuntu-26.04-desktop-amd64.iso"   # adjust filename
 GPU_PCI="0000:01:00"        # Bus address WITHOUT function — passes the device + audio together
@@ -43,10 +43,10 @@ qm create "$VMID" \
   --boot "order=scsi0;ide2" \
   --ide2 "$ISO_PATH,media=cdrom"
 
-# Main disk — on local-zfs (the workstation's 2TB NVMe rpool).
+# Main disk — on local-zfs (the host's NVMe rpool).
 qm set "$VMID" --scsi0 "local-zfs:$DISK_GB,format=raw,discard=on,iothread=1,ssd=1"
 
-# PCI passthrough for the GTX 1080.
+# PCI passthrough for the dGPU.
 # x-vga=1 = use this as primary VGA (host doesn't draw to monitor through it).
 # pcie=1 = use PCIe instead of legacy PCI.
 qm set "$VMID" --hostpci0 "$GPU_PCI,pcie=1,x-vga=1"
@@ -62,7 +62,7 @@ qm set "$VMID" --hostpci0 "$GPU_PCI,pcie=1,x-vga=1"
 log "VM $VMID created."
 log
 log "NEXT STEPS:"
-log "  1. Connect monitor to the 1080's HDMI/DP output."
+log "  1. Connect monitor to the passed-through GPU's HDMI/DP output."
 log "  2. Edit the USB passthrough lines in this script if you want keyboard/mouse in the VM."
 log "  3. Start the VM:  qm start $VMID"
 log "  4. Install Ubuntu 26.04 from the ISO."

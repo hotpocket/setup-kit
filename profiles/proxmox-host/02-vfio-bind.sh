@@ -1,15 +1,14 @@
 #!/bin/bash
-# Bind the GTX 1080 (and its HDMI audio function) to vfio-pci so that the
+# Bind the passthrough dGPU (and its HDMI audio function) to vfio-pci so the
 # host doesn't grab it. Required before passing through to the workstation VM.
 
-SCRIPT_NAME="restore-host-02-vfio-bind"
+SCRIPT_NAME="proxmox-host-02-vfio-bind"
 source "$(dirname "$0")/../../lib.sh"
 require_root
 
-# *** EDIT THESE *** — find with: lspci -nn | grep -i nvidia
-# GTX 1080 will look like: 10de:1b80 (VGA) + 10de:10f0 (audio)
-# Verify on YOUR system before running. The IDs below are typical for 1080 FE
-# but can vary by board revision.
+# *** EDIT THESE for your card *** — find with: lspci -nn | grep -iE 'nvidia|amd/ati'
+# A card reports a VGA id + an audio id; pass both. Verify on YOUR system.
+# Example (GTX 1080 FE): 10de:1b80 (VGA) + 10de:10f0 (audio) — yours will differ.
 GPU_IDS="10de:1b80,10de:10f0"
 
 log "Binding PCI IDs to vfio-pci: $GPU_IDS"
@@ -38,6 +37,6 @@ EOF
 update-initramfs -u -k all
 
 log "Done. REBOOT to apply."
-log "After reboot, verify the 1080 is bound to vfio-pci:"
-log "  lspci -nnk -d 10de:"
+log "After reboot, verify the GPU is bound to vfio-pci:"
+log "  lspci -nnk | grep -A3 -iE 'vga|3d|audio'"
 log "  Look for 'Kernel driver in use: vfio-pci'"

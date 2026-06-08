@@ -41,8 +41,6 @@ if ! is_vm && ! dpkg -s proxmox-ve >/dev/null 2>&1 \
 else
   ok "conditional virtualbox: skipped ($(virt_context))"
 fi
-[[ "$(conf_get cond_printer_brother no)" == yes ]] \
-  && warn "printer-brother enabled: driver is a manual .deb — see conditional/printer-brother.list"
 
 # ---- subtract permanent skips ----------------------------------------------
 SKIPS="$(conf_get skip_pkgs "")"

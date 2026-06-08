@@ -1,3 +1,0 @@
-# Brother HL-L3270CDW VENDOR driver — almost never needed: LAN printing is driverless (IPP/dnssd) once cups+avahi are in. Manual i386 .deb, legacy edge cases only
-#
-hll3270cdwpdrv                              #      0.0 MB  

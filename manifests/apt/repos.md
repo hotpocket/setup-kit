@@ -14,7 +14,6 @@
 | ppa:danielrichter2007/grub-customizer | cli-system | keep (bare-metal relevance only) |
 | ppa:alessandro-strada (google-drive-ocamlfuse) | apps | keep |
 | nvidia-container-toolkit.list | conditional/nvidia | conditional |
-| brostrend.list (wifi dkms driver) | conditional hardware | conditional — only the machine with that adapter |
 | ddev.list | dev-core (ddev) | keep |
 | charm.list | cli-system (glow via charm repo) | keep |
 | minetestdevs PPA | games (minetest) | keep if games group on |
@@ -22,6 +21,3 @@
 
 Keyrings travel with their repo entries; never copy `*.distUpgrade`,
 `*.save`, `*.dpkg-bak` variants.
-
-Non-repo installs (manual .deb): hll3270cdwpdrv (Brother printer —
-conditional/printer-brother).
