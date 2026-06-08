@@ -2,7 +2,7 @@
 
 Steps that can't (or shouldn't) be scripted.
 
-## Before running any restore-host script
+## Before running any proxmox-host script
 
 - [ ] Proxmox VE installed on the 2 TB Gen4 NVMe (boot drive).
 - [ ] Logged into Proxmox web UI as root from another machine on the LAN.
@@ -50,8 +50,8 @@ Steps that can't (or shouldn't) be scripted.
 - [ ] Verify GPU is detected inside the VM: `lspci | grep -i nvidia` should show the 1080.
 - [ ] Install NVIDIA driver inside the VM (NOT on the host): `ubuntu-drivers autoinstall`.
 - [ ] Reboot the VM. Display output should now drive your monitor.
-- [ ] Copy `snapshot/` into the VM (scp, virtio-fs, or shared folder).
-- [ ] Proceed to `restore-vm/`.
+- [ ] Provision the VM with the workstation profile (see README):
+      `curl -fsSL .../get.sh | bash -s -- workstation install`.
 
 ## Backup setup on the host
 

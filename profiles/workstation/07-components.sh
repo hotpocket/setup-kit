@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram (default ON), herdr (opt-in), ocr-tts (prompt+GPU gate).
+# Components: oom-zram (default ON), docker, herdr (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -53,7 +53,7 @@ if [[ "$(conf_get component_oom_zram yes)" == yes ]]; then
       sudo systemctl set-property "user@$(id -u).service" ManagedOOMMemoryPressureLimit=80%
     fi
   fi
-  # Swap policy (decision 2026-06-06): zram is always the first tier.
+  # Swap policy: zram is always the first tier.
   #   auto      : RAM < 16G → zram + 4G disk overflow at prio -2 (emergency
   #               only — SSD writes only under genuine overcommit)
   #               RAM ≥ 16G → zram-only (no disk swap ever — SSD wear)
@@ -110,15 +110,13 @@ if [[ "$(conf_get component_oom_zram yes)" == yes ]]; then
 fi
 
 # ------------------------------------------------------------- docker-rootless
-# LinuxBeast convention (verified 2026-06-06): rootful daemon disabled,
-# user-level dockerd; .bashrc exports DOCKER_HOST to the user socket.
-# Without this, the kit's docker-ce install + .configs' DOCKER_HOST export
-# point CLI at a socket that doesn't exist.
+# Rootless docker: rootful daemon disabled, user-level dockerd; .bashrc
+# exports DOCKER_HOST to the user socket. Without this, the kit's docker-ce
+# install + .configs' DOCKER_HOST export point the CLI at a missing socket.
 DOCKER_MODE="$(conf_get component_docker_rootless yes)"
 if [[ "$DOCKER_MODE" == no ]] && command -v docker >/dev/null 2>&1; then
-  # explicit ROOTFUL mode (service VMs — frigate-style; matches the owner's
-  # original docker.sh): daemon enabled, user in docker group. The .bashrc
-  # DOCKER_HOST guard keeps the CLI pointed at the rootful socket here.
+  # explicit ROOTFUL mode (service VMs): daemon enabled, user in docker
+  # group. The .bashrc DOCKER_HOST guard keeps the CLI on the rootful socket.
   section "docker-rootful ($MODE)"
   if systemctl is-active docker >/dev/null 2>&1; then
     ok "rootful docker active"
@@ -143,8 +141,8 @@ elif [[ "$DOCKER_MODE" == yes ]] && command -v docker >/dev/null 2>&1; then
       warn "docker running rootful (or not configured) — converting to rootless"
       if (( INSTALL )); then
         sudo systemctl disable --now docker.service docker.socket 2>/dev/null || true
-        # stale rootful socket file makes setuptool abort even with the
-        # daemon stopped (hit on LeBuntu) — clear it before converting
+        # a stale rootful socket file makes setuptool abort even with the
+        # daemon stopped — clear it before converting
         sudo rm -f /var/run/docker.sock
         dockerd-rootless-setuptool.sh install 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log" \
           || miss "docker rootless setup failed"
@@ -190,7 +188,7 @@ fi
 # Speech-to-text chain (CPU-only — vosk lgraph model; NOT GPU-gated like
 # TTS). .configs ships hotkeys + wrapper; this provisions what they call:
 # the nerd-dictation repo, vosk in the pyenv python, and the model.
-# Found broken on LeBuntu: Alt+s bound → wrapper → "binary not found".
+# Without it: the .configs Alt+s hotkey fires but the wrapper can't find vosk.
 if [[ "$(conf_get component_dictation yes)" == yes ]]; then
   section "dictation ($MODE) — nerd-dictation + vosk"
   ND="$HOME/git/nerd-dictation"          # wrapper's portable fallback path
@@ -251,8 +249,7 @@ fi
 # default on. Installs BOTH session toolsets (X11 + Wayland) — the install
 # is often driven from a different session than the one ocrscr runs in, and
 # a box may offer both at the login screen; ocrscr picks the right pair at
-# click-time. All small CLIs. Found broken on LeBuntu (Wayland): grim/slurp
-# + imagemagick missing, xsel can't reach the Wayland clipboard.
+# click-time. All small CLIs.
 if [[ "$(conf_get component_ocr yes)" == yes ]]; then
   section "ocr (screen) ($MODE)"
   # tesseract+imagemagick always; gnome-screenshot for GNOME (Wayland or X11
@@ -306,35 +303,3 @@ if [[ "$(conf_get component_tts no)" == yes ]]; then
 else
   ok "tts: opt-in (component_tts=yes to enable; heavy — kokoro/torch)"
 fi
-
-# ------------------------------------------------------------- ocr-tts
-OCRTTS_WANT="$(conf_get component_ocr_tts ask)"
-section "ocr-tts ($MODE) — components/ocr-tts.md"
-case "$OCRTTS_WANT" in
-  yes)
-    if has_nvidia; then
-      if [[ -x "$HOME/git/.configs/ocr-and-tts-setup.sh" || -f "$HOME/git/.configs/ocr-and-tts-setup.sh" ]]; then
-        warn "ocr-tts enabled — driven by .configs scripts (kokoro/pyenv heavy; run attended)"
-        (( INSTALL )) && hint "bash ~/git/.configs/ocr-and-tts-setup.sh && ~/git/.configs/setup.sh install"
-      else
-        fail "ocr-tts wants .configs cloned first (06-configs)"
-      fi
-    else
-      fail "ocr-tts enabled but no NVIDIA GPU — GPU gate fails (see components/ocr-tts.md; CPU floor undecided)"
-    fi ;;
-  ask)
-    if [[ -t 0 ]] && (( INSTALL )); then
-      if has_nvidia; then
-        read -rp "Install OCR/TTS tools (kokoro TTS, dictation, ocrscr)? [y/N] " a
-        if [[ "$a" =~ ^[Yy] ]]; then conf_set component_ocr_tts yes
-        else conf_set component_ocr_tts no; fi
-        log "recorded component_ocr_tts=$(conf_get component_ocr_tts) — re-run install to apply"
-      else
-        ok "no NVIDIA GPU — ocr-tts not offered (GPU gate)"
-        conf_set component_ocr_tts no
-      fi
-    else
-      ok "ocr-tts: will prompt at first interactive install"
-    fi ;;
-  *) ok "ocr-tts: off" ;;
-esac

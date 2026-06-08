@@ -26,7 +26,7 @@ gcc                                         #      0.0 MB  devel
 pkg-config                                  #      0.0 MB  oldlibs
 clang                                       #      0.0 MB  devel
 build-essential                             #      0.0 MB  devel
-shellcheck                                  #              +new (not on old box)
-git-lfs                                     #              +new (not on old box)
-docker-ce-rootless-extras                   #              +new (not on old box)
-uidmap                                      #              +new (not on old box)
+shellcheck                                  #              +new
+git-lfs                                     #              +new
+docker-ce-rootless-extras                   #              +new
+uidmap                                      #              +new

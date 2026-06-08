@@ -90,8 +90,8 @@ has_kvm_dev()  { [[ -e /dev/kvm ]]; }
 manifest_pkgs() { grep -hvE '^[[:space:]]*(#|$)' "$1" 2>/dev/null | awk '{print $1}'; }
 
 # strictly installed — NOT just known to dpkg. `dpkg -s` exits 0 for
-# removed-but-config-files packages, which hid a removed libreoffice-calc
-# from the installer on LeBuntu (caught by verify.sh).
+# removed-but-config-files packages, which would hide a removed package from
+# the installer (the kind of drift verify.sh exists to catch).
 pkg_installed() {
   [[ "$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null)" == "install ok installed" ]]
 }

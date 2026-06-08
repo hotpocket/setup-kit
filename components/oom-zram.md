@@ -2,16 +2,12 @@
 
 Memory-pressure hardening for any desktop machine: zram swap (in-RAM,
 compressed, zero SSD writes) + systemd-oomd tuning + session-bus shield.
-Without it, Ubuntu's stock config force-logs-out the whole GNOME session
-under memory pressure — happened on LinuxBeast 2026-06-05 22:11 (Chrome 8G +
-4 Claude Code terminals, 31G RAM, no swap → oomd killed user `dbus.service`
-→ session collapse, all apps lost).
+Without it, Ubuntu's stock config can force-log-out the whole GNOME session
+under memory pressure: on a swapless box a pressure spike lets oomd kill the
+user `dbus.service`, which collapses the session and loses every open app.
 
-**Constraint (owner preference): NO disk swap, ever** — SSD-wear concern.
-`#/swapfile` in fstab stays commented out. zram is the only acceptable swap.
-
-Working reference script (applied + verified on LinuxBeast 2026-06-05):
-`~/git/tmp/fix-oom-setup.sh` — fold into the workstation provisioning stage.
+**Constraint: NO disk swap, ever** — SSD-wear concern. `#/swapfile` in fstab
+stays commented out. zram is the only acceptable swap.
 
 ## What it does (4 parts)
 
@@ -23,8 +19,7 @@ Working reference script (applied + verified on LinuxBeast 2026-06-05):
    compression-algorithm = zstd
    swap-priority = 100
    ```
-   TODO for setup-kit: derive `zram-size` from RAM (e.g. `min(ram/4, 8192)`)
-   instead of hardcoding 8G.
+   (the installer derives `zram-size` as `min(ram/4, 8192)` MB.)
 2. **sysctl** — `/etc/sysctl.d/99-zram.conf`: `vm.page-cluster = 0`
    (single-page swap-ins; standard zram pairing).
 3. **Soften oomd** — Ubuntu default kills the user slice at 50% pressure /
@@ -35,7 +30,7 @@ Working reference script (applied + verified on LinuxBeast 2026-06-05):
    - `/etc/systemd/oomd.conf.d/20-longer-duration.conf`:
      `[OOM]` `DefaultMemoryPressureDurationSec=60s`, then
      `systemctl restart systemd-oomd` (safe, monitor daemon only)
-   - TODO: parameterize the uid in `user@1000.service` for multi-user.
+   - (the installer uses the live `id -u`, so this works for any user.)
 4. **Shield the session bus** (user-level, no sudo) —
    `~/.config/systemd/user/dbus.service.d/oomd-avoid.conf`:
    ```ini

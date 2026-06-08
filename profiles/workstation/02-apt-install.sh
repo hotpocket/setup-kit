@@ -98,8 +98,8 @@ if [[ -t 0 && "$(conf_get size_review_done no)" != yes ]]; then
   conf_set size_review_done yes
 fi
 
-# ---- sanity: if apt can't even read its sources (e.g. Signed-By conflict,
-# ---- as steam caused on LeBuntu), every name would look unknown — abort loud
+# ---- sanity: if apt can't even read its sources (e.g. a Signed-By conflict
+# ---- like a bad steam repo), every name would look unknown — abort loud
 KNOWN_COUNT=$(apt-cache pkgnames 2>/dev/null | wc -l)
 if (( KNOWN_COUNT < 10000 )); then
   fail "apt index unreadable ($KNOWN_COUNT names) — fix sources first: apt-get update"
@@ -108,7 +108,7 @@ if (( KNOWN_COUNT < 10000 )); then
 fi
 
 # ---- drop names this release doesn't know (one bad name aborts the whole
-# ---- apt transaction — found the hard way on 26.04 with wireless-tools).
+# ---- apt transaction — e.g. wireless-tools, dropped on 26.04).
 # awk set-membership, NOT sort|comm: Ubuntu 26.04's uutils sort and comm
 # disagree on locale collation, which silently misclassified every package.
 mapfile -t UNKNOWN < <(apt-cache pkgnames \

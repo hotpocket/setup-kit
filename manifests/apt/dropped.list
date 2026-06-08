@@ -14,9 +14,9 @@ virtualbox-7.2                              #    268.4 MB  replaced by unversion
 webmin                                      #    150.8 MB  root web panel; Proxmox UI / Cockpit cover it
 openshot-qt                                 #    137.4 MB  not needed
 mysql-workbench-community                   #    117.0 MB  install piecemeal if needed
-tofu                                        #    109.7 MB  verified zero usage 2026-06-05
+tofu                                        #    109.7 MB  unused
 usermin                                     #     68.4 MB  webmin's per-user sibling — same family, same verdict
-steam-launcher                              #     19.5 MB  replaced by steam-installer (multiverse). Valve's package manages its own apt source; the kit adding one broke apt entirely on LeBuntu (Signed-By clash)
+steam-launcher                              #     19.5 MB  replaced by steam-installer (multiverse). Valve's package manages its own apt source; the kit adding one breaks apt entirely (Signed-By clash)
 grub-customizer                             #      8.7 MB  PPA has no 26.04 builds; bare-metal niche (extras when it returns)
 pulseeffects                                #      4.8 MB  renamed easyeffects (added to media group)
 openjdk-17-jdk                              #      2.4 MB  replaced by default-jdk (track current)
@@ -25,7 +25,7 @@ unixodbc-dev                                #      1.8 MB  only needed by mssql 
 gnome-shell-extension-ubuntu-dock           #      0.9 MB  integrated into 26.04 desktop
 gnome-shell-extension-desktop-icons-ng      #      0.5 MB  integrated into 26.04 desktop
 cheese                                      #      0.4 MB  removed — GNOME Snapshot ships with the desktop
-paprefs                                     #      0.4 MB  PulseAudio-era; its pulseaudio-module-gsettings dep CONFLICTS with pipewire-pulse/ubuntu-desktop on 26.04 — caused an install/remove flap loop on LeBuntu
+paprefs                                     #      0.4 MB  PulseAudio-era; its pulseaudio-module-gsettings dep CONFLICTS with pipewire-pulse/ubuntu-desktop on 26.04 — causes an install/remove flap loop
 neofetch                                    #      0.3 MB  dead upstream — fastfetch is the successor (in extras)
 gnome-shell-extension-appindicator          #      0.3 MB  integrated into 26.04 desktop
 wireless-tools                              #      0.3 MB  removed — iw/nmcli are the modern tools

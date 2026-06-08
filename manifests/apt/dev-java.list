@@ -1,4 +1,4 @@
 # Dev: Java — current JDK + maven (default ON)
 #
 maven                                       #      0.1 MB  java
-default-jdk                                 #              +new (not on old box)
+default-jdk                                 #              +new

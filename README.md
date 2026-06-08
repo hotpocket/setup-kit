@@ -5,9 +5,7 @@ Ubuntu CD for the survey) and it becomes a machine that works the way I
 expect — packages, dev toolchains, configs, conventions — without
 reinstalling everything by hand.
 
-Grew out of a one-shot migration kit (see PROGRESS.md history); now
-profile-based and idempotent. Sibling docs: ../homelab-2026.md (target
-architecture), ../pcbuild-2026.md (hardware).
+Profile-based and idempotent: re-run any time — already-installed is success.
 
 ## Layout
 
@@ -21,7 +19,7 @@ manifests/            WHAT to install (curated, size-annotated)
 profiles/
   workstation/        full dev desktop (bare metal or VM — same scripts)
   proxmox-host/       IOMMU/VFIO, ZFS, nested-virt, GPU-passthrough main VM
-components/           opt-in/conditional extras (herdr, oom-zram, ocr-tts)
+components/           opt-in/conditional extras (herdr, oom-zram, dictation/ocr/tts)
 hosts/                per-machine answer files (example.conf is the template)
 capture/              refresh tooling: re-snapshot a machine, regen manifests
 snapshot/             raw capture data (gitignored; large + contains secrets)
@@ -59,7 +57,7 @@ Dotfiles/user config are NOT duplicated here — the workstation profile
 ends by cloning `github.com:hotpocket/.configs` and running its
 `setup.sh install`.
 
-## Design principles (carried over from the capture phase)
+## Design principles
 
 - **Idempotent** — re-runnable; already-installed is success, not failure.
 - **Doctor/install split** (the `.configs/setup.sh` convention): every
@@ -79,6 +77,6 @@ LXC: pass `/dev/kvm` through. The doctor checks this.
 
 ## Status
 
-Manifests + structure done; profile script rework in progress — see
-PROGRESS.md ("Plan — ordered"). Do NOT run the profile installers yet;
-they are unported restore-* scripts. `survey` is safe everywhere.
+The `workstation` profile is tested and idempotent on bare-metal Ubuntu
+24.04 and 26.04. The `proxmox-host` scripts are reviewed but not yet run on
+a real host — read them before use. `survey` is read-only and safe anywhere.

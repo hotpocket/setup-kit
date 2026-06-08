@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Generate curated apt manifests from snapshot/apt/manual.txt.
 
-Applies the curation decisions recorded in PROGRESS.md (2026-06-05/06):
-drops, optional groups (off by default), conditional groups (hardware/
-virt-detected), and dev-stack grouping. Sizes/sections come from dpkg on
-the machine where the snapshot was taken — re-run there after a capture
-refresh.
+Applies the curation decisions: drops, optional groups (off by default),
+conditional groups (hardware/virt-detected), and dev-stack grouping.
+Sizes/sections come from dpkg on the machine where the snapshot was taken —
+re-run there after a capture refresh.
 
 Output: manifests/apt/*.list (+ optional/, conditional/), one package per
 line, '# comment' lines allowed, sorted by installed size desc.
@@ -35,17 +34,17 @@ DROPS = {  # pkg: reason
     "bruno": "not needed",
     "dotnet-sdk-6.0": "EOL since 2024; piecemeal if needed",
     "openshot-qt": "not needed",
-    "tofu": "verified zero usage 2026-06-05",
+    "tofu": "unused",
     "jdk-21": "replaced by default-jdk (track current)",
     "openjdk-17-jdk": "replaced by default-jdk (track current)",
     "packages-microsoft-prod": "MS repo bootstrap — repos were dropped",
     "steam-launcher": "replaced by steam-installer (multiverse). Valve's"
                       " package manages its own apt source; the kit adding"
-                      " one broke apt entirely on LeBuntu (Signed-By clash)",
+                      " one breaks apt entirely (Signed-By clash)",
     "steam-libs-amd64": "dependency of the launcher — never list directly",
     "steam-libs-i386": "dependency of the launcher — never list directly",
     "virtualbox-7.2": "replaced by unversioned 'virtualbox' (conditional)",
-    # gone/renamed on Ubuntu 26.04 (verified live on LeBuntu 2026-06-06):
+    # gone/renamed on Ubuntu 26.04:
     "acpi-support": "obsolete on 26.04",
     "cheese": "removed — GNOME Snapshot ships with the desktop",
     "fuse-zip": "removed from 26.04 archives",
@@ -62,7 +61,7 @@ DROPS = {  # pkg: reason
     "wireless-tools": "removed — iw/nmcli are the modern tools",
     "paprefs": "PulseAudio-era; its pulseaudio-module-gsettings dep"
                " CONFLICTS with pipewire-pulse/ubuntu-desktop on 26.04 —"
-               " caused an install/remove flap loop on LeBuntu",
+               " causes an install/remove flap loop",
     "grub-customizer": "PPA has no 26.04 builds; bare-metal niche (extras"
                        " when it returns)",
 }
@@ -115,8 +114,7 @@ CONDITIONAL = {
                    ["virtualbox"]),
     "printer-brother": ("Brother HL-L3270CDW VENDOR driver — almost never"
                         " needed: LAN printing is driverless (IPP/dnssd)"
-                        " once cups+avahi are in, verified on LeBuntu"
-                        " 2026-06-06; even LinuxBeast prints via dnssd."
+                        " once cups+avahi are in."
                         " Manual i386 .deb, legacy edge cases only",
                         ["hll3270cdwpdrv"]),
     "wifi-brostrend": ("BrosTrend USB WiFi adapter dkms driver — only on"
@@ -129,8 +127,8 @@ ADDITIONS = {
     "games": ["steam-installer"],
     "media": ["easyeffects"],          # pulseeffects' successor
     "dev-core": ["shellcheck", "git-lfs",
-                 # rootless docker (the LinuxBeast convention — rootful
-                 # daemon disabled, user-level dockerd; see 07-components)
+                 # rootless docker (rootful daemon disabled, user-level
+                 # dockerd; see 07-components)
                  "docker-ce-rootless-extras", "uidmap"],
     "dev-java": ["default-jdk"],
     "dev-cloud": ["google-cloud-cli"],
@@ -212,7 +210,7 @@ HEADERS = {
                  " its vendor apt repo, see repos.md)",
     "dev-flutter-deps": "Dev: flutter Linux-desktop build deps + adb udev"
                         " rules (default ON; flutter SDK itself: lang/)",
-    "libs-review": "Libraries that were marked 'manual' on the old box."
+    "libs-review": "Libraries that were marked 'manual' in the source set."
                    " NOT installed by setup — apt pulls real deps in"
                    " automatically. Kept for reference/debugging only",
 }
@@ -248,7 +246,7 @@ def main():
         for size, p, note in sorted(rows, reverse=True):
             lines.append(f"{p:<44}# {size/1024:8.1f} MB  {note}")
         for p in extra:
-            lines.append(f"{p:<44}# {'':>8}     +new (not on old box)")
+            lines.append(f"{p:<44}# {'':>8}     +new")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\n".join(lines) + "\n")
         return len(rows) + len(extra), sum(r[0] for r in rows)

@@ -75,7 +75,7 @@ repo wine winehq \
   "deb [signed-by=$KEYDIR/winehq.gpg] https://dl.winehq.org/wine-builds/ubuntu/ $CODENAME main"
 # NO steam repo here — the steam package manages its own sources files
 # (/etc/apt/sources.list.d/steam-stable.list, /usr/share/keyrings/steam.gpg).
-# Adding our own broke ALL of apt on LeBuntu with a Signed-By conflict.
+# Adding our own breaks all of apt with a Signed-By conflict.
 repo cli_system charm \
   "https://repo.charm.sh/apt/gpg.key" \
   "deb [signed-by=$KEYDIR/charm.gpg] https://repo.charm.sh/apt/ * *"

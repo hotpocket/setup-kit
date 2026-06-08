@@ -1,6 +1,6 @@
 #!/bin/bash
 # Flutter SDK + Android Studio + SDK + emulator (+ /dev/kvm doctor check).
-# Decision 2026-06-06: full Studio (emulator wanted), default AVD.
+# Full Android Studio (emulator wanted), default AVD.
 SCRIPT_NAME="ws-05-flutter-android"
 source "$(dirname "$0")/../../lib.sh"
 require_user
@@ -61,8 +61,8 @@ elif snap list android-studio >/dev/null 2>&1; then
   ok "android studio (snap)"
 else
   warn "android studio missing"
-  # The download page is JS-rendered (URL scraping fails — learned on
-  # LeBuntu); the snap is the reliable scripted path.
+  # The download page is JS-rendered (URL scraping fails); the snap is the
+  # reliable scripted path.
   do_or_say sudo snap install android-studio --classic \
     || miss "android-studio: snap install failed — manual tarball from developer.android.com/studio"
 fi

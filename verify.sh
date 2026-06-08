@@ -148,8 +148,8 @@ if [[ -d "$HOME/git/.configs/.local/share/icons" ]]; then
 fi
 
 # -- 4d. ~/bin wiring — every .configs tool must be the LIVE symlink ------------
-# A stale real file in ~/bin silently shadows the .configs version (this hid
-# broken tts scripts with a dead-venv shebang on LeBuntu 2026-06-06).
+# A stale real file in ~/bin silently shadows the .configs version (e.g. a
+# stale copy with a dead-venv shebang masking the fixed .configs tool).
 bin_bad=0; bin_n=0
 while IFS= read -r tool; do
   n="$(basename "$tool")"; tgt="$HOME/bin/$n"; bin_n=$((bin_n+1))

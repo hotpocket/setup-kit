@@ -52,10 +52,9 @@ fi
 
 # --- one symlink-or-heal primitive for every .configs subtree (3a/3b) ------
 # link_one <src-file> <target>: make $target a symlink to $src, healing a
-# stale REAL file in the way (the bug that let broken tts scripts shadow the
-# fixed .configs copies on LeBuntu). Identical real files are replaced
-# silently; DIVERGENT ones are backed up to .pre-setup-kit and flagged loudly
-# (on the source box a real file may be NEWER than .configs — never lose it).
+# stale REAL file in the way (which would otherwise shadow the .configs copy).
+# Identical real files are replaced silently; DIVERGENT ones are backed up to
+# .pre-setup-kit and flagged loudly (a real file may be NEWER — never lose it).
 # Sets LINK_CHANGED=1 when it links something. check-mode only reports.
 LINK_CHANGED=0
 link_one() {
@@ -83,7 +82,7 @@ link_one() {
 
 # link_tree <src-dir> <dst-dir> [exec_gate] : link every file under src into
 # dst (mirrored). exec_gate=1 → skip .desktop entries whose Exec binary isn't
-# installed here (e.g. indicator-multiload on a non-LinuxBeast box). Reads
+# installed here (e.g. a launcher for a tool this box doesn't have). Reads
 # extra find predicates from $LINK_FIND[@] if set.
 link_tree() {
   local src="$1" dst="$2" gate="${3:-0}" f exe
@@ -111,7 +110,7 @@ LINK_FIND=(-maxdepth 1 -executable); link_tree "$DEST/bin" "$HOME/bin"; LINK_FIN
 # Launcher assets: .configs tracks ~/.local/share/{applications,icons} for
 # custom tools (ocrscr, tts). setup.sh copies the .desktop files but NOT the
 # hicolor icons → iconless entries, unpinned. Mirror both, refresh caches,
-# pin to the dock. Found on LeBuntu 2026-06-06.
+# pin to the dock.
 LS_SRC="$DEST/.local/share"
 if [[ -d "$LS_SRC" ]]; then
   LINK_CHANGED=0
@@ -124,7 +123,7 @@ if [[ -d "$LS_SRC" ]]; then
     # Do NOT build a per-user icon cache: ~/.local/share/icons/hicolor has
     # no index.theme, so gtk-update-icon-cache yields a DEGENERATE cache
     # that GTK trusts as authoritative and serves nothing from — worse than
-    # none (this hid the tts icon on LeBuntu). Remove any stale cache and
+    # none (it hides the icons entirely). Remove any stale cache and
     # let GTK live-scan the dir against the system hicolor index.theme.
     rm -f "$HOME/.local/share/icons/hicolor/icon-theme.cache"
   fi
@@ -152,11 +151,8 @@ if [[ -d "$LS_SRC" ]]; then
 fi
 
 # Autostart entries: .configs tracks ~/.config/autostart (tts-server etc.)
-# but nothing wired them — found missing on LeBuntu 2026-06-06 (tts server
-# never started at login). Same symlink convention as launcher assets.
-# Autostart entries: .configs tracks ~/.config/autostart (tts-server etc.)
-# but nothing wired them — found missing on LeBuntu 2026-06-06 (tts server
-# never started at login). Exec-gated so each box only autostarts apps it has.
+# but setup.sh doesn't wire them. Same symlink convention as launcher assets,
+# exec-gated so each box only autostarts apps it actually has.
 AS_SRC="$DEST/.config/autostart"
 if [[ -d "$AS_SRC" ]]; then
   mkdir -p "$HOME/.config/autostart"

@@ -41,7 +41,7 @@ if [[ "$(conf_get lang_python yes)" == yes ]]; then
       fi
     done < <(manifest_pkgs "$LANG_M/python.list")
   fi
-  # global stays SYSTEM by policy (2026-06-07). Pinning global to 3.12 made
+  # global stays SYSTEM by policy. Pinning global to 3.12 made
   # the pyenv-version prompt fire in EVERY dir, defeating its purpose (it's
   # meant to flag projects that diverge from system via a .python-version).
   # system python3 ships via apt; 3.12 is installed above as an *available*

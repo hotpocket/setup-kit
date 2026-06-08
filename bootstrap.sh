@@ -75,7 +75,7 @@ case "$cmd" in
     fi
     # one sudo upfront so phases don't stall on password prompts mid-run.
     # NB: don't gate on bare `sudo -v` — with verifypw=all it demands a
-    # password even when NOPASSWD covers every command (caught on LeBuntu).
+    # password even when NOPASSWD covers every command.
     if [[ "$mode" == install ]]; then
       sudo -n true 2>/dev/null || sudo -v || { echo "sudo required"; exit 1; }
       ( while true; do sleep 50; sudo -n true 2>/dev/null || exit; done ) &

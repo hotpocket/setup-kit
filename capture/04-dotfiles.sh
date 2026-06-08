@@ -12,7 +12,7 @@ mkdir -p "$OUT"
 log "Building curated dotfiles tarball..."
 
 # Whitelist of paths under $HOME worth shipping.
-# Edit this list if Brandon has additional config locations.
+# Edit this list to add other config locations.
 INCLUDE=(
   .bashrc .bash_profile .profile .bash_logout .bash_aliases
   .zshrc .zsh_history .zsh_aliases

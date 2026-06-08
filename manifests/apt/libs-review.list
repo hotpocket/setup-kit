@@ -1,4 +1,4 @@
-# Libraries that were marked 'manual' on the old box. NOT installed by setup — apt pulls real deps in automatically. Kept for reference/debugging only
+# Libraries that were marked 'manual' in the source set. NOT installed by setup — apt pulls real deps in automatically. Kept for reference/debugging only
 #
 mesa-vulkan-drivers                         #     78.7 MB  libs
 libwebkit2gtk-4.0-37                        #     75.5 MB  libs

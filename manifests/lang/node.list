@@ -2,7 +2,7 @@
 # reason). lts/* resolves to it. Old projects nvm-install their pinned
 # versions on demand.
 nvm:lts/*
-# npm globals (from snapshot 2026-05-15)
+# npm globals
 npm:aws-cdk
 npm:corepack
 npm:tsx

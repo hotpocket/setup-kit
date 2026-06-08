@@ -7,7 +7,7 @@ panes/tabs/workspaces, and a local JSON socket API agents can use to manage
 their own layout. Single Rust binary, no Electron, Linux + macOS only.
 
 - Site: https://herdr.dev
-- Repo: https://github.com/ogulcancelik/herdr (AGPL-3.0, v0.6.8 as of 2026-06)
+- Repo: https://github.com/ogulcancelik/herdr (AGPL-3.0)
 - Maturity: young but solid — ~41k LOC Rust, ~12k lines tests, 7 CI workflows
 
 ## Why it's wanted
@@ -42,7 +42,7 @@ survive terminal/SSH disconnects.
   (bootstraps/binary-syncs remote side over SSH stdio)
 - Tailscale-friendly: nothing exposed on tailnet; trust boundary is SSH
 
-## Security/privacy audit findings (source-reviewed 2026-06-05)
+## Security/privacy audit findings (source-reviewed)
 
 - No telemetry/analytics/crash reporting of any kind
 - ONE outbound call: automatic update check on TUI startup + periodic —
