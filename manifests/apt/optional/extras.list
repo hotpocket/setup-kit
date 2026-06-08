@@ -1,0 +1,19 @@
+# Niche/occasional tools — OFF by default (lean rule: defaults are only what makes stuff run). Flip group_extras=yes or install piecemeal
+#
+calibre                                     #     61.9 MB  text
+qemu-system-x86                             #     57.2 MB  otherosfs
+john-data                                   #     19.2 MB  admin
+ipmitool                                    #      5.7 MB  utils
+octave-image                                #      3.6 MB  math
+freeipmi-tools                              #      2.6 MB  admin
+octave-signal                               #      2.4 MB  math
+fio                                         #      2.1 MB  utils
+octave-control                              #      2.0 MB  math
+octave-optim                                #      1.8 MB  math
+gsmartcontrol                               #      1.7 MB  utils
+genisoimage                                 #      1.7 MB  otherosfs
+octave-io                                   #      1.2 MB  math
+john                                        #      0.4 MB  admin
+octave-statistics                           #      0.4 MB  math
+libdvd-pkg                                  #      0.1 MB  contrib/utils
+fastfetch                                   #      0.0 MB  ?

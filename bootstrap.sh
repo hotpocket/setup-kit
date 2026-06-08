@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# setup-kit entry point — provision a machine to work the way Brandon expects.
+#
+#   ./bootstrap.sh survey                  # read-only hardware report (live-CD friendly)
+#   ./bootstrap.sh workstation [check]     # doctor: report what's missing, change nothing
+#   ./bootstrap.sh workstation install     # provision (prompts once, records answers)
+#   ./bootstrap.sh proxmox-host install    # IOMMU/VFIO/ZFS/nested-virt + VM creation
+#
+# Answers live in hosts/$(hostname).conf — re-runs are non-interactive and
+# idempotent; flip a group/component there and re-run install to add it.
+set -uo pipefail
+KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$KIT_DIR/lib.sh"
+
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+
+cmd="${1:-}"; mode="${2:-check}"
+case "$cmd" in
+  survey)
+    # Stage 0 — qualify hardware before committing to an install.
+    echo "=== setup-kit hardware survey: $(hostname) ==="
+    echo "--- CPU virt ---"
+    grep -qE 'svm|vmx' /proc/cpuinfo && echo "OK: virtualization flags present" \
+      || echo "FAIL: no svm/vmx — no KVM, no android emulator, no proxmox"
+    echo "--- /dev/kvm ---"
+    [[ -e /dev/kvm ]] && echo "OK: /dev/kvm present" \
+      || echo "MISSING: bare metal→enable virt in BIOS; Proxmox VM→nested virt (profiles/proxmox-host/05-nested-virt.sh); LXC→device passthrough"
+    echo "--- virtualization context ---"
+    echo "systemd-detect-virt: $(systemd-detect-virt 2>/dev/null || true)"
+    echo "--- GPUs ---"
+    lspci -nn 2>/dev/null | grep -Ei 'vga|3d|display' || echo "(lspci unavailable)"
+    echo "--- IOMMU groups (passthrough quality) ---"
+    if [[ -d /sys/kernel/iommu_groups ]] && ls /sys/kernel/iommu_groups/ &>/dev/null; then
+      for g in /sys/kernel/iommu_groups/*/devices/*; do
+        echo "group ${g#/sys/kernel/iommu_groups/}" | sed 's|/devices/| |'
+      done | sort -V | head -40
+    else
+      echo "IOMMU disabled — boot with amd_iommu=on/intel_iommu=on to evaluate passthrough"
+    fi
+    echo "--- disks ---"
+    lsblk -d -o NAME,MODEL,SERIAL,SIZE -e7
+    echo "--- NICs ---"
+    ip -br link | grep -v '^lo'
+    ;;
+
+  workstation)
+    [[ "$mode" == doctor ]] && mode=check   # alias — same thing
+    case "$mode" in check|install) ;; *) usage ;; esac
+    # first run: create the host answer file from the template
+    if [[ ! -f "$HOST_CONF" ]]; then
+      cp "$KIT_DIR/hosts/example.conf" "$HOST_CONF"
+      echo "Created $HOST_CONF from template."
+      if [[ -t 0 && "$mode" == install ]]; then
+        read -rp "Review/edit it now? [Y/n] " a
+        [[ "$a" =~ ^[Nn] ]] || "${EDITOR:-nano}" "$HOST_CONF"
+      else
+        echo "Defaults will be used — edit it to change groups/components."
+      fi
+    fi
+    # first interactive install: present the opt-in group menu once.
+    # Defaults (already on) are the dev-on-a-VM set; this lists the rest.
+    if [[ -t 0 && "$mode" == install && "$(conf_get groups_selected no)" != yes ]]; then
+      OPTIN=(media wine games dev_db dev_php dev_rust dev_go dev_r)
+      section "optional groups (dev + GUI defaults already on)"
+      i=0
+      for g in "${OPTIN[@]}"; do
+        printf '  %2d) %-10s [%s]\n' $((++i)) "${g//_/-}" "$(conf_get "group_$g" no)"
+      done
+      read -rp "numbers to toggle ON (space-separated, enter = none): " nums || nums=""
+      for n in $nums; do
+        [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#OPTIN[@]} )) || continue
+        conf_set "group_${OPTIN[$((n-1))]}" yes
+      done
+      conf_set groups_selected yes
+    fi
+    # one sudo upfront so phases don't stall on password prompts mid-run.
+    # NB: don't gate on bare `sudo -v` — with verifypw=all it demands a
+    # password even when NOPASSWD covers every command (caught on LeBuntu).
+    if [[ "$mode" == install ]]; then
+      sudo -n true 2>/dev/null || sudo -v || { echo "sudo required"; exit 1; }
+      ( while true; do sleep 50; sudo -n true 2>/dev/null || exit; done ) &
+      SUDO_KEEPALIVE=$!
+      trap '[[ -n "${SUDO_KEEPALIVE:-}" ]] && kill "$SUDO_KEEPALIVE" 2>/dev/null' EXIT
+    fi
+    # install mode loops passes until a pass changes nothing, then runs the
+    # independent verifier — one command does the whole job.
+    rc=0
+    for pass in 1 2 3; do
+      RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S)-p$pass.log"
+      for phase in "$KIT_DIR/profiles/workstation/"[0-9][0-9]*-*.sh; do
+        bash "$phase" "$mode" 2>&1 | tee -a "$RUN_LOG"
+        [[ "${PIPESTATUS[0]}" -eq 0 ]] || rc=1
+      done
+      # summary that answers "did anything change?" from stdout alone
+      n_ok=$(grep -c '\[ OK \]'   "$RUN_LOG" || true)
+      n_warn=$(grep -c '\[WARN\]' "$RUN_LOG" || true)
+      n_fail=$(grep -c '\[FAIL\]' "$RUN_LOG" || true)
+      # actions = do_or_say invocations, kit "installed:" log lines, apt runs —
+      # NOT phrases like "already installed" from chained tools
+      n_act=$(grep -cE '\] \+ |^\[[0-9T:.+-]+\] installed: |apt install attempt' "$RUN_LOG" || true)
+      section "summary — $(hostname) ($mode, pass $pass)"
+      echo "  ok: $n_ok   warn: $n_warn   fail: $n_fail   actions: $n_act"
+      [[ "$mode" == check ]] && { echo "  doctor only — 'install' applies. Full log: $RUN_LOG"; break; }
+      if (( n_act == 0 )); then
+        if (( n_warn == 0 && n_fail == 0 )); then
+          echo "  ✔ CONVERGED — nothing to change; system matches the manifests"
+        else
+          echo "  ✔ stable — no actions left; remaining warn/fail need a human"
+          echo "    (see profiles/workstation/99-manual-checklist.md)"
+        fi
+        break
+      fi
+      echo "  changes applied — running another pass..."
+    done
+    if [[ "$mode" == install ]]; then
+      [[ -s "$LOG_DIR/missing.log" ]] && echo "  Misses to triage: $LOG_DIR/missing.log"
+      section "independent verification (verify.sh)"
+      "$KIT_DIR/verify.sh" | tail -3
+    fi
+    exit "$rc"
+    ;;
+
+  proxmox-host)
+    case "$mode" in check|install) ;; *) usage ;; esac
+    [[ "$mode" == install ]] || {
+      echo "proxmox-host has no doctor yet — scripts are reviewed-but-unrun; read them first:"
+      ls "$KIT_DIR/profiles/proxmox-host/"
+      exit 0
+    }
+    [[ $EUID -eq 0 ]] || { echo "proxmox-host install must run as root"; exit 2; }
+    echo "Running proxmox-host phases (01 grub-iommu, 02 vfio, 03 zfs, 05 nested-virt)."
+    echo "04-create-workstation-vm is NOT auto-run — review its tunables, then run it directly."
+    for phase in 01-grub-iommu 02-vfio-bind 03-zfs-tune 05-nested-virt; do
+      bash "$KIT_DIR/profiles/proxmox-host/$phase.sh" || true
+    done
+    ;;
+
+  *) usage ;;
+esac

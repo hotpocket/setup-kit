@@ -1,0 +1,4 @@
+# Dev: flutter Linux-desktop build deps + adb udev rules (default ON; flutter SDK itself: lang/)
+#
+android-sdk-platform-tools-common           #      0.0 MB  devel
+libgtk-3-dev                                #              +new (not on old box)

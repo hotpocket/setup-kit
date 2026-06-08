@@ -1,0 +1,42 @@
+# Record of curation drops — NEVER installed; kept so refresh runs don't re-propose them
+#
+mssql-server                                #   1099.7 MB  1.1G; install piecemeal if ever needed
+cursor                                      #    858.4 MB  code (stable) is the keeper
+code-insiders                               #    778.0 MB  code (stable) is the keeper
+mssql-server-fts                            #    553.8 MB  with mssql-server
+azuredatastudio                             #    552.2 MB  install piecemeal if needed
+rstudio                                     #    541.2 MB  install piecemeal if needed
+bruno                                       #    477.2 MB  not needed
+signal-desktop                              #    431.7 MB  not needed
+jdk-21                                      #    331.1 MB  replaced by default-jdk (track current)
+dotnet-sdk-6.0                              #    329.3 MB  EOL since 2024; piecemeal if needed
+virtualbox-7.2                              #    268.4 MB  replaced by unversioned 'virtualbox' (conditional)
+webmin                                      #    150.8 MB  root web panel; Proxmox UI / Cockpit cover it
+openshot-qt                                 #    137.4 MB  not needed
+mysql-workbench-community                   #    117.0 MB  install piecemeal if needed
+tofu                                        #    109.7 MB  verified zero usage 2026-06-05
+usermin                                     #     68.4 MB  webmin's per-user sibling — same family, same verdict
+steam-launcher                              #     19.5 MB  replaced by steam-installer (multiverse). Valve's package manages its own apt source; the kit adding one broke apt entirely on LeBuntu (Signed-By clash)
+grub-customizer                             #      8.7 MB  PPA has no 26.04 builds; bare-metal niche (extras when it returns)
+pulseeffects                                #      4.8 MB  renamed easyeffects (added to media group)
+openjdk-17-jdk                              #      2.4 MB  replaced by default-jdk (track current)
+vino                                        #      2.1 MB  dead — gnome-remote-desktop ships with the desktop
+unixodbc-dev                                #      1.8 MB  only needed by mssql tooling
+gnome-shell-extension-ubuntu-dock           #      0.9 MB  integrated into 26.04 desktop
+gnome-shell-extension-desktop-icons-ng      #      0.5 MB  integrated into 26.04 desktop
+cheese                                      #      0.4 MB  removed — GNOME Snapshot ships with the desktop
+paprefs                                     #      0.4 MB  PulseAudio-era; its pulseaudio-module-gsettings dep CONFLICTS with pipewire-pulse/ubuntu-desktop on 26.04 — caused an install/remove flap loop on LeBuntu
+neofetch                                    #      0.3 MB  dead upstream — fastfetch is the successor (in extras)
+gnome-shell-extension-appindicator          #      0.3 MB  integrated into 26.04 desktop
+wireless-tools                              #      0.3 MB  removed — iw/nmcli are the modern tools
+mousetweaks                                 #      0.2 MB  removed on 26.04
+gnome-startup-applications                  #      0.1 MB  removed on 26.04
+kerneloops                                  #      0.1 MB  removed on 26.04
+nautilus-extension-gnome-terminal           #      0.1 MB  removed (Ptyxis era)
+fuse-zip                                    #      0.1 MB  removed from 26.04 archives
+acpi-support                                #      0.1 MB  obsolete on 26.04
+packages-microsoft-prod                     #      0.0 MB  MS repo bootstrap — repos were dropped
+steam-libs-i386                             #      0.0 MB  dependency of the launcher — never list directly
+steam-libs-amd64                            #      0.0 MB  dependency of the launcher — never list directly
+mssql-tools18                               #      0.0 MB  with mssql-server
+mssql-tools                                 #      0.0 MB  with mssql-server

@@ -1,0 +1,4 @@
+# Rust — OFF by default. PREFER rustup over these apt pkgs (apt rust is stale); listed for completeness
+#
+cargo                                       #     20.9 MB  devel
+rustc                                       #      9.4 MB  devel

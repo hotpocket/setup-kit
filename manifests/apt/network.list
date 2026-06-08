@@ -1,0 +1,37 @@
+# Network tools and services (default ON)
+#
+hashcat                                     #     79.2 MB  net
+wireshark                                   #     10.2 MB  net
+network-manager                             #      7.4 MB  net
+filezilla                                   #      6.1 MB  net
+nmap                                        #      4.0 MB  net
+samba                                       #      3.9 MB  net
+wpasupplicant                               #      3.7 MB  net
+transmission-gtk                            #      2.8 MB  net
+openssh-server                              #      2.0 MB  net
+lynx                                        #      1.9 MB  web
+aircrack-ng                                 #      1.8 MB  net
+cups                                        #      1.0 MB  net
+wget                                        #      0.9 MB  web
+cups-filters                                #      0.9 MB  net
+net-tools                                   #      0.8 MB  net
+mailutils                                   #      0.5 MB  mail
+curl                                        #      0.5 MB  web
+network-manager-openvpn-gnome               #      0.5 MB  net
+cups-client                                 #      0.4 MB  net
+tshark                                      #      0.4 MB  net
+whois                                       #      0.3 MB  net
+avahi-daemon                                #      0.3 MB  net
+network-manager-pptp-gnome                  #      0.2 MB  net
+traceroute                                  #      0.2 MB  net
+cups-bsd                                    #      0.1 MB  net
+certbot                                     #      0.1 MB  web
+jnettop                                     #      0.1 MB  net
+avahi-autoipd                               #      0.1 MB  net
+iftop                                       #      0.1 MB  net
+httrack                                     #      0.1 MB  web
+geoip-bin                                   #      0.0 MB  net
+network-manager-config-connectivity-ubuntu  #      0.0 MB  net
+gunicorn                                    #      0.0 MB  httpd
+xul-ext-ubufox                              #      0.0 MB  web
+transmission                                #      0.0 MB  net

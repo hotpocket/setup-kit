@@ -1,0 +1,17 @@
+# Dev: pyenv build deps + pip/pipx (default ON). pyenv itself + interpreters: see manifests/lang/
+#
+python3-pip                                 #      6.7 MB  python
+pipx                                        #      3.2 MB  python
+python3-venv                                #      0.0 MB  python
+libssl-dev                                  #              +new (not on old box)
+zlib1g-dev                                  #              +new (not on old box)
+libbz2-dev                                  #              +new (not on old box)
+libreadline-dev                             #              +new (not on old box)
+libsqlite3-dev                              #              +new (not on old box)
+libncurses-dev                              #              +new (not on old box)
+xz-utils                                    #              +new (not on old box)
+tk-dev                                      #              +new (not on old box)
+libxml2-dev                                 #              +new (not on old box)
+libxmlsec1-dev                              #              +new (not on old box)
+libffi-dev                                  #              +new (not on old box)
+liblzma-dev                                 #              +new (not on old box)

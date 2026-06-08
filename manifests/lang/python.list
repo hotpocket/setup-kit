@@ -1,0 +1,9 @@
+# Python — ONE stable interpreter for a base install (decision 2026-06-06:
+# one version per language kit-wide, a step or two behind latest for
+# stability). 3.12 aligns with .configs setup.sh (PYTHON_VERSION=3.12.11).
+# Prefix resolves to the latest 3.12.x at install time.
+# Project envs rebuild per-project; pip freezes archived in snapshot/languages/.
+3.12
+
+# pipx tools
+pipx:poetry

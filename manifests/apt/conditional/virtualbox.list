@@ -1,0 +1,3 @@
+# Only on bare-metal non-Proxmox targets; skip when provisioning a proxmox-host or inside any VM (systemd-detect-virt). Plain 'virtualbox' from multiverse — NOT Oracle's versioned virtualbox-7.2 (needs their repo; fails on fresh boxes)
+#
+virtualbox                                  #    106.5 MB  contrib/misc

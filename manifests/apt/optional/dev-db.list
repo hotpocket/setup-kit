@@ -1,0 +1,4 @@
+# Databases — OFF by default; flip on in host config
+#
+mariadb-server                              #     54.0 MB  database
+postgresql                                  #      0.0 MB  database

@@ -1,0 +1,12 @@
+# Editors (default ON)
+#
+code                                        #    775.1 MB  devel
+libreoffice-writer                          #     34.1 MB  editors
+libreoffice-calc                            #     28.5 MB  editors
+libreoffice-help-common                     #     14.5 MB  editors
+libreoffice-style-breeze                    #      7.1 MB  editors
+neovim                                      #      6.6 MB  editors
+vim                                         #      4.0 MB  editors
+libreoffice-impress                         #      3.2 MB  editors
+libreoffice-math                            #      2.0 MB  editors
+wxhexeditor                                 #      1.8 MB  editors

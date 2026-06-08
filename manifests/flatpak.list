@@ -1,0 +1,3 @@
+# Flatpak apps. Remote: flathub https://dl.flathub.org/repo/
+# Format: app-id [@group]
+com.usebottles.bottles @wine

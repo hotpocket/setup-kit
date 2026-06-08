@@ -1,0 +1,5 @@
+# Only when an NVIDIA GPU is present (lspci | grep -i nvidia). Driver pkg may be superseded — prefer 'ubuntu-drivers install' for the driver itself
+#
+nvidia-cuda-toolkit                         #    166.7 MB  non-free/devel
+nvidia-driver-580                           #      1.4 MB  non-free/libs
+nvidia-container-toolkit                    #      0.0 MB  ?

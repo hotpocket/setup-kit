@@ -1,0 +1,12 @@
+# raw capture data: large, machine-specific, contains secrets (WiFi PSKs)
+snapshot/
+# real host answer files may embed machine details; example.conf is tracked
+hosts/*.conf
+!hosts/example.conf
+logs/
+
+# python bytecode from importing bin/ scripts during testing
+__pycache__/
+*.pyc
+# session transport (patches/bundles) — never part of the kit
+handoff-to-*/

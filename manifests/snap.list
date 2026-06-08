@@ -1,0 +1,20 @@
+# Snap applications. Bases/runtimes (core*, gnome-*, mesa-*, gtk-common-
+# themes, bare, snapd) install automatically as dependencies — never list
+# them here.
+# Format: name [--classic] [@group]   — @group gates on that apt group's
+# host-conf toggle; no @group = always (dev-on-VM baseline).
+tailscale                               # node networking — always
+imgcat                                  # tiny CLI — always
+canonical-livepatch                     # needs 'pro attach' before it does anything
+chromium @apps
+# firefox @apps          # dropped — owner does not use (chromium covers browser/headless)
+# thunderbird @apps      # dropped — owner does not use
+evince @apps
+cups @apps                              # printing is driverless IPP once cups present
+snap-store @desktop
+multipass @apps                         # VM manager — pointless inside a VM
+# --- dropped / flagged ---
+# bruno                         DROPPED 2026-06-05 (also dropped as deb)
+# hover                         FLAGGED: abandoned flutter-desktop tool
+# wine-platform-5-stable        FLAGGED: wine comes from winehq apt repo now
+# wine-platform-runtime         FLAGGED: see above

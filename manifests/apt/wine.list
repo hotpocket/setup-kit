@@ -1,0 +1,5 @@
+# Wine for Windows apps, e.g. MTGA (default ON)
+#
+wine-stable                                 #     13.5 MB  otherosfs
+winetricks                                  #      1.0 MB  contrib/otherosfs
+winehq-stable                               #      0.0 MB  otherosfs

@@ -1,0 +1,4 @@
+# OFF-by-default language stacks (flip on in the host answer file)
+go:latest                       # + go install golang.org/x/tools/gopls@latest, honnef.co/go/tools/cmd/staticcheck@latest
+rust:rustup                     # via rustup.rs — NOT apt rustc/cargo (stale)
+java-extra:                     # default-jdk is already ON; vendor JDKs piecemeal via Temurin apt repo

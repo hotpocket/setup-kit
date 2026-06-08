@@ -1,0 +1,4 @@
+# Dev: cloud CLIs — aws, gcloud (default ON; gcloud needs its vendor apt repo, see repos.md)
+#
+awscli                                      #      9.9 MB  admin
+google-cloud-cli                            #              +new (not on old box)

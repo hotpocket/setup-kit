@@ -1,0 +1,9 @@
+# Games incl. steam — default OFF (most targets are headless nodes/VMs without dGPU or monitor; flip group_games=yes for a gaming desktop)
+#
+minetest                                    #     28.8 MB  games
+aisleriot                                   #     18.7 MB  games
+gnome-mahjongg                              #      4.9 MB  games
+gnome-sudoku                                #      1.9 MB  games
+gnome-mines                                 #      1.7 MB  games
+gamemode                                    #      0.1 MB  games
+steam-installer                             #              +new (not on old box)

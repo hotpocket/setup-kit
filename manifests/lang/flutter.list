@@ -1,0 +1,20 @@
+# Flutter + Android (decision 2026-06-06: full Studio + emulator)
+# apt-side deps: manifests/apt/dev-flutter-deps.list (+ dev-core for clang/cmake/ninja)
+flutter:stable -> ~/development/flutter        # git clone, channel stable
+dart-global:serverpod
+dart-global:melos
+dart-global:coverage     # one package provides collect_/format_/test_with_coverage
+
+# Android: Studio tarball -> ~/android-studio (today's convention), SDK -> ~/Android/Sdk
+android-sdk:platform-tools
+android-sdk:build-tools;latest
+android-sdk:emulator
+android-sdk:system-images;current-stable;google_apis;x86_64
+android-avd:default-pixel                      # one default AVD; more via Studio GUI
+
+# REQUIREMENT: emulator needs /dev/kvm.
+#  - bare metal: BIOS virt enabled, kvm group membership
+#  - Proxmox VM: host must enable nested virt + CPU type 'host'
+#    (see profiles/proxmox-host/05-nested-virt.sh)
+#  - LXC: pass /dev/kvm device into the container
+# Workstation doctor must check /dev/kvm and point at the right remediation.

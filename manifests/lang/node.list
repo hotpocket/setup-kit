@@ -1,0 +1,8 @@
+# Node — ONE version: the LATEST LTS (it's long-term support for a
+# reason). lts/* resolves to it. Old projects nvm-install their pinned
+# versions on demand.
+nvm:lts/*
+# npm globals (from snapshot 2026-05-15)
+npm:aws-cdk
+npm:corepack
+npm:tsx

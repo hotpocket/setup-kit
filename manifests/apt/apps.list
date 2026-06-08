@@ -1,0 +1,5 @@
+# GUI applications (default ON)
+#
+brave-browser                               #    432.4 MB  web
+google-chrome-stable                        #    402.2 MB  web
+google-drive-ocamlfuse                      #      8.6 MB  ocaml

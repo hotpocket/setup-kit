@@ -1,0 +1,32 @@
+# Dev: C/C++ chain, git/gh/jq, docker, sqlite (default ON)
+#
+docker-ce                                   #    102.6 MB  admin
+containerd.io                               #     89.2 MB  devel
+docker-buildx-plugin                        #     69.0 MB  admin
+gh                                          #     43.3 MB  utils
+docker-ce-cli                               #     43.2 MB  admin
+cmake                                       #     35.6 MB  devel
+ddev                                        #     34.8 MB  
+docker-compose-plugin                       #     31.4 MB  admin
+git                                         #     21.2 MB  vcs
+stress-ng                                   #      8.4 MB  devel
+lld-18                                      #      5.0 MB  devel
+nasm                                        #      3.2 MB  devel
+sysprof                                     #      2.4 MB  devel
+bison                                       #      2.4 MB  devel
+yasm                                        #      2.1 MB  devel
+libtool                                     #      1.2 MB  devel
+flex                                        #      0.9 MB  devel
+sqlite3                                     #      0.6 MB  database
+make                                        #      0.4 MB  devel
+ninja-build                                 #      0.3 MB  devel
+jq                                          #      0.1 MB  utils
+llvm                                        #      0.1 MB  devel
+gcc                                         #      0.0 MB  devel
+pkg-config                                  #      0.0 MB  oldlibs
+clang                                       #      0.0 MB  devel
+build-essential                             #      0.0 MB  devel
+shellcheck                                  #              +new (not on old box)
+git-lfs                                     #              +new (not on old box)
+docker-ce-rootless-extras                   #              +new (not on old box)
+uidmap                                      #              +new (not on old box)
