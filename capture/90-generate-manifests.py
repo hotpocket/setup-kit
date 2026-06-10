@@ -173,6 +173,11 @@ for p in ["wine-stable", "winehq-stable", "winetricks"]:
     OVERRIDES[p] = "wine"
 for p in ["glow", "snapd"]:
     OVERRIDES[p] = "cli-system"
+# gir deps for the system-monitor GNOME shell extension — the extension is
+# not an apt package, so nothing pulls these in; 'introspection' section
+# would bury them in libs-review (never installed)
+for p in ["gir1.2-gtop-2.0", "gir1.2-nm-1.0", "gir1.2-clutter-1.0"]:
+    OVERRIDES[p] = "desktop"
 OVERRIDES["ddev"] = "dev-core"
 
 # version-pinned kernel packages: never migrate — the target's OS install

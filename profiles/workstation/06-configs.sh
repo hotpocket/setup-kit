@@ -122,7 +122,7 @@ LINK_FIND=(-maxdepth 1 -executable); link_tree "$DEST/bin" "$HOME/bin"; LINK_FIN
 (( DOCTOR_WARN == _w )) && ok "dotfiles + ~/bin: all linked to .configs"
 
 # Launcher assets: .configs tracks ~/.local/share/{applications,icons} for
-# custom tools (ocrscr, tts). setup.sh copies the .desktop files but NOT the
+# custom tools (ocrscr, tts). setup.sh links the .desktop files but NOT the
 # hicolor icons → iconless entries, unpinned. Mirror both, refresh caches,
 # pin to the dock.
 LS_SRC="$DEST/.local/share"

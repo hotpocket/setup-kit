@@ -60,8 +60,10 @@ fonts-khmeros-core                          #      0.5 MB  fonts
 brasero                                     #      0.5 MB  gnome
 fontconfig                                  #      0.5 MB  fonts
 xfonts-scalable                             #      0.5 MB  fonts
+gir1.2-clutter-1.0                          #      0.5 MB  introspection
 gnome-session-bin                           #      0.4 MB  gnome
 xfonts-cyrillic                             #      0.4 MB  fonts
+gir1.2-nm-1.0                               #      0.4 MB  introspection
 xdg-desktop-portal-gtk                      #      0.4 MB  gnome
 gtk2-engines-murrine                        #      0.3 MB  x11
 fonts-lklug-sinhala                         #      0.3 MB  fonts
@@ -92,6 +94,7 @@ gvfs-fuse                                   #      0.1 MB  gnome
 wmctrl                                      #      0.1 MB  x11
 xsel                                        #      0.1 MB  x11
 xclip                                       #      0.1 MB  x11
+gir1.2-gtop-2.0                             #      0.1 MB  introspection
 ubuntu-session                              #      0.0 MB  gnome
 ubuntu-settings                             #      0.0 MB  x11
 gnome-session-canberra                      #      0.0 MB  gnome
