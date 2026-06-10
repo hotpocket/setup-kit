@@ -237,7 +237,10 @@ SETTLE=0
 # 7a. failed units
 nf=$(systemctl --failed --no-legend --plain 2>/dev/null | wc -l)
 (( nf == 0 )) && pass "calm: no failed systemd units" \
-  || { failv "calm: $nf failed unit(s):"; systemctl --failed --no-legend --plain | sed 's/^/        /'; }
+  || { failv "calm: $nf failed unit(s):"; systemctl --failed --no-legend --plain | sed 's/^/        /'
+       systemctl --failed --no-legend --plain | grep -q not-found \
+         && echo "        ('not-found' = unit was removed mid-failure; a tombstone —" \
+         && echo "         sudo systemctl reset-failed clears it)"; }
 
 # 7b. flapping units — restart counter is the loop detector ("activating"
 # units never show in --failed while systemd is busy restarting them)
