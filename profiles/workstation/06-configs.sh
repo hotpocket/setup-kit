@@ -38,6 +38,19 @@ else
   fi
 fi
 
+# setup-kit itself arrives via https (get.sh on a keyless fresh box), which
+# makes every later `git push` beg for credentials. The successful ssh clone
+# of private .configs above proves GitHub ssh auth works — flip the kit's
+# own remote to match.
+KIT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+KIT_URL="$(git -C "$KIT_DIR" remote get-url origin 2>/dev/null || true)"
+if [[ "$KIT_URL" == https://github.com/* ]]; then
+  warn "setup-kit remote is https (push would prompt for credentials)"
+  do_or_say git -C "$KIT_DIR" remote set-url origin "git@github.com:${KIT_URL#https://github.com/}"
+else
+  ok "setup-kit remote: ssh"
+fi
+
 if [[ -x "$DEST/setup.sh" ]]; then
   if (( INSTALL )) && [[ "$(conf_get configs_run_setup yes)" == yes ]]; then
     log "running .configs/setup.sh install..."
