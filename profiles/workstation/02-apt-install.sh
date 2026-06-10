@@ -44,6 +44,27 @@ else
   ok "conditional virtualbox: skipped ($(virt_context))"
 fi
 
+# ---- nvidia: the nouveau blacklist must be IN the initramfs ------------------
+# dpkg triggers normally regenerate it when the driver installs, but a missed
+# trigger leaves nouveau loading early at boot and the nvidia module unable to
+# bind — driver installed, nvidia-smi dead, persistenced/cdi-refresh restart-
+# looping (caught in the wild: GTX 1080, driver 580 built, nouveau on the card).
+# Runs before the early exits below so a converged re-run still checks it;
+# a pass-1 missed trigger is caught on pass 2 (bootstrap loops until converged).
+if nvidia_wanted && dpkg -l 'nvidia-driver-*' 2>/dev/null | grep -q '^ii'; then
+  # no grep -q: early exit SIGPIPEs lsinitramfs and pipefail fails the match
+  if lsinitramfs "/boot/initrd.img-$(uname -r)" 2>/dev/null \
+       | grep 'nvidia-graphics-drivers\.conf' >/dev/null; then
+    ok "nvidia: nouveau blacklist present in initramfs"
+  elif (( INSTALL )); then
+    warn "nvidia: nouveau blacklist missing from initramfs — regenerating"
+    sudo update-initramfs -u -k all
+    warn "nvidia: REBOOT required before the nvidia driver can take the GPU"
+  else
+    fail "nvidia: nouveau blacklist missing from initramfs (stale — nouveau will grab the GPU at boot)"
+  fi
+fi
+
 # ---- subtract permanent skips ----------------------------------------------
 SKIPS="$(conf_get skip_pkgs "")"
 if [[ -n "$SKIPS" ]]; then

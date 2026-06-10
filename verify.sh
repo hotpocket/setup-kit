@@ -50,6 +50,28 @@ while IFS= read -r p; do
 done < <(grep -hvE '^[[:space:]]*(#|$)' "${FILES[@]}" 2>/dev/null | awk '{print $1}' | sort -u)
 (( apt_missing == 0 )) && pass "apt: all $apt_total available manifest packages installed"
 
+# -- 1b. nvidia driver actually driving the GPU --------------------------------
+# Installed != working: a stale initramfs still loads nouveau early, the nvidia
+# module can't bind, and persistenced/cdi-refresh restart-loop — which otherwise
+# only surfaces as opaque calm-check noise (caught in the wild: GTX 1080,
+# driver 580 built and installed, nvidia-smi dead).
+if [[ " ${FILES[*]} " == *conditional/nvidia.list* ]]; then
+  if nvidia-smi >/dev/null 2>&1; then
+    pass "nvidia: driver answering (nvidia-smi)"
+  elif grep -q '^nouveau ' /proc/modules; then
+    # no grep -q on the pipe: early exit SIGPIPEs lsinitramfs and pipefail
+    # turns a real match into rc 141
+    if lsinitramfs "/boot/initrd.img-$(uname -r)" 2>/dev/null \
+         | grep 'nvidia-graphics-drivers\.conf' >/dev/null; then
+      failv "nvidia: nouveau holds the GPU; initramfs has the blacklist — reboot pending"
+    else
+      failv "nvidia: nouveau holds the GPU — blacklist missing from initramfs; fix: sudo update-initramfs -u -k all && reboot"
+    fi
+  else
+    failv "nvidia: nvidia-smi not answering and no GPU driver loaded (DKMS build failed? secure boot?)"
+  fi
+fi
+
 # -- 2. snaps / flatpaks ------------------------------------------------------
 while IFS= read -r line; do
   line="${line%%#*}"; line=$(echo "$line" | xargs); [[ -z "$line" ]] && continue
