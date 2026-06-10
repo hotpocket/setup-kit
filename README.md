@@ -34,10 +34,12 @@ curl -fsSL https://raw.githubusercontent.com/hotpocket/setup-kit/main/get.sh | b
 
 (or one: `curl -fsSL .../get.sh | bash -s -- workstation install`)
 
-`install` prompts once (sudo password, group menu, size review), loops
-passes until nothing changes, runs the independent verifier, and offers
-`gh auth login` inline when the private .configs repo needs it. Re-run any
-time — it's idempotent. On a LAN without GitHub:
+`install` front-loads ALL interaction in the first minute — sudo password,
+group menu, GitHub auth (pins host keys, writes the ssh-over-443 stanza,
+recovers resident FIDO2 keys from a plugged YubiKey via `ssh-keygen -K`,
+falls back to `gh auth login`), and the private .configs clone — then loops
+passes unaided until nothing changes and runs the independent verifier
+(size review times out to install-all). Re-run any time — it's idempotent. On a LAN without GitHub:
 `SETUP_KIT_REPO=brandon@<host>:/path/to/setup-kit ... get.sh | bash`.
 
 ## Other commands

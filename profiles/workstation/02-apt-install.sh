@@ -82,7 +82,8 @@ if [[ -t 0 && "$(conf_get size_review_done no)" != yes ]]; then
     for e in "${BIG[@]}"; do
       printf '  %2d) %-40s %s MB\n' $((++i)) "${e%%:*}" "${e##*:}"
     done
-    read -rp "numbers to SKIP (space-separated, enter = install all): " nums || nums=""
+    # 120s timeout → install all: a walked-away-from run must never stall here
+    read -t 120 -rp "numbers to SKIP (space-separated, enter/timeout = install all): " nums || { nums=""; echo; }
     newskips=""
     for n in $nums; do
       [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#BIG[@]} )) || continue

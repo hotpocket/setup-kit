@@ -82,6 +82,11 @@ case "$cmd" in
       SUDO_KEEPALIVE=$!
       trap '[[ -n "${SUDO_KEEPALIVE:-}" ]] && kill "$SUDO_KEEPALIVE" 2>/dev/null' EXIT
     fi
+    # Front-load the REST of the interaction here (GitHub host keys, YubiKey
+    # PIN + touches, .configs clone) — after this, the phase loop is unaided.
+    # Deliberately not piped: it needs the tty for PIN/touch prompts.
+    chmod +x "$KIT_DIR/profiles/workstation/preamble-github-auth.sh" 2>/dev/null || true
+    bash "$KIT_DIR/profiles/workstation/preamble-github-auth.sh" "$mode" || true
     # install mode loops passes until a pass changes nothing, then runs the
     # independent verifier — one command does the whole job.
     rc=0
