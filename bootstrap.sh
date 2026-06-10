@@ -115,7 +115,7 @@ case "$cmd" in
     if [[ "$mode" == install ]]; then
       [[ -s "$LOG_DIR/missing.log" ]] && echo "  Misses to triage: $LOG_DIR/missing.log"
       section "independent verification (verify.sh)"
-      "$KIT_DIR/verify.sh" | tail -3
+      "$KIT_DIR/verify.sh" --settle 30 | grep -E '^(FAIL|===|    )'
     fi
     exit "$rc"
     ;;

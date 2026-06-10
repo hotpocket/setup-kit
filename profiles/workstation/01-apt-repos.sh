@@ -85,8 +85,8 @@ ppa media  ppa:marin-m/songrec
 ppa apps   ppa:alessandro-strada/ppa
 ppa games  ppa:minetestdevs/stable
 
-# conditional: nvidia container toolkit (docker GPU) only with an NVIDIA card
-if has_nvidia && group_on dev_core; then
+# conditional: nvidia container toolkit (docker GPU) only with a SUPPORTED card
+if nvidia_wanted && group_on dev_core; then
   repo always nvidia-container-toolkit \
     "https://nvidia.github.io/libnvidia-container/gpgkey" \
     "deb [signed-by=$KEYDIR/nvidia-container-toolkit.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/\$(ARCH) /"

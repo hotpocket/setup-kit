@@ -47,7 +47,10 @@ time — it's idempotent. On a LAN without GitHub:
                                      # groups, GPUs, disks — qualify the box
 ./bootstrap.sh workstation           # doctor: report, change nothing
 ./bootstrap.sh proxmox-host install  # host: VFIO, ZFS, nested virt, main VM
-./verify.sh                          # independent system-vs-manifest check
+./verify.sh                          # independent system-vs-manifest check,
+                                     # plus "system calm": no failed/flapping
+                                     # units, quiet journal (--settle 30 adds
+                                     # load + fork-churn sampling)
 ```
 
 Re-runs are idempotent: flip a group in `hosts/<name>.conf` (e.g.
@@ -67,6 +70,8 @@ ends by cloning `github.com:hotpocket/.configs` and running its
 - **Capture-to-var-then-write** — never `> file` before a privileged
   command can fail.
 - **Log everything** — each script writes `<script>.log` alongside stdout.
+- **Detection-gated nvidia** — driver/toolkit install only when
+  `ubuntu-drivers` actually supports the card (legacy GPUs → nouveau).
 
 ## Android emulator note
 

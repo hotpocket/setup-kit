@@ -28,9 +28,11 @@ for f in "$APT_M"/optional/*.list; do
   mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$f")
 done
 # conditional groups
-if has_nvidia && [[ "$(conf_get cond_nvidia auto)" != no ]]; then
+if nvidia_wanted; then
   mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/conditional/nvidia.list")
-  ok "conditional nvidia: GPU detected — included"
+  ok "conditional nvidia: supported GPU detected — included"
+elif has_nvidia && [[ "$(conf_get cond_nvidia auto)" != no ]]; then
+  warn "conditional nvidia: GPU present but unsupported by current driver (legacy card) — skipped, nouveau it is"
 else
   ok "conditional nvidia: skipped"
 fi

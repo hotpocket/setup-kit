@@ -90,6 +90,9 @@ if [[ "$(conf_get lang_node yes)" == yes ]]; then
     else
       warn "node ${want} not installed"
       do_or_say nvm install "${want:-lts/*}" --default || miss "nvm: $want"
+      # do_or_say pipes through tee, so nvm's PATH export dies in the
+      # subshell — activate here or the npm -g loop below can't find npm
+      (( INSTALL )) && { nvm use default >/dev/null 2>&1 || true; }
     fi
     while IFS= read -r entry; do
       [[ "$entry" == npm:* ]] || continue

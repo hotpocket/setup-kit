@@ -11,7 +11,8 @@ pass() { printf 'PASS  %s\n' "$*"; PASS=$((PASS+1)); }
 failv() { printf 'FAIL  %s\n' "$*"; FAILN=$((FAILN+1)); }
 
 # -- tiny, independent conf reader ------------------------------------------
-cv() { sed -n "s/^$1=\([^#]*\).*/\1/p" "$CONF" 2>/dev/null | tail -1 | tr -d ' '; }
+# trim edges only — list values (skip_pkgs) are space-separated inside
+cv() { sed -n "s/^$1=\([^#]*\).*/\1/p" "$CONF" 2>/dev/null | tail -1 | sed 's/^ *//;s/ *$//'; }
 gon() { [[ "$(cv "group_${1//-/_}")" == yes ]]; }
 
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
@@ -30,7 +31,11 @@ for f in manifests/apt/optional/*.list; do
   gon "$(basename "$f" .list)" && FILES+=("$f")
 done
 # conditionals re-derived independently
-if lspci 2>/dev/null | grep -qi nvidia; then FILES+=(manifests/apt/conditional/nvidia.list); fi
+# mirror installer: nvidia only when ubuntu-drivers backs the GPU (legacy cards skip)
+if lspci 2>/dev/null | grep -qi nvidia \
+   && ubuntu-drivers devices 2>/dev/null | grep -q 'nvidia-driver'; then
+  FILES+=(manifests/apt/conditional/nvidia.list)
+fi
 if [[ "$(systemd-detect-virt 2>/dev/null || true)" == "" || "$(systemd-detect-virt 2>/dev/null)" == none ]] \
    && ! dpkg -s proxmox-ve >/dev/null 2>&1; then
   FILES+=(manifests/apt/conditional/virtualbox.list)
@@ -219,6 +224,74 @@ else
   else
     failv "dpkg --audit reports broken packages"
   fi
+fi
+
+# -- 7. system calm — a fresh install should be QUIET --------------------------
+# State checks above say "is everything there"; this says "is anything
+# misbehaving": restart loops, journal spam, busy processes. Caught in the
+# wild: nvidia-cdi-refresh.service restart-looping 1500+ times against a
+# driver that didn't support the GPU.
+SETTLE=0
+[[ "${1:-}" == --settle ]] && SETTLE="${2:-30}"
+
+# 7a. failed units
+nf=$(systemctl --failed --no-legend --plain 2>/dev/null | wc -l)
+(( nf == 0 )) && pass "calm: no failed systemd units" \
+  || { failv "calm: $nf failed unit(s):"; systemctl --failed --no-legend --plain | sed 's/^/        /'; }
+
+# 7b. flapping units — restart counter is the loop detector ("activating"
+# units never show in --failed while systemd is busy restarting them)
+flap=$(systemctl show '*.service' --property=Id,NRestarts 2>/dev/null \
+  | awk -v RS='' -F'\n' '{id="";n=0
+      for(i=1;i<=NF;i++){p=index($i,"=");k=substr($i,1,p-1);v=substr($i,p+1)
+        if(k=="Id")id=v; if(k=="NRestarts")n=v}
+      if(n+0>5) print "        "id" ("n" restarts)"}')
+[[ -z "$flap" ]] && pass "calm: no flapping services (NRestarts ≤ 5)" \
+  || { failv "calm: restart-looping service(s):"; printf '%s\n' "$flap"; }
+
+# 7c. units stuck activating right now
+act=$(systemctl list-units --state=activating --no-legend --plain 2>/dev/null | awk '{print $1}')
+[[ -z "$act" ]] && pass "calm: nothing stuck activating" \
+  || { failv "calm: stuck activating:"; printf '%s\n' "$act" | sed 's/^/        /'; }
+
+# 7d. journal noise — warnings+errors per 5 min, with top repeat offenders
+JWMAX=$(cv calm_journal_warns); JWMAX=${JWMAX:-50}
+jw=$(journalctl -p warning --since "-5 min" -o cat 2>/dev/null | wc -l)
+if (( jw <= JWMAX )); then
+  pass "calm: journal quiet ($jw warnings+ in 5 min, max $JWMAX)"
+else
+  failv "calm: journal noisy ($jw warnings+ in 5 min, max $JWMAX) — top repeats:"
+  journalctl -p warning --since "-5 min" -o cat 2>/dev/null \
+    | sort | uniq -c | sort -rn | head -3 | sed 's/^/        /'
+fi
+
+# 7e. coredumps in the last hour
+if command -v coredumpctl >/dev/null 2>&1; then
+  nc=$(coredumpctl list --since "-1 hour" --no-legend 2>/dev/null | wc -l)
+  (( nc == 0 )) && pass "calm: no recent coredumps" \
+    || failv "calm: $nc coredump(s) in the last hour (coredumpctl list)"
+fi
+
+# 7f/7g. load + churn — only with --settle N (needs a quiet sample window;
+# pointless straight after an install while apt/snapd are still digesting)
+if (( SETTLE > 0 )); then
+  echo "    (settling ${SETTLE}s before load/churn sampling...)"
+  sleep "$SETTLE"
+  CORES=$(nproc)
+  LMAX=$(cv calm_load_per_core); LMAX=${LMAX:-50}   # load1*100/cores
+  l1=$(awk '{printf "%d", $1*100}' /proc/loadavg)
+  (( l1 / CORES <= LMAX )) \
+    && pass "calm: load $(awk '{print $1}' /proc/loadavg) on $CORES cores" \
+    || { failv "calm: load high for idle: $(awk '{print $1}' /proc/loadavg) on $CORES cores — top consumers:"
+         ps aux --sort=-%cpu | awk 'NR>1&&NR<6{printf "        %s%% %s\n",$3,$11}'; }
+  # fork churn: kernel total-process counter, 5s apart. A respawn loop
+  # (modprobe every second) shows here even when each child dies instantly.
+  f0=$(awk '/^processes/{print $2}' /proc/stat); sleep 5
+  f1=$(awk '/^processes/{print $2}' /proc/stat)
+  rate=$(( (f1 - f0) / 5 ))
+  FMAX=$(cv calm_fork_rate); FMAX=${FMAX:-20}
+  (( rate <= FMAX )) && pass "calm: fork rate ${rate}/s (max $FMAX)" \
+    || failv "calm: high fork churn ${rate}/s (max $FMAX) — something is respawning"
 fi
 
 echo "=== verify done: $PASS pass, $FAILN fail ==="
