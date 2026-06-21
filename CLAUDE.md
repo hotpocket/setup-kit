@@ -18,7 +18,7 @@ packages, toolchains, configs — idempotently.
 
 - `lib.sh` — shared helpers: output, modes, host-conf, detection, manifest/apt.
 - `manifests/` — WHAT to install: grouped apt lists, lang stacks, snap/flatpak, direct debs.
-- `profiles/workstation/` — ordered idempotent phases (`00-identity` … `07-components`).
+- `profiles/workstation/` — ordered idempotent phases (`00-identity` … `08-claude-skills`).
 - `profiles/proxmox-host/` — host-side passthrough / ZFS / VM-creation scripts.
 - `components/` — opt-in/conditional extras; one spec per `components/*.md`.
 - `hosts/<hostname>.conf` — per-machine answer file (`example.conf` is the template).
@@ -31,6 +31,12 @@ packages, toolchains, configs — idempotently.
 - **No silent sudo** — detect root needs upfront, one consolidated sudo pass; log gaps to `logs/missing.log` instead of failing silently.
 - **Manifests are generated** — `capture/90-generate-manifests.py` writes `manifests/apt/*`. Edit the generator (its strings become the file comments), not the `.list` files by hand — a regen overwrites them.
 - **Two repos** — setup-kit owns machine-level provisioning; `~/git/.configs` (private) owns user dotfiles/bin/dconf and is cloned + run by phase 06. setup-kit never duplicates dotfiles.
+
+## Git — ABSOLUTE RULE
+
+- Claude commits. The user pushes. NEVER run `git push` — any remote, any protocol (SSH/HTTPS/gh), tags, force, anything. No exceptions, ever.
+- Never ask to push, never offer to push, never suggest pushing. Pushing is exclusively the user's action, done on their schedule.
+- After committing, just report the commit and stop.
 
 ## Gotchas
 

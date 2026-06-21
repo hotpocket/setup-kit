@@ -4,6 +4,8 @@ snapshot/
 hosts/*.conf
 !hosts/example.conf
 logs/
+# transient/ephemeral generated docs (docs/ + docs/reports/ are tracked)
+docs/logs/
 
 # python bytecode from importing bin/ scripts during testing
 __pycache__/

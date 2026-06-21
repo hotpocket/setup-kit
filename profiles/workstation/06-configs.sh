@@ -114,7 +114,7 @@ link_tree() {
 # 1) core dotfiles (specific files at the repo root)  2) ~/bin executables
 _w=$DOCTOR_WARN
 for df in .bashrc .bash_aliases .gitconfig \
-          .claude/settings.json .claude/statusline-command.sh; do
+          .claude/CLAUDE.md .claude/settings.json .claude/statusline-command.sh; do
   link_one "$DEST/$df" "$HOME/$df"
 done
 mkdir -p "$HOME/bin"
