@@ -263,43 +263,42 @@ if [[ "$(conf_get component_ocr yes)" == yes ]]; then
 fi
 
 # ------------------------------------------------------------- tts (kokoro)
-# Clipboard TTS: client (tkinter GUI, light) + server (kokoro neural TTS +
-# vlc + soundfile, HEAVY — pulls torch). Deps live in a DEDICATED pyenv
-# virtualenv named `kokoro-tts` (~/.pyenv/versions/kokoro-tts), NOT pyenv global — so the
+# Clipboard TTS server (kokoro neural TTS + vlc + soundfile, HEAVY — pulls
+# torch). ALWAYS provisioned, NOT opt-in: .configs ships the clipboard-TTS
+# client (now the Flutter control window, replacing the old Tk client) plus
+# the server symlinks unconditionally, and the client is useless without this
+# backend — so the venv is a baseline dependency. (Heavy but CPU-fine; kokoro
+# ~82M, no GPU gate.) Deps live in a DEDICATED pyenv virtualenv named
+# `kokoro-tts` (~/.pyenv/versions/kokoro-tts), NOT pyenv global — so the
 # .configs shebangs (#!~/.pyenv/versions/kokoro-tts/bin/python) resolve regardless
 # of global (which stays system for a clean prompt), the deps don't pollute
 # the bare 3.12, and the path is stable across machines (name, not patch).
-# Default OFF: heavy. CPU works (kokoro ~82M) — no GPU gate, just opt-in.
-if [[ "$(conf_get component_tts no)" == yes ]]; then
-  section "tts (kokoro) ($MODE)"
-  for d in libsndfile1 vlc espeak-ng python3-tk; do
-    pkg_installed "$d" && ok "tts dep $d" || { warn "tts dep $d missing"; do_or_say sudo apt-get install -y "$d"; }
-  done
-  export PYENV_ROOT="$HOME/.pyenv" PATH="$HOME/.pyenv/bin:$PATH"
-  TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
-  BASE12="$(pyenv versions --bare 2>/dev/null | grep -E '^3\.12(\.|$)' | grep -v / | tail -1)"
-  if [[ ! -x "$TTS_PY" ]]; then
-    warn "tts virtualenv missing"
-    if (( INSTALL )); then
-      if [[ -z "$BASE12" ]]; then
-        fail "no 3.12 interpreter to build the kokoro-tts venv from — run 04-languages"
-      else
-        pyenv virtualenv "$BASE12" kokoro-tts 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log" \
-          || miss "tts: pyenv virtualenv $BASE12 tts"
-      fi
-    fi
-  else
-    ok "tts virtualenv present"
-  fi
-  if [[ -x "$TTS_PY" ]]; then
-    if "$TTS_PY" -c 'import kokoro,soundfile,vlc,tkinter' 2>/dev/null; then
-      ok "tts venv deps (kokoro, soundfile, vlc, tkinter) present"
+section "tts (kokoro) ($MODE)"
+for d in libsndfile1 vlc espeak-ng python3-tk; do
+  pkg_installed "$d" && ok "tts dep $d" || { warn "tts dep $d missing"; do_or_say sudo apt-get install -y "$d"; }
+done
+export PYENV_ROOT="$HOME/.pyenv" PATH="$HOME/.pyenv/bin:$PATH"
+TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
+BASE12="$(pyenv versions --bare 2>/dev/null | grep -E '^3\.12(\.|$)' | grep -v / | tail -1)"
+if [[ ! -x "$TTS_PY" ]]; then
+  warn "tts virtualenv missing"
+  if (( INSTALL )); then
+    if [[ -z "$BASE12" ]]; then
+      fail "no 3.12 interpreter to build the kokoro-tts venv from — run 04-languages"
     else
-      warn "tts venv deps missing"
-      do_or_say "$TTS_PY" -m pip install --quiet kokoro soundfile python-vlc \
-        || miss "tts: pip install into tts venv"
+      pyenv virtualenv "$BASE12" kokoro-tts 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log" \
+        || miss "tts: pyenv virtualenv $BASE12 kokoro-tts"
     fi
   fi
 else
-  ok "tts: opt-in (component_tts=yes to enable; heavy — kokoro/torch)"
+  ok "tts virtualenv present"
+fi
+if [[ -x "$TTS_PY" ]]; then
+  if "$TTS_PY" -c 'import kokoro,soundfile,vlc,tkinter' 2>/dev/null; then
+    ok "tts venv deps (kokoro, soundfile, vlc, tkinter) present"
+  else
+    warn "tts venv deps missing"
+    do_or_say "$TTS_PY" -m pip install --quiet kokoro soundfile python-vlc \
+      || miss "tts: pip install into tts venv"
+  fi
 fi

@@ -87,12 +87,12 @@ if [[ -x "$HOME/.pyenv/bin/pyenv" ]]; then
     || failv "python: $PYVER not installed"
 else failv "python: pyenv missing"; fi
 # audio-tool venvs — deps isolated in dedicated venvs, not in global/bare 3.12
-if [[ "$(cv component_tts)" == yes ]]; then
-  TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
-  [[ -x "$TTS_PY" ]] && "$TTS_PY" -c 'import kokoro,soundfile,vlc' 2>/dev/null \
-    && pass "tts venv: kokoro/soundfile/vlc importable" \
-    || failv "tts venv missing or incomplete (~/.pyenv/versions/kokoro-tts)"
-fi
+# tts venv is always provisioned (07-components): .configs ships the clipboard
+# TTS client + server unconditionally, so this backend must exist — not opt-in.
+TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
+[[ -x "$TTS_PY" ]] && "$TTS_PY" -c 'import kokoro,soundfile,vlc' 2>/dev/null \
+  && pass "tts venv: kokoro/soundfile/vlc importable" \
+  || failv "tts venv missing or incomplete (~/.pyenv/versions/kokoro-tts)"
 if [[ "$(cv component_dictation)" == yes || -z "$(cv component_dictation)" ]]; then
   VOSK_PY="$HOME/.pyenv/versions/vosk/bin/python"
   [[ -x "$VOSK_PY" ]] && "$VOSK_PY" -c 'import vosk' 2>/dev/null \
