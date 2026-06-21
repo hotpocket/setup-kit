@@ -193,6 +193,12 @@ if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; 
     n="$(basename "$d")"
     [[ "$favs" == *"'$n'"* ]] && pass "dock pin: $n" || failv "dock pin: $n not in favorites"
   done
+  # middle-click paste of the PRIMARY selection. 26.04's gschema default is
+  # false; .configs/setup.sh forces it true. A false here = the override
+  # didn't take (or got reset).
+  [[ "$(gsettings get org.gnome.desktop.interface gtk-enable-primary-paste 2>/dev/null)" == true ]] \
+    && pass "middle-click primary paste enabled" \
+    || failv "middle-click primary paste disabled (gtk-enable-primary-paste != true)"
 fi
 
 # -- 5. oom-zram component — kernel-level truth --------------------------------
