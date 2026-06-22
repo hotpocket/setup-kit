@@ -150,3 +150,5 @@ init                                        #      0.0 MB  metapackages
 lsp-plugins                                 #      0.0 MB  metapackages
 lsof                                        #              +new
 wl-clipboard                                #              +new
+scdaemon                                    #              +new
+pcscd                                       #              +new

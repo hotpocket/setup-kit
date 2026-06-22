@@ -138,7 +138,13 @@ ADDITIONS = {
     # something), so it never lands in manual.txt — pin it explicitly.
     # wl-clipboard: wl-copy/wl-paste back the tts-clipboard + ocr scripts;
     # was OCR-component-only, promoted to default.
-    "cli-system": ["lsof", "wl-clipboard"],
+    # scdaemon: the gpg<->smartcard bridge for the YubiKey OpenPGP chain
+    # (pass->gpg->scdaemon->YubiKey). Has NO reverse-Depends, so under
+    # --no-install-recommends nothing pulls it in — a fresh box can't reach
+    # the card without it. pcscd: scdaemon.conf uses pcsc-shared, so the card
+    # is reached via pcscd (python3-ykman Depends it, but pin explicitly —
+    # the whole secret chain dies silently if it's absent).
+    "cli-system": ["lsof", "wl-clipboard", "scdaemon", "pcscd"],
     "games": ["steam-installer"],
     "media": ["easyeffects"],          # pulseeffects' successor
     "dev-core": ["shellcheck", "git-lfs",
