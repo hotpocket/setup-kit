@@ -8,7 +8,7 @@ init_mode "${1:-}"
 section "snaps ($MODE)"
 if ! command -v snap >/dev/null 2>&1; then
   warn "snapd not installed"
-  do_or_say sudo apt-get install -y snapd
+  apt_install snapd
 fi
 while IFS= read -r entry; do
   entry="${entry%%#*}"; entry="$(echo "$entry" | xargs)"; [[ -z "$entry" ]] && continue
@@ -31,7 +31,7 @@ done < <(grep -hvE '^[[:space:]]*(#|$)' "$MANIFEST_DIR/snap.list")
 section "flatpaks ($MODE)"
 if ! command -v flatpak >/dev/null 2>&1; then
   warn "flatpak not installed"
-  do_or_say sudo apt-get install -y flatpak
+  apt_install flatpak
 fi
 if command -v flatpak >/dev/null 2>&1; then
   if flatpak remotes --user 2>/dev/null | grep -q flathub \

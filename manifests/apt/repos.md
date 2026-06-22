@@ -3,7 +3,7 @@
 | Repo | Needed by (group) | Status |
 |---|---|---|
 | docker.list (download.docker.com) | dev-core (docker-ce…) | keep |
-| vscode.sources (packages.microsoft.com/repos/code) | editors (code) | keep |
+| vscode.sources (packages.microsoft.com/repos/code) | editors (code) | keep — package-managed; setup-kit must NOT add a vscode.list (Signed-By clash kills apt) |
 | google-chrome.list | apps | keep — use the `.list`, NOT the broken `.sources` duplicate (missing Architectures → i386 warning) |
 | brave-browser-release.list | apps | keep |
 | cloud-sdk (packages.cloud.google.com) | dev-cloud (google-cloud-cli) | keep |

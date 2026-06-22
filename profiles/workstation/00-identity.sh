@@ -31,7 +31,7 @@ if [[ "$(virt_context)" == kvm ]]; then
     ok "qemu-guest-agent installed (kvm guest)"
   else
     warn "kvm guest without qemu-guest-agent"
-    do_or_say sudo apt-get install -y qemu-guest-agent
+    apt_install qemu-guest-agent
     do_or_say sudo systemctl enable --now qemu-guest-agent
   fi
 else

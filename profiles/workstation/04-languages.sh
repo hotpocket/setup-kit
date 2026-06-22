@@ -114,7 +114,7 @@ if [[ "$(conf_get group_dev_go no)" == yes ]]; then
     ok "go $(go version 2>/dev/null | awk '{print $3}')"
   else
     warn "go missing"
-    do_or_say sudo apt-get install -y golang-go
+    apt_install golang-go
   fi
   if command -v go >/dev/null 2>&1; then
     for tool in golang.org/x/tools/gopls@latest honnef.co/go/tools/cmd/staticcheck@latest; do

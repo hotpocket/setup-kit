@@ -61,9 +61,16 @@ repo dev_core ddev \
 repo dev_cloud google-cloud-sdk \
   "https://packages.cloud.google.com/apt/doc/apt-key.gpg" \
   "deb [signed-by=$KEYDIR/google-cloud-sdk.gpg] https://packages.cloud.google.com/apt cloud-sdk main"
-repo editors vscode \
-  "https://packages.microsoft.com/keys/microsoft.asc" \
-  "deb [arch=$ARCH signed-by=$KEYDIR/vscode.gpg] https://packages.microsoft.com/repos/code stable main"
+# NO vscode repo here — the `code` package manages its own source file
+# (/etc/apt/sources.list.d/vscode.sources, signed-by /usr/share/keyrings/microsoft.gpg).
+# Adding our own vscode.list pointed at a *different* signed-by path breaks ALL of
+# apt with a Signed-By conflict — apt compares the keyring PATHS, not the keys, so
+# even the byte-identical Microsoft key in two locations is fatal. Same trap as steam.
+# Heal boxes that got the bad list from an earlier setup-kit run:
+if [[ -e /etc/apt/sources.list.d/vscode.list ]]; then
+  warn "removing stale vscode.list (conflicts with the code package's vscode.sources)"
+  do_or_say sudo rm -f /etc/apt/sources.list.d/vscode.list && NEED_UPDATE=1
+fi
 repo apps google-chrome \
   "https://dl.google.com/linux/linux_signing_key.pub" \
   "deb [arch=$ARCH signed-by=$KEYDIR/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main"

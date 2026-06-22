@@ -115,10 +115,21 @@ manifest_missing() {
   done < <(manifest_pkgs "$1")
 }
 
+# apt-get install that NEVER blocks on an interactive prompt. It must be
+# non-interactive for two reasons: (1) do_or_say pipes stdout through tee, and
+# with sudo's use_pty the conffile prompt's relay can't be answered from the
+# terminal — dpkg wedges forever (caught on 24.04: systemd-zram-generator's
+# conffile prompt hung the whole run); (2) an unattended "walk away" run must
+# never stall. force-confold keeps the on-disk conffile — the kit manages its
+# own configs explicitly, not by answering dpkg prompts.
+APT_NI=(DEBIAN_FRONTEND=noninteractive apt-get
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+apt_install() { do_or_say sudo "${APT_NI[@]}" install -y "$@"; }
+
 apt_install_one() {
   local pkg="$1"
   pkg_installed "$pkg" && return 0
-  if sudo apt-get install -y --no-install-recommends "$pkg" >/dev/null 2>&1; then
+  if sudo "${APT_NI[@]}" install -y --no-install-recommends "$pkg" >/dev/null 2>&1; then
     log "installed: $pkg"
   else
     miss "apt: $pkg"

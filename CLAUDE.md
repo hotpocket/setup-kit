@@ -42,4 +42,6 @@ packages, toolchains, configs — idempotently.
 
 - `snapshot/` is gitignored (large, machine-specific, holds WiFi PSKs). Never commit it.
 - Don't add a steam apt repo — the steam package manages its own source; a duplicate breaks all of apt (Signed-By clash).
+- Same for **vscode**: the `code` package drops its own `vscode.sources` (signed-by `/usr/share/keyrings/microsoft.gpg`). Never add a `vscode.list` — apt compares keyring *paths*, not keys, so even the identical Microsoft key at a different path is a fatal Signed-By clash that kills all of apt. `01-apt-repos.sh` deliberately omits it and removes any stale `vscode.list`.
+- **All `apt-get install` must be non-interactive** — use the `apt_install` helper (lib.sh) or the `02-apt-install.sh` array (`DEBIAN_FRONTEND=noninteractive` + `--force-confdef --force-confold`). A bare `apt-get install` can hit a dpkg conffile prompt; because phases pipe through `tee` and sudo uses `use_pty`, that prompt is *unanswerable* and wedges the run forever (seen on 24.04 with `systemd-zram-generator`). Configs the kit owns (e.g. `zram-generator.conf`) are reconciled by content, not by answering dpkg.
 - The Android emulator needs `/dev/kvm` (BIOS virt on bare metal; nested virt + `cpu=host` in a Proxmox VM).

@@ -25,6 +25,36 @@ section "github auth preamble ($MODE)"
 
 mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 
+# gnome-keyring / gcr ssh-agent can't sign FIDO2 (-sk) keys and silently refuses
+# ("agent refused operation"), shadowing a working YubiKey — and it intercepts
+# SSH_AUTH_SOCK ahead of any real agent. Mask it so ssh talks to the security
+# key directly. User-level + reversible; the already-running agent persists
+# until next login, so the github auth below also sets IdentityAgent none to
+# bypass any agent regardless of login state.
+disable_gnome_ssh_agent() {
+  (( INSTALL )) || return 0
+  command -v systemctl >/dev/null 2>&1 && systemctl --user mask --now \
+    gcr-ssh-agent.socket gcr-ssh-agent.service >/dev/null 2>&1 || true
+  local src=/etc/xdg/autostart/gnome-keyring-ssh.desktop
+  local dst="$HOME/.config/autostart/gnome-keyring-ssh.desktop"
+  if [[ -f "$src" ]] && { [[ ! -f "$dst" ]] || ! grep -q '^Hidden=true' "$dst"; }; then
+    mkdir -p "$HOME/.config/autostart"
+    cp "$src" "$dst" && printf '\nHidden=true\nX-GNOME-Autostart-enabled=false\n' >> "$dst"
+    log "disabled gnome-keyring ssh agent (effective next login)"
+  fi
+}
+disable_gnome_ssh_agent
+
+# Path of a resident FIDO2 (-sk) key recovered from a YubiKey, if one exists —
+# this is the preferred github identity. Prints nothing / returns 1 if none.
+gh_resident_key() {
+  local f
+  for f in "$HOME"/.ssh/id_*_sk_rk*; do
+    [[ -f "$f" && "$f" != *.pub ]] && { printf '%s\n' "$f"; return 0; }
+  done
+  return 1
+}
+
 # ---- 1. host keys: GitHub's published values, for both the real host and
 # the ssh-over-443 alias. Pinned constants, NOT ssh-keyscan — a keyscan
 # trusts whoever answers the wire. (ed25519 fingerprint:
@@ -50,21 +80,44 @@ chmod 600 "$HOME/.ssh/known_hosts" 2>/dev/null || true
 (( seeded )) && log "pinned GitHub host keys into known_hosts"
 ok "known_hosts: GitHub host keys"
 
-# ---- 2. ssh config stanza (443 — port 22 is firewall-bait)
-if grep -qE '^[[:space:]]*Host[[:space:]]+github\.com' "$HOME/.ssh/config" 2>/dev/null; then
-  ok "ssh config: github.com stanza present"
-elif (( INSTALL )); then
-  cat >> "$HOME/.ssh/config" <<'EOF'
-
-Host github.com
-  HostName ssh.github.com
-  Port 443
-  PreferredAuthentications publickey
-EOF
-  chmod 600 "$HOME/.ssh/config"
-  log "wrote github.com stanza to ~/.ssh/config"
+# ---- 2. ssh config stanza (443 — port 22 is firewall-bait). When a YubiKey
+# resident key is present, lock github to it: IdentitiesOnly + IdentityAgent
+# none => ONLY that key is offered and no agent is consulted, so no stray key
+# (e.g. an unrelated dbswebsite key) is tried and a refusing gnome-keyring can't
+# intercept. Without an -sk key we leave the stanza agent-friendly (a passphrase
+# key loaded in an agent still works). This reconciles every run — it no longer
+# matters that .configs may already be cloned.
+CFG="$HOME/.ssh/config"
+GH_SK="$(gh_resident_key || true)"
+if ! grep -qE '^[[:space:]]*Host[[:space:]]+github\.com' "$CFG" 2>/dev/null; then
+  if (( INSTALL )); then
+    { echo
+      echo "Host github.com"
+      echo "  HostName ssh.github.com"
+      echo "  Port 443"
+      echo "  PreferredAuthentications publickey"
+      if [[ -n "$GH_SK" ]]; then
+        echo "  IdentitiesOnly yes"
+        echo "  IdentityAgent none"
+        echo "  IdentityFile $GH_SK"
+      fi
+    } >> "$CFG"
+    chmod 600 "$CFG"
+    log "wrote github.com stanza${GH_SK:+ (pinned $GH_SK)}"
+  else
+    warn "~/.ssh/config: no github.com stanza"
+  fi
 else
-  warn "~/.ssh/config: no github.com stanza"
+  ok "ssh config: github.com stanza present"
+  # idempotently pin a resident key into an existing stanza if absent
+  if [[ -n "$GH_SK" ]] && ! grep -qF "IdentityFile $GH_SK" "$CFG"; then
+    if (( INSTALL )); then
+      sed -i "/^Host github\.com$/a\\  IdentitiesOnly yes\n  IdentityAgent none\n  IdentityFile $GH_SK" "$CFG"
+      log "pinned resident key in existing github stanza ($GH_SK)"
+    else
+      warn "github stanza present but resident key $GH_SK not pinned"
+    fi
+  fi
 fi
 
 # ---- 3. auth + clone, minimum touches: just TRY the clone — a separate
@@ -92,7 +145,7 @@ if lsusb 2>/dev/null | grep -qiE 'yubico|fido'; then
     [[ -f "$f" && "$f" != *.pub ]] || continue
     chmod 600 "$f"; found=1
     grep -qF "IdentityFile $f" "$HOME/.ssh/config" 2>/dev/null \
-      || sed -i "/^Host github\.com$/a\\  IdentityFile $f" "$HOME/.ssh/config"
+      || sed -i "/^Host github\.com$/a\\  IdentitiesOnly yes\n  IdentityAgent none\n  IdentityFile $f" "$HOME/.ssh/config"
   done
   if (( found )); then
     log "recovered key(s) pinned in ssh config — retrying clone (touch again)"

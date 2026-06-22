@@ -17,17 +17,25 @@ if [[ "$(conf_get component_oom_zram yes)" == yes ]]; then
     ok "systemd-zram-generator installed"
   else
     warn "systemd-zram-generator missing"
-    do_or_say sudo apt-get install -y systemd-zram-generator
+    apt_install systemd-zram-generator
   fi
-  if [[ -f /etc/systemd/zram-generator.conf ]]; then
-    ok "zram-generator.conf present ($(grep -oP 'zram-size = \K\S+' /etc/systemd/zram-generator.conf 2>/dev/null || echo '?') MB)"
+  # Reconcile by CONTENT, not just presence: the package ships its own
+  # zram-generator.conf (a dpkg conffile), so the old "write only when missing"
+  # left a package-default file in place and never restored our prio-100 tuning
+  # (and, on 24.04, the differing default is what triggered the conffile prompt
+  # that hung the run). Render what we want and write iff it differs. Pairs with
+  # apt_install's --force-confold, which keeps THIS file across package upgrades.
+  ZRAM_WANT=$(printf '[zram0]\nzram-size = %s\ncompression-algorithm = zstd\nswap-priority = 100\n' "$ZRAM_MB")
+  if [[ -f /etc/systemd/zram-generator.conf && "$(cat /etc/systemd/zram-generator.conf)" == "$ZRAM_WANT" ]]; then
+    ok "zram-generator.conf matches (${ZRAM_MB} MB zstd, prio 100)"
   else
-    warn "zram-generator.conf missing (would set ${ZRAM_MB} MB zstd)"
+    [[ -f /etc/systemd/zram-generator.conf ]] \
+      && warn "zram-generator.conf drifted — reconciling to ${ZRAM_MB} MB zstd prio 100" \
+      || warn "zram-generator.conf missing — writing ${ZRAM_MB} MB zstd prio 100"
     if (( INSTALL )); then
-      printf '[zram0]\nzram-size = %s\ncompression-algorithm = zstd\nswap-priority = 100\n' "$ZRAM_MB" \
-        | sudo tee /etc/systemd/zram-generator.conf >/dev/null
+      printf '%s\n' "$ZRAM_WANT" | sudo tee /etc/systemd/zram-generator.conf >/dev/null
       sudo systemctl daemon-reload
-      sudo systemctl start systemd-zram-setup@zram0.service
+      sudo systemctl restart systemd-zram-setup@zram0.service
     fi
   fi
   if [[ -f /etc/sysctl.d/99-zram.conf ]]; then
@@ -283,7 +291,7 @@ if [[ "$(conf_get component_ocr yes)" == yes ]]; then
   # the right one per compositor at click-time.
   for d in tesseract-ocr imagemagick python3-gi xdg-desktop-portal-gnome maim xsel grim slurp wl-clipboard; do
     if pkg_installed "$d"; then ok "ocr dep $d"
-    else warn "ocr dep $d missing"; do_or_say sudo apt-get install -y "$d"; fi
+    else warn "ocr dep $d missing"; apt_install "$d"; fi
   done
 fi
 
@@ -300,7 +308,7 @@ fi
 # the bare 3.12, and the path is stable across machines (name, not patch).
 section "tts (kokoro) ($MODE)"
 for d in libsndfile1 vlc espeak-ng python3-tk; do
-  pkg_installed "$d" && ok "tts dep $d" || { warn "tts dep $d missing"; do_or_say sudo apt-get install -y "$d"; }
+  pkg_installed "$d" && ok "tts dep $d" || { warn "tts dep $d missing"; apt_install "$d"; }
 done
 export PYENV_ROOT="$HOME/.pyenv" PATH="$HOME/.pyenv/bin:$PATH"
 TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
