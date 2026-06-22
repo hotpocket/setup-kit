@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram (default ON), docker, herdr (opt-in), dictation/ocr/tts.
+# Components: oom-zram (default ON), docker, herdr/ollama (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -182,6 +182,31 @@ if [[ "$HERDR_WANT" == yes ]]; then
   fi
 else
   ok "herdr: opt-in, currently '$HERDR_WANT' (flip component_herdr=yes to enable)"
+fi
+
+# ------------------------------------------------------------- ollama
+# Local LLM runtime backing the `wat` alias (ollama run codellama) from
+# .configs. Default OFF: own installer (not apt), and the models are large.
+# The installer adds /usr/local/bin/ollama + a systemd service; we also pull
+# codellama so `wat` works out of the box (skipped in check mode).
+OLLAMA_WANT="$(conf_get component_ollama no)"
+if [[ "$OLLAMA_WANT" == yes ]]; then
+  section "ollama ($MODE) — components/ollama.md"
+  if command -v ollama >/dev/null 2>&1; then
+    ok "ollama installed"
+  else
+    warn "ollama missing"
+    do_or_say bash -c 'curl -fsSL https://ollama.com/install.sh | sh'
+  fi
+  # codellama: the model `wat` runs. Pull is large; only in install mode.
+  if command -v ollama >/dev/null 2>&1 && ollama list 2>/dev/null | grep -q '^codellama'; then
+    ok "ollama model codellama present"
+  else
+    warn "ollama model codellama missing (backs the 'wat' alias)"
+    do_or_say ollama pull codellama || miss "ollama: pull codellama"
+  fi
+else
+  ok "ollama: opt-in, currently '$OLLAMA_WANT' (flip component_ollama=yes to enable)"
 fi
 
 # ------------------------------------------------------------- dictation

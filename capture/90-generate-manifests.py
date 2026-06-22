@@ -134,6 +134,11 @@ CONDITIONAL = {
 
 # additions not in the snapshot (marked '+new' in output)
 ADDITIONS = {
+    # lsof: pslsof/lports aliases need it; only auto-installed (a dep of
+    # something), so it never lands in manual.txt — pin it explicitly.
+    # wl-clipboard: wl-copy/wl-paste back the tts-clipboard + ocr scripts;
+    # was OCR-component-only, promoted to default.
+    "cli-system": ["lsof", "wl-clipboard"],
     "games": ["steam-installer"],
     "media": ["easyeffects"],          # pulseeffects' successor
     "dev-core": ["shellcheck", "git-lfs",

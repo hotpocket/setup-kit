@@ -6,3 +6,4 @@
 
 # pipx tools
 pipx:poetry
+pipx:yt-dlp
