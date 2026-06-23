@@ -232,7 +232,6 @@ firefox-locale-en                           #      0.0 MB  oldlibs
 gir1.2-gmenu-3.0                            #      0.0 MB  introspection
 chromium-chromedriver                       #      0.0 MB  oldlibs
 gir1.2-gtkclutter-1.0                       #      0.0 MB  introspection
-tldr                                        #      0.0 MB  oldlibs
 libpcap-dev                                 #      0.0 MB  libdevel
 libu2f-udev                                 #      0.0 MB  oldlibs
 p7zip-full                                  #      0.0 MB  oldlibs

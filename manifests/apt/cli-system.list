@@ -61,6 +61,8 @@ findutils                                   #      0.5 MB  utils
 zip                                         #      0.5 MB  utils
 software-properties-gtk                     #      0.5 MB  admin
 gnupg                                       #      0.5 MB  utils
+scdaemon                                    #              +new  GnuPG smartcard bridge (YubiKey OpenPGP → pass)
+pcscd                                       #              +new  PC/SC daemon scdaemon talks through (pcsc-shared)
 diffutils                                   #      0.4 MB  utils
 hplip                                       #      0.4 MB  utils
 rhythmbox-plugin-alternative-toolbar        #      0.4 MB  misc
@@ -148,6 +150,7 @@ ubuntu-desktop-minimal                      #      0.0 MB  metapackages
 ubuntu-desktop                              #      0.0 MB  metapackages
 init                                        #      0.0 MB  metapackages
 lsp-plugins                                 #      0.0 MB  metapackages
+tldr                                        #      0.0 MB  oldlibs
 lsof                                        #              +new
 wl-clipboard                                #              +new
 scdaemon                                    #              +new
