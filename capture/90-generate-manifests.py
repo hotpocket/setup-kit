@@ -18,6 +18,8 @@ OUT = ROOT / "manifests/apt"
 
 # ---------------------------------------------------------------- decisions
 DROPS = {  # pkg: reason
+    "tldr": "transitional (->tldr-hs); both gone from 26.04 — use tealdeer",
+    "tldr-hs": "Haskell tldr client; dropped from 26.04 archive — use tealdeer",
     "webmin": "root web panel; Proxmox UI / Cockpit cover it",
     "usermin": "webmin's per-user sibling — same family, same verdict",
     "mssql-server": "1.1G; install piecemeal if ever needed",
@@ -144,7 +146,14 @@ ADDITIONS = {
     # the card without it. pcscd: scdaemon.conf uses pcsc-shared, so the card
     # is reached via pcscd (python3-ykman Depends it, but pin explicitly —
     # the whole secret chain dies silently if it's absent).
-    "cli-system": ["lsof", "wl-clipboard", "scdaemon", "pcscd"],
+    # tealdeer: the maintained Rust tldr client; provides /usr/bin/tldr with
+    # the standard `tldr <cmd>` syntax. The snapshot's `tldr` (transitional ->
+    # tldr-hs) and tldr-hs itself are BOTH gone from 26.04 (resolute) — apt
+    # there has no candidate — so we install tealdeer by name instead (dropped
+    # below). NOTE: tealdeer ships no offline cache; `tldr <cmd>` errors with
+    # "Page cache not found" until seeded (`tldr --update`) or auto_update is
+    # set in ~/.config/tealdeer/config.toml.
+    "cli-system": ["lsof", "wl-clipboard", "scdaemon", "pcscd", "tealdeer"],
     "games": ["steam-installer"],
     "media": ["easyeffects"],          # pulseeffects' successor
     "dev-core": ["shellcheck", "git-lfs",

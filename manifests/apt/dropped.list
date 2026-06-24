@@ -16,6 +16,7 @@ openshot-qt                                 #    137.4 MB  not needed
 mysql-workbench-community                   #    117.0 MB  install piecemeal if needed
 tofu                                        #    109.7 MB  unused
 usermin                                     #     68.4 MB  webmin's per-user sibling — same family, same verdict
+tldr-hs                                     #     26.2 MB  Haskell tldr client; dropped from 26.04 archive — use tealdeer
 steam-launcher                              #     19.5 MB  replaced by steam-installer (multiverse). Valve's package manages its own apt source; the kit adding one breaks apt entirely (Signed-By clash)
 grub-customizer                             #      8.7 MB  PPA has no 26.04 builds; bare-metal niche (extras when it returns)
 pulseeffects                                #      4.8 MB  renamed easyeffects (added to media group)
@@ -40,3 +41,4 @@ steam-libs-i386                             #      0.0 MB  dependency of the lau
 steam-libs-amd64                            #      0.0 MB  dependency of the launcher — never list directly
 mssql-tools18                               #      0.0 MB  with mssql-server
 mssql-tools                                 #      0.0 MB  with mssql-server
+tldr                                        #      0.0 MB  transitional (->tldr-hs); both gone from 26.04 — use tealdeer
