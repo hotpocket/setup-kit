@@ -156,3 +156,5 @@ wl-clipboard                                #              +new
 scdaemon                                    #              +new
 pcscd                                       #              +new
 tealdeer                                    #              +new
+nethogs                                     #              +new  per-process net (Astra Monitor backend)
+lm-sensors                                  #              +new  hardware temps (Astra Monitor sensors panel)

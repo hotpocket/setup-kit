@@ -1,11 +1,14 @@
 # Apps with no apt repo — installed from vendor .debs by
 # profiles/workstation/02b-debs.sh. Fields: name method arg
-# methods: url=stable latest link, github=owner/repo:asset-suffix,
+# methods: url=stable latest link, github=owner/repo:asset-suffix
+#          (asset-suffix is a regex anchored at the URL end — e.g.
+#          'without_gui_.*amd64.deb' picks one of several same-suffix assets),
 #          optional 4th field = group gate (host-conf group_<name>=yes)
 #          manual=doctor-warns only (version-pinned vendor URLs)
 zoom	url	https://zoom.us/client/latest/zoom_amd64.deb
 discord	url	https://discord.com/api/download?platform=linux&format=deb
 obsidian	github	obsidianmd/obsidian-releases:amd64.deb
+amdgpu-top	github	Umio-Yasuno/amdgpu_top:without_gui_.*amd64.deb
 minikube	url	https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb	dev_k8s
 master-pdf-editor-5	manual	https://code-industry.net/free-pdf-editor/ — version-pinned URLs
 ganttproject	manual	https://www.ganttproject.biz/download — version-pinned URLs

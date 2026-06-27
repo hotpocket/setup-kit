@@ -86,6 +86,18 @@ while IFS= read -r line; do
   [[ -n "$grp" ]] && ! gon "$grp" && continue
   flatpak info "$line" >/dev/null 2>&1 && pass "flatpak: $line" || failv "flatpak: $line"
 done < manifests/flatpak.list
+# gnome extensions: only on a GNOME box (CLI present); enablement is login-
+# dependent on Wayland, so verify presence (installed), not active state.
+if command -v gnome-extensions >/dev/null 2>&1; then
+  while IFS= read -r line; do
+    line="${line%%#*}"; line=$(echo "$line" | xargs); [[ -z "$line" ]] && continue
+    grp=""; [[ "$line" == *" @"* ]] && { grp="${line##*@}"; line="${line% @*}"; }
+    uuid="${line%% *}"
+    [[ -n "$grp" ]] && ! gon "$grp" && continue
+    gnome-extensions list 2>/dev/null | grep -qxF "$uuid" \
+      && pass "gnome-ext: $uuid" || failv "gnome-ext: $uuid (not installed)"
+  done < manifests/gnome-extensions.list
+fi
 
 # -- 3. direct debs (url/github methods only; honor optional group gate) ------
 while IFS=$'\t' read -r name method arg grp; do

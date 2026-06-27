@@ -153,7 +153,11 @@ ADDITIONS = {
     # below). NOTE: tealdeer ships no offline cache; `tldr <cmd>` errors with
     # "Page cache not found" until seeded (`tldr --update`) or auto_update is
     # set in ~/.config/tealdeer/config.toml.
-    "cli-system": ["lsof", "wl-clipboard", "scdaemon", "pcscd", "tealdeer"],
+    # nethogs (per-process net) + lm-sensors (temps): optional backends for the
+    # Astra Monitor GNOME extension (manifests/gnome-extensions.list); useful
+    # standalone too. amdgpu_top (its AMD-GPU backend) is a deb (debs.list).
+    "cli-system": ["lsof", "wl-clipboard", "scdaemon", "pcscd", "tealdeer",
+                   "nethogs", "lm-sensors"],
     "games": ["steam-installer"],
     "media": ["easyeffects"],          # pulseeffects' successor
     "dev-core": ["shellcheck", "git-lfs",

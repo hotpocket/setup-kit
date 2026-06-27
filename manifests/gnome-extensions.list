@@ -1,0 +1,19 @@
+# GNOME Shell extensions from extensions.gnome.org (e.g.o).
+# User-level (~/.local/share/gnome-shell/extensions) — installed + enabled by
+# profiles/workstation/06z-gnome-extensions.sh. Hand-maintained (NOT generated
+# by capture/; the apt snapshot can't see e.g.o-installed extensions — which is
+# exactly why these were lost on the last fresh box).
+#
+# Format: uuid [@group]   — @group gates on that apt group's host-conf toggle;
+# no @group = always (desktop baseline). Lines starting with # are ignored.
+#
+# WAYLAND NOTE: a freshly INSTALLED extension cannot be loaded into a running
+# Wayland session — the phase installs + flags it enabled, but it only becomes
+# ACTIVE after the next log out / log in. Already-installed ones enable live.
+#
+# Distro extensions (ubuntu-dock, appindicators, ding, tiling-assistant) ship
+# with the desktop — do NOT list them here; they're managed by GNOME/Ubuntu.
+
+clipboard-history@alexsaveau.dev    # Clipboard History — searchable clipboard manager (Wayland-fine)
+monitor@astraext.github.io          # Astra Monitor — top-bar system monitor (Wayland-native; replaces the
+                                    #   unmaintained system-monitor-next@paradoxxx.zero from the old box)
