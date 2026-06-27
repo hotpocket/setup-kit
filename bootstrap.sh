@@ -105,6 +105,16 @@ case "$cmd" in
       n_act=$(grep -cE '\] \+ |^\[[0-9T:.+-]+\] installed: |apt install attempt' "$RUN_LOG" || true)
       section "summary — $(hostname) ($mode, pass $pass)"
       echo "  ok: $n_ok   warn: $n_warn   fail: $n_fail   actions: $n_act"
+      # surface WHAT failed/warned, not just the counts — last occurrence of
+      # each unique message (later passes supersede earlier ones)
+      if (( n_fail > 0 )); then
+        echo "  FAIL:"
+        grep '\[FAIL\]' "$RUN_LOG" | sed 's/.*\[FAIL\]  *//' | awk '!seen[$0]++' | sed 's/^/    ✗ /'
+      fi
+      if (( n_warn > 0 )); then
+        echo "  WARN:"
+        grep '\[WARN\]' "$RUN_LOG" | sed 's/.*\[WARN\]  *//' | awk '!seen[$0]++' | sed 's/^/    ! /'
+      fi
       [[ "$mode" == check ]] && { echo "  doctor only — 'install' applies. Full log: $RUN_LOG"; break; }
       if (( n_act == 0 )); then
         if (( n_warn == 0 && n_fail == 0 )); then
