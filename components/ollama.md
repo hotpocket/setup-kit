@@ -33,6 +33,10 @@ serves models over a local HTTP API (127.0.0.1:11434).
   changes nothing.
 - Swap the model by editing the `wat` alias + the pull in 07-components.sh if a
   different default is wanted (e.g. `llama3`, `qwen2.5-coder`).
+- `ollama_coder_model=<tag>` in the host conf pulls an additional coding model
+  for editor/agentic use (default empty = none). LinuxBeast2 uses
+  `qwen3-coder:30b` (~18 GB, MoE 3B-active, fits the 3090's 24 GB VRAM at Q4,
+  ~50 tok/s). Point Continue.dev/Cline at the local API (127.0.0.1:11434).
 
 ## Notes
 

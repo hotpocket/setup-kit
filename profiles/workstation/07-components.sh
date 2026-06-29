@@ -213,6 +213,17 @@ if [[ "$OLLAMA_WANT" == yes ]]; then
     warn "ollama model codellama missing (backs the 'wat' alias)"
     do_or_say ollama pull codellama || miss "ollama: pull codellama"
   fi
+  # Optional coding model (editor/agentic use, e.g. qwen3-coder:30b ~18 GB).
+  # Default empty = pull nothing extra. Set ollama_coder_model in the host conf.
+  OLLAMA_CODER="$(conf_get ollama_coder_model "")"
+  if [[ -n "$OLLAMA_CODER" ]]; then
+    if command -v ollama >/dev/null 2>&1 && ollama list 2>/dev/null | grep -qF "$OLLAMA_CODER"; then
+      ok "ollama coder model $OLLAMA_CODER present"
+    else
+      warn "ollama coder model $OLLAMA_CODER missing"
+      do_or_say ollama pull "$OLLAMA_CODER" || miss "ollama: pull $OLLAMA_CODER"
+    fi
+  fi
 else
   ok "ollama: opt-in, currently '$OLLAMA_WANT' (flip component_ollama=yes to enable)"
 fi
