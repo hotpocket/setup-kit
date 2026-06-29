@@ -363,3 +363,27 @@ if [[ -x "$TTS_PY" ]]; then
       || miss "tts: pip install into tts venv"
   fi
 fi
+
+# --------------------------------------------- tts flutter client bundle
+# .configs ships the Flutter control-window SOURCE only; build/ is gitignored,
+# so a fresh machine has no usable client binary until we compile it here. The
+# ~/bin/tts-clipboard-flutter wrapper execs the bundle's tts_client. Needs the
+# flutter SDK (05) and the .configs checkout (06), both of which precede us.
+FLUTTER_BIN="$HOME/development/flutter/bin/flutter"
+TTS_FL_SRC="$HOME/git/.configs/tts-flutter"
+TTS_FL_BIN="$TTS_FL_SRC/build/linux/x64/release/bundle/tts_client"
+if [[ ! -d "$TTS_FL_SRC" ]]; then
+  warn "tts flutter client: source missing ($TTS_FL_SRC) — run 06-configs"
+elif [[ ! -x "$FLUTTER_BIN" ]]; then
+  warn "tts flutter client: flutter SDK missing — run 05-flutter-android"
+elif [[ -x "$TTS_FL_BIN" ]]; then
+  ok "tts flutter client bundle present"
+elif (( INSTALL )); then
+  warn "tts flutter client bundle not built — building"
+  (cd "$TTS_FL_SRC" && "$FLUTTER_BIN" build linux --release) 2>&1 \
+    | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
+  [[ -x "$TTS_FL_BIN" ]] && ok "tts flutter client built" \
+    || miss "tts: flutter build linux --release (bundle still absent)"
+else
+  warn "tts flutter client bundle not built (would: cd $TTS_FL_SRC && flutter build linux --release)"
+fi

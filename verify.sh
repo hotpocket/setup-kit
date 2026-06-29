@@ -133,6 +133,11 @@ TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
 [[ -x "$TTS_PY" ]] && "$TTS_PY" -c 'import kokoro,soundfile,vlc' 2>/dev/null \
   && pass "tts venv: kokoro/soundfile/vlc importable" \
   || failv "tts venv missing or incomplete (~/.pyenv/versions/kokoro-tts)"
+# tts flutter client: .configs ships source only (build/ gitignored); 07 builds
+# the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
+TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
+[[ -x "$TTS_FL_BIN" ]] && pass "tts flutter client bundle built" \
+  || failv "tts flutter client bundle missing (run: cd ~/git/.configs/tts-flutter && flutter build linux --release)"
 if [[ "$(cv component_dictation)" == yes || -z "$(cv component_dictation)" ]]; then
   VOSK_PY="$HOME/.pyenv/versions/vosk/bin/python"
   [[ -x "$VOSK_PY" ]] && "$VOSK_PY" -c 'import vosk' 2>/dev/null \
