@@ -23,5 +23,5 @@ write discoveries back across sessions.
 - Do NOT track Obsidian runtime state: `~/.config/obsidian/obsidian.json`
   (GUIDs, absolute paths, open-state) is machine-specific — let Obsidian
   regenerate it.
-- claude-conduct is local-only for now: on a machine without it, phase 08 logs
-  to `missing.log` and skips rather than failing.
+- claude-conduct lives at `git@github.com:hotpocket/claude-conduct.git`; phase 08
+  clones it on a fresh box and symlinks the skill into `~/.claude/skills/vault`.

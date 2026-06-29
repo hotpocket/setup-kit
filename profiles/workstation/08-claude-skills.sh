@@ -3,7 +3,7 @@
 # skill into ~/.claude/skills/<name>. Edit skills at their source, never the link.
 # Specs: components/{gstack,vault,conduct}.md
 #   gstack         -> third-party, cloned from its own upstream (~/git/gstack)
-#   vault, conduct -> our canonical repo ~/git/claude-conduct (local-only for now)
+#   vault, conduct -> our canonical repo ~/git/claude-conduct (github: hotpocket/claude-conduct)
 SCRIPT_NAME="ws-08-claude-skills"
 source "$(dirname "$0")/../../lib.sh"
 require_user
@@ -22,8 +22,9 @@ skill_repo() { case "$1" in
   vault|conduct) echo "$HOME/git/claude-conduct" ;;
 esac; }
 skill_url() { case "$1" in
-  gstack) echo "git@github.com:garrytan/gstack.git" ;;
-  *)      echo "" ;;   # claude-conduct: local-only, no remote yet
+  gstack)        echo "git@github.com:garrytan/gstack.git" ;;
+  vault|conduct) echo "git@github.com:hotpocket/claude-conduct.git" ;;
+  *)             echo "" ;;
 esac; }
 skill_path() { case "$1" in
   gstack)  echo "$HOME/git/gstack" ;;            # SKILL.md lives at the repo root
