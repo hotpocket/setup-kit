@@ -44,24 +44,29 @@ else
   ok "conditional virtualbox: skipped ($(virt_context))"
 fi
 
-# ---- nvidia: the nouveau blacklist must be IN the initramfs ------------------
-# dpkg triggers normally regenerate it when the driver installs, but a missed
-# trigger leaves nouveau loading early at boot and the nvidia module unable to
-# bind — driver installed, nvidia-smi dead, persistenced/cdi-refresh restart-
-# looping (caught in the wild: GTX 1080, driver 580 built, nouveau on the card).
+# ---- nvidia: nouveau must not grab the GPU at boot --------------------------
+# A missed dpkg trigger can leave nouveau loading early and the nvidia module
+# unable to bind — driver installed, nvidia-smi dead, persistenced/cdi-refresh
+# restart-looping (caught in the wild: GTX 1080, driver 580 built, nouveau on
+# the card). We check the actual invariant, generator-agnostic: the blacklist
+# conf exists on disk AND nouveau isn't currently loaded. We deliberately do
+# NOT introspect the initramfs: lsinitramfs (initramfs-tools) can't read a
+# dracut-built image — Ubuntu 26.04 uses dracut, update-initramfs is a shim —
+# and the image is 0600 root-only, so the old `lsinitramfs ... | grep` ran
+# empty on every pass and regenerated forever, fixing nothing.
 # Runs before the early exits below so a converged re-run still checks it;
 # a pass-1 missed trigger is caught on pass 2 (bootstrap loops until converged).
 if nvidia_wanted && dpkg -l 'nvidia-driver-*' 2>/dev/null | grep -q '^ii'; then
-  # no grep -q: early exit SIGPIPEs lsinitramfs and pipefail fails the match
-  if lsinitramfs "/boot/initrd.img-$(uname -r)" 2>/dev/null \
-       | grep 'nvidia-graphics-drivers\.conf' >/dev/null; then
-    ok "nvidia: nouveau blacklist present in initramfs"
+  if grep -rsqE '^[[:space:]]*blacklist[[:space:]]+nouveau' \
+       /etc/modprobe.d /usr/lib/modprobe.d /lib/modprobe.d \
+     && ! lsmod | grep -q '^nouveau'; then
+    ok "nvidia: nouveau blacklisted, not holding the GPU"
   elif (( INSTALL )); then
-    warn "nvidia: nouveau blacklist missing from initramfs — regenerating"
+    warn "nvidia: nouveau not yet excluded — regenerating initramfs"
     sudo update-initramfs -u -k all
     warn "nvidia: REBOOT required before the nvidia driver can take the GPU"
   else
-    fail "nvidia: nouveau blacklist missing from initramfs (stale — nouveau will grab the GPU at boot)"
+    fail "nvidia: nouveau still able to grab the GPU at boot (blacklist missing or nouveau loaded)"
   fi
 fi
 
