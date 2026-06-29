@@ -10,7 +10,11 @@
       (the kit does NOT migrate keys); then `ssh -T git@github.com`
 - [ ] Flip `.configs` remote back to ssh if it was cloned via https:
       `git -C ~/git/.configs remote set-url origin git@github.com:hotpocket/.configs.git`
-- [ ] `gh auth login` · `aws configure` / SSO · `gcloud auth login`
+- [ ] `gh auth login` · `gcloud auth login`
+- [ ] AWS SSO (preferred over long-lived keys):
+      `aws configure sso`            # one-time: prompts SSO start URL, region, account, role → named profile
+      `aws sso login --profile <name>`   # refresh the session (re-run when it expires)
+      then `export AWS_PROFILE=<name>` (or pass `--profile <name>` per command)
 - [ ] GPG: import secret keys from offline backup
 - [ ] Browsers (Chrome/Brave/Firefox): sign in + sync
 - [ ] VS Code settings sync · Zoom · Steam
