@@ -40,21 +40,25 @@ plus the matching setup-kit provisioning.
 6. **setup-kit component_tts + verify.sh** — provision `libportaudio2` +
    `sounddevice` instead of `vlc`/`python-vlc`; dropped `python3-tk` (the old Tk
    client is gone). General-purpose VLC media player stays in `media.list`.
+7. **Vault/conduct skill now installs.** `claude-conduct` was pushed to
+   `git@github.com:hotpocket/claude-conduct.git` and cloned to `~/git/claude-conduct`;
+   setup-kit phase `08-claude-skills` now has the real clone URL (was local-only),
+   so fresh boxes clone it and symlink `vault`/`conduct` into `~/.claude/skills/`.
+   Ran the phase here — both skills linked and resolvable.
 
 Commits (all unpushed): `.configs` d3c5632 (transport/text/icon), a1d9a5a
-(VLC→sounddevice + systemd); `setup-kit` 6cdec94 (sounddevice provisioning).
+(VLC→sounddevice + systemd); `setup-kit` 6cdec94 (sounddevice provisioning),
+d132745 (claude-conduct remote so vault/conduct skills clone on fresh boxes).
 
 ## Discoveries
 - **First-sentence stutter was a VLC clock bug.** VLC verbose log on a cold
   PulseAudio stream: `playback way too late: flushing buffers` + `write index
   corrupt`; the second (warm) play is clean. A persistent, never-closed output
   stream removes the cold start entirely — the real fix, not a warm-up hack.
-- **Vault skill is not installed on this box (setup-kit gap).** Phase
-  `08-claude-skills` sources `vault`/`conduct` from `~/git/claude-conduct`, which
-  is *local-only* (no clone URL) and absent here → the skill never lands at
-  `~/.claude/skills/vault`; `logs/missing.log` has flagged this every run. A
-  working copy exists at `~/git/hh/vault/working-knowledge/skills/vault` (v4.0).
-  An agent following the documented path can't find the skill.
+- **The vault skill wasn't installed because `claude-conduct` had no remote.**
+  Phase `08-claude-skills` registered it local-only, so on a box without the repo
+  the skill silently never landed (flagged in `logs/missing.log` every run).
+  Fixed this session (repo now on GitHub + phase 08 has the URL).
 - Launching a long-lived daemon from a sandboxed tool call gets reaped;
   `systemd-run --user` escapes the sandbox and is the reliable way to start it
   mid-session.
@@ -75,9 +79,6 @@ Commits (all unpushed): `.configs` d3c5632 (transport/text/icon), a1d9a5a
 - **Refresh `~/git/.configs/tts-flutter/README.md`** — stale: still documents the
   removed "Stop Reading" button and predates the transport controls, text panel,
   `tts-player` icon, the VLC→sounddevice swap, and the systemd unit. ~15 min.
-- **Resolve the vault-skill install gap** — decide the canonical home and either
-  restore `~/git/claude-conduct` or repoint setup-kit phase 08 at the `~/git/hh`
-  copy, so the skill stops being silently skipped. A path + a yes/no. ~15–20 min.
 
 ### Needs dedicated focus
 - (none)
