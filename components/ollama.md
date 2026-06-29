@@ -1,8 +1,8 @@
 # ollama — opt-in component (workstation profile)
 
 Local LLM runtime. Backs the `wat` alias from `~/git/.configs`
-(`alias wat="ollama run codellama"`) — a quick "ask the local model" from the
-terminal, no network/API key. Single Go binary + a background server that
+(`alias wat="ollama run qwen3-coder:30b"`) — a quick "ask the local model" from
+the terminal, no network/API key. Single Go binary + a background server that
 serves models over a local HTTP API (127.0.0.1:11434).
 
 - Site: https://ollama.com
@@ -22,21 +22,21 @@ serves models over a local HTTP API (127.0.0.1:11434).
 1. `curl -fsSL https://ollama.com/install.sh | sh` — installs
    `/usr/local/bin/ollama` and a systemd service (`ollama.service`), creates
    an `ollama` user. Root needed (the script sudo's).
-2. `ollama pull codellama` — the model `wat` runs. Done in install mode so the
-   alias works immediately; skipped in `check` (just reports missing).
+2. `ollama pull qwen3-coder:30b` — the model `wat` runs. Done in install mode so
+   the alias works immediately; skipped in `check` (just reports missing).
 
 ## Setup-kit integration
 
 - **OPT-IN** — `component_ollama=yes` in `hosts/<hostname>.conf` to enable
   (default `no`). Provisioned by `profiles/workstation/07-components.sh`.
-- `check` mode: reports whether `ollama` and the `codellama` model are present,
+- `check` mode: reports whether `ollama` and the `wat` model are present,
   changes nothing.
-- Swap the model by editing the `wat` alias + the pull in 07-components.sh if a
-  different default is wanted (e.g. `llama3`, `qwen2.5-coder`).
-- `ollama_coder_model=<tag>` in the host conf pulls an additional coding model
-  for editor/agentic use (default empty = none). LinuxBeast2 uses
-  `qwen3-coder:30b` (~18 GB, MoE 3B-active, fits the 3090's 24 GB VRAM at Q4,
-  ~50 tok/s). Point Continue.dev/Cline at the local API (127.0.0.1:11434).
+- The `wat` model defaults to `qwen3-coder:30b` (~18 GB, MoE 3B-active, fits the
+  3090's 24 GB VRAM, benchmarked ~187 tok/s — both faster and far stronger than
+  the old codellama 7B it replaced). Override with `ollama_model=<tag>` in the
+  host conf; keep it in sync with the `wat` alias in `.configs/.bash_aliases`.
+- Editor/agentic use: point Continue.dev/Cline at the local API
+  (127.0.0.1:11434).
 
 ## Notes
 

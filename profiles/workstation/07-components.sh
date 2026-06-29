@@ -193,10 +193,11 @@ else
 fi
 
 # ------------------------------------------------------------- ollama
-# Local LLM runtime backing the `wat` alias (ollama run codellama) from
+# Local LLM runtime backing the `wat` alias (ollama run qwen3-coder:30b) from
 # .configs. Default OFF: own installer (not apt), and the models are large.
 # The installer adds /usr/local/bin/ollama + a systemd service; we also pull
-# codellama so `wat` works out of the box (skipped in check mode).
+# the wat model so `wat` works out of the box (skipped in check mode).
+# Model is configurable via ollama_model (must match the .bash_aliases alias).
 OLLAMA_WANT="$(conf_get component_ollama no)"
 if [[ "$OLLAMA_WANT" == yes ]]; then
   section "ollama ($MODE) — components/ollama.md"
@@ -206,23 +207,14 @@ if [[ "$OLLAMA_WANT" == yes ]]; then
     warn "ollama missing"
     do_or_say bash -c 'curl -fsSL https://ollama.com/install.sh | sh'
   fi
-  # codellama: the model `wat` runs. Pull is large; only in install mode.
-  if command -v ollama >/dev/null 2>&1 && ollama list 2>/dev/null | grep -q '^codellama'; then
-    ok "ollama model codellama present"
+  # the model `wat` runs (qwen3-coder:30b ~18 GB — MoE 3B-active, fits the
+  # 3090 at ~187 tok/s). Pull is large; only in install mode.
+  OLLAMA_MODEL="$(conf_get ollama_model qwen3-coder:30b)"
+  if command -v ollama >/dev/null 2>&1 && ollama list 2>/dev/null | grep -qF "$OLLAMA_MODEL"; then
+    ok "ollama model $OLLAMA_MODEL present (backs the 'wat' alias)"
   else
-    warn "ollama model codellama missing (backs the 'wat' alias)"
-    do_or_say ollama pull codellama || miss "ollama: pull codellama"
-  fi
-  # Optional coding model (editor/agentic use, e.g. qwen3-coder:30b ~18 GB).
-  # Default empty = pull nothing extra. Set ollama_coder_model in the host conf.
-  OLLAMA_CODER="$(conf_get ollama_coder_model "")"
-  if [[ -n "$OLLAMA_CODER" ]]; then
-    if command -v ollama >/dev/null 2>&1 && ollama list 2>/dev/null | grep -qF "$OLLAMA_CODER"; then
-      ok "ollama coder model $OLLAMA_CODER present"
-    else
-      warn "ollama coder model $OLLAMA_CODER missing"
-      do_or_say ollama pull "$OLLAMA_CODER" || miss "ollama: pull $OLLAMA_CODER"
-    fi
+    warn "ollama model $OLLAMA_MODEL missing (backs the 'wat' alias)"
+    do_or_say ollama pull "$OLLAMA_MODEL" || miss "ollama: pull $OLLAMA_MODEL"
   fi
 else
   ok "ollama: opt-in, currently '$OLLAMA_WANT' (flip component_ollama=yes to enable)"
