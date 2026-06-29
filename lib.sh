@@ -72,7 +72,10 @@ conf_get() {
 conf_set() {
   touch "$HOST_CONF"
   if grep -qE "^${1}=" "$HOST_CONF"; then
-    sed -i "s|^${1}=.*|${1}=${2}|" "$HOST_CONF"
+    # escape sed-special chars in the value (\, |, &) so a value like a URL or
+    # model tag can't corrupt the replacement; preserves the line's position
+    local esc=${2//\\/\\\\}; esc=${esc//|/\\|}; esc=${esc//&/\\&}
+    sed -i "s|^${1}=.*|${1}=${esc}|" "$HOST_CONF"
   else
     echo "${1}=${2}" >> "$HOST_CONF"
   fi
@@ -129,6 +132,11 @@ apt_install() { do_or_say sudo "${APT_NI[@]}" install -y "$@"; }
 apt_install_one() {
   local pkg="$1"
   pkg_installed "$pkg" && return 0
+  # honor the doctor/install split: never mutate in check mode (mirrors do_or_say)
+  if (( ${INSTALL:-0} == 0 )); then
+    printf '  %s[would]%s apt install %s\n' "$C_DIM" "$C_RST" "$pkg"
+    return 0
+  fi
   if sudo "${APT_NI[@]}" install -y --no-install-recommends "$pkg" >/dev/null 2>&1; then
     log "installed: $pkg"
   else

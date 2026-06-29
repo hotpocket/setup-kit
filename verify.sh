@@ -2,7 +2,9 @@
 # INDEPENDENT verification — checks the system against the manifests using
 # only traditional tools. Deliberately does NOT source lib.sh or reuse the
 # installer's logic: a bug shared between installer and verifier would lie
-# twice. Read-only. Exit 0 = system matches manifests.
+# twice. Read-only except for one benign refresh: with sudo it runs `apt-get
+# update` to test source health (refreshes /var/lib/apt/lists, installs
+# nothing). Exit 0 = system matches manifests.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 CONF="hosts/$(hostname).conf"
@@ -41,13 +43,17 @@ if [[ "$(systemd-detect-virt 2>/dev/null || true)" == "" || "$(systemd-detect-vi
   FILES+=(manifests/apt/conditional/virtualbox.list)
 fi
 apt_missing=0; apt_total=0
-while IFS= read -r p; do
-  [[ "$SKIPS" == *" $p "* ]] && continue
-  apt-cache show "$p" >/dev/null 2>&1 || continue   # not in this release's archive
-  apt_total=$((apt_total+1))
-  st=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null)
-  [[ "$st" == "install ok installed" ]] || { failv "apt: $p ($st)"; apt_missing=$((apt_missing+1)); }
-done < <(grep -hvE '^[[:space:]]*(#|$)' "${FILES[@]}" 2>/dev/null | awk '{print $1}' | sort -u)
+# guard: with no groups enabled FILES is empty, and `grep` with no file args
+# would block reading stdin — feed it nothing instead.
+if (( ${#FILES[@]} > 0 )); then
+  while IFS= read -r p; do
+    [[ "$SKIPS" == *" $p "* ]] && continue
+    apt-cache show "$p" >/dev/null 2>&1 || continue   # not in this release's archive
+    apt_total=$((apt_total+1))
+    st=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null)
+    [[ "$st" == "install ok installed" ]] || { failv "apt: $p ($st)"; apt_missing=$((apt_missing+1)); }
+  done < <(grep -hvE '^[[:space:]]*(#|$)' "${FILES[@]}" 2>/dev/null | awk '{print $1}' | sort -u)
+fi
 (( apt_missing == 0 )) && pass "apt: all $apt_total available manifest packages installed"
 
 # -- 1b. nvidia driver actually driving the GPU --------------------------------

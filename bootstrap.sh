@@ -89,7 +89,7 @@ case "$cmd" in
     bash "$KIT_DIR/profiles/workstation/preamble-github-auth.sh" "$mode" || true
     # install mode loops passes until a pass changes nothing, then runs the
     # independent verifier — one command does the whole job.
-    rc=0
+    rc=0; settled=0
     for pass in 1 2 3; do
       RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S)-p$pass.log"
       for phase in "$KIT_DIR/profiles/workstation/"[0-9][0-9]*-*.sh; do
@@ -123,14 +123,18 @@ case "$cmd" in
           echo "  ✔ stable — no actions left; remaining warn/fail need a human"
           echo "    (see profiles/workstation/99-manual-checklist.md)"
         fi
+        settled=1
         break
       fi
       echo "  changes applied — running another pass..."
     done
     if [[ "$mode" == install ]]; then
+      (( settled )) || { echo "  ⚠ NOT converged after $pass passes — still applying changes; re-run install"; rc=1; }
       [[ -s "$LOG_DIR/missing.log" ]] && echo "  Misses to triage: $LOG_DIR/missing.log"
       section "independent verification (verify.sh)"
       "$KIT_DIR/verify.sh" --settle 30 | grep -E '^(FAIL|===|    )'
+      # verify's own exit code (not grep's) folds into the run result
+      [[ "${PIPESTATUS[0]}" -eq 0 ]] || rc=1
     fi
     exit "$rc"
     ;;
