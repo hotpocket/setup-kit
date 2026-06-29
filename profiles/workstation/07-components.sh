@@ -217,6 +217,31 @@ else
   ok "ollama: opt-in, currently '$OLLAMA_WANT' (flip component_ollama=yes to enable)"
 fi
 
+# ------------------------------------------------------------- mtga (wine)
+# MTG Arena under Wine. Install-only: fetch WotC's bootstrap installer and run
+# it once (GUI; downloads the ~14 GB client into ~/.wine). The kit never owns
+# that data. Done = MTGA.exe present. See components/mtga.md. The launcher
+# self-update loop fix is deliberately NOT handled here — see that doc's caveat.
+MTGA_WANT="$(conf_get component_mtga no)"
+if [[ "$MTGA_WANT" == yes ]]; then
+  section "mtga ($MODE) — components/mtga.md"
+  MTGA_EXE="$HOME/.wine/drive_c/Program Files/Wizards of the Coast/MTGA/MTGA.exe"
+  MTGA_URL="https://mtgarena.downloads.wizards.com/Live/Windows32/MTGAInstaller.exe"
+  if [[ -f "$MTGA_EXE" ]]; then
+    ok "MTGA installed (MTGA.exe present)"
+  elif ! command -v wine >/dev/null 2>&1; then
+    warn "MTGA wanted but wine missing — set group_wine=yes (manifests/apt/wine.list)"
+    miss "mtga: wine absent (flip group_wine=yes)"
+  else
+    warn "MTGA not installed — fetch + run WotC installer (GUI, downloads ~14 GB)"
+    # GUI installer: needs a desktop session; runs once in install mode only.
+    do_or_say bash -c 'curl -fL "'"$MTGA_URL"'" -o /tmp/MTGAInstaller.exe && wine /tmp/MTGAInstaller.exe' \
+      || miss "mtga: installer fetch/run failed (needs a desktop session)"
+  fi
+else
+  ok "mtga: opt-in, currently '$MTGA_WANT' (flip component_mtga=yes to enable)"
+fi
+
 # ------------------------------------------------------------- dictation
 # Speech-to-text chain (CPU-only — vosk lgraph model; NOT GPU-gated like
 # TTS). .configs ships hotkeys + wrapper; this provisions what they call:
