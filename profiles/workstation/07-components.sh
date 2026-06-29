@@ -324,7 +324,7 @@ if [[ "$(conf_get component_ocr yes)" == yes ]]; then
 fi
 
 # ------------------------------------------------------------- tts (kokoro)
-# Clipboard TTS server (kokoro neural TTS + vlc + soundfile, HEAVY — pulls
+# Clipboard TTS server (kokoro neural TTS + sounddevice, HEAVY — pulls
 # torch). ALWAYS provisioned, NOT opt-in: .configs ships the clipboard-TTS
 # client (now the Flutter control window, replacing the old Tk client) plus
 # the server symlinks unconditionally, and the client is useless without this
@@ -335,7 +335,7 @@ fi
 # of global (which stays system for a clean prompt), the deps don't pollute
 # the bare 3.12, and the path is stable across machines (name, not patch).
 section "tts (kokoro) ($MODE)"
-for d in libsndfile1 vlc espeak-ng python3-tk; do
+for d in libsndfile1 libportaudio2 espeak-ng; do
   pkg_installed "$d" && ok "tts dep $d" || { warn "tts dep $d missing"; apt_install "$d"; }
 done
 export PYENV_ROOT="$HOME/.pyenv" PATH="$HOME/.pyenv/bin:$PATH"
@@ -355,11 +355,11 @@ else
   ok "tts virtualenv present"
 fi
 if [[ -x "$TTS_PY" ]]; then
-  if "$TTS_PY" -c 'import kokoro,soundfile,vlc,tkinter' 2>/dev/null; then
-    ok "tts venv deps (kokoro, soundfile, vlc, tkinter) present"
+  if "$TTS_PY" -c 'import kokoro,soundfile,sounddevice' 2>/dev/null; then
+    ok "tts venv deps (kokoro, soundfile, sounddevice) present"
   else
     warn "tts venv deps missing"
-    do_or_say "$TTS_PY" -m pip install --quiet kokoro soundfile python-vlc \
+    do_or_say "$TTS_PY" -m pip install --quiet kokoro soundfile sounddevice \
       || miss "tts: pip install into tts venv"
   fi
 fi

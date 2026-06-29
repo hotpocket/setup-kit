@@ -130,8 +130,8 @@ else failv "python: pyenv missing"; fi
 # tts venv is always provisioned (07-components): .configs ships the clipboard
 # TTS client + server unconditionally, so this backend must exist — not opt-in.
 TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
-[[ -x "$TTS_PY" ]] && "$TTS_PY" -c 'import kokoro,soundfile,vlc' 2>/dev/null \
-  && pass "tts venv: kokoro/soundfile/vlc importable" \
+[[ -x "$TTS_PY" ]] && "$TTS_PY" -c 'import kokoro,soundfile,sounddevice' 2>/dev/null \
+  && pass "tts venv: kokoro/soundfile/sounddevice importable" \
   || failv "tts venv missing or incomplete (~/.pyenv/versions/kokoro-tts)"
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
