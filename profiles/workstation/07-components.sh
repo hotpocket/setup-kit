@@ -232,6 +232,39 @@ if [[ "$MTGA_WANT" == yes ]]; then
   MTGA_URL="https://mtgarena.downloads.wizards.com/Live/Windows32/MTGAInstaller.exe"
   if [[ -f "$MTGA_EXE" ]]; then
     ok "MTGA installed (MTGA.exe present)"
+    # Launcher entry: Wine drops the Start-Menu shortcut in a nested subdir
+    # GNOME's app grid won't surface, with a themed icon name that needs a
+    # cache rebuild (else: gear icon). Reconcile to ONE top-level entry with
+    # an absolute icon path; hide the nested original (NoDisplay). Reconciled
+    # by content — re-runs converge even if Wine rewrites the nested file.
+    APPS="$HOME/.local/share/applications"
+    NESTED="$APPS/wine/Programs/MTG Arena/MTG Arena.desktop"
+    FLAT="$APPS/mtga.desktop"
+    if [[ -f "$NESTED" ]]; then
+      icon="$(awk -F= '/^Icon=/{print $2; exit}' "$NESTED")"
+      icon_abs=""
+      for d in 256x256 192x192 128x128 96x96 64x64 48x48; do
+        p="$HOME/.local/share/icons/hicolor/$d/apps/$icon.png"
+        [[ -f "$p" ]] && { icon_abs="$p"; break; }
+      done
+      # desired flat = nested minus NoDisplay, with icon → absolute path
+      desired="$(grep -v '^NoDisplay=' "$NESTED")"
+      [[ -n "$icon_abs" ]] && desired="$(printf '%s\n' "$desired" | sed "s|^Icon=.*|Icon=$icon_abs|")"
+      if [[ "$(cat "$FLAT" 2>/dev/null)" == "$desired" ]] && grep -q '^NoDisplay=true' "$NESTED"; then
+        ok "MTGA launcher entry positioned (flat + absolute icon, nested hidden)"
+      else
+        warn "MTGA launcher entry needs positioning (nested shortcut unsurfaced / gear icon)"
+        if (( INSTALL )); then
+          printf '%s\n' "$desired" > "$FLAT"
+          grep -q '^NoDisplay=' "$NESTED" || printf 'NoDisplay=true\n' >> "$NESTED"
+          update-desktop-database "$APPS" 2>/dev/null
+          gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null
+          ok "positioned MTGA launcher entry"
+        fi
+      fi
+    else
+      warn "MTGA installed but no Wine launcher shortcut yet — run MTGA once so Wine generates it"
+    fi
   elif ! command -v wine >/dev/null 2>&1; then
     warn "MTGA wanted but wine missing — set group_wine=yes (manifests/apt/wine.list)"
     miss "mtga: wine absent (flip group_wine=yes)"

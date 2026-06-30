@@ -22,11 +22,27 @@ It's the game. Default OFF — large (~14 GB), GUI, desktop-only.
 3. `wine MTGAInstaller.exe` — GUI installer runs once, downloads the client
    into `~/.wine`. Not headless; needs a desktop session.
 
+## Launcher desktop entry (auto-reconciled once MTGA.exe present)
+
+Wine's `winemenubuilder` writes the Start-Menu shortcut to a *nested* path
+(`~/.local/share/applications/wine/Programs/MTG Arena/MTG Arena.desktop`) that
+GNOME's app grid won't surface, with a themed icon name (`FAC1_MTGALauncher.0`)
+that needs an icon-cache rebuild — otherwise it shows as a generic gear.
+
+When MTGA is installed, the component reconciles ONE clean launcher entry:
+- writes `~/.local/share/applications/mtga.desktop` = the nested entry with its
+  `Icon=` rewritten to the absolute hicolor PNG path (highest res available);
+- sets `NoDisplay=true` on the nested original so only one MTGA shows;
+- refreshes `update-desktop-database` + `gtk-update-icon-cache`.
+Reconciled by content, so re-runs converge. Wine may rewrite the nested file on
+launch (dropping `NoDisplay`); the next provision re-hides it.
+
 ## Idempotency
 
 - Done = `~/.wine/drive_c/Program Files/Wizards of the Coast/MTGA/MTGA.exe`
-  exists → component reports `ok` and does nothing.
-- `check` mode never downloads/runs the installer — only reports presence.
+  exists → component reports `ok`, then reconciles the launcher entry (above).
+- `check` mode never downloads/runs the installer and never writes the entry —
+  only reports presence and launcher-entry drift.
 - The 14 GB client lives only in `~/.wine` (never in git, never re-provisioned).
 
 ## Setup-kit integration
