@@ -48,14 +48,22 @@ packages, toolchains, configs — idempotently.
 
 ## Session conduct
 
-**At session start**, orient from the project's Obsidian memory before acting:
-1. Read `vault/sessions/Session Log.md` → most recent recap.
-2. Read `vault/todos/setup-kit.md` → open work.
-Then proceed with the user's request. Use the `/vault` skill for all memory
-operations (lookup, note, recap, todo). When you discover something durable
-(architecture, a gotcha, a decision and its why), write it back to the vault.
+Session-start orientation is injected by the global `SessionStart` router
+(`~/bin/claude-orient`), which runs this repo's `scripts/session-start.sh`:
+latest recap pointer + open-todo count. Go deeper on demand — read the recap body
+in `vault/sessions/` or open `vault/todos/setup-kit.md`.
 
-**At session end**, offer `/vault recap` to capture what changed.
+**Vault access is file-first.** Use `scripts/vault-digest` for cheap reads —
+grep/awk over note frontmatter, no Obsidian app/CLI/GUI, safe across parallel
+sessions:
+- `scripts/vault-digest summaries [subdir]` — one-line gist per note (Level 0).
+- `scripts/vault-digest type <t>` / `concern <c>` — filter by frontmatter.
+- `scripts/vault-digest recap` / `todos` / `backlinks <note>` / `search <q>`.
+Read a full note body (Level 2) only after a summary points you to it. The
+`/vault` skill (Obsidian CLI) is an optional accelerator — never load-bearing.
+
+When you discover something durable (architecture, a gotcha, a decision and its
+why), write it back to the vault. **At session end**, offer `/vault recap`.
 
 ## Docs layout
 
