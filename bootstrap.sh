@@ -5,6 +5,7 @@
 #   ./bootstrap.sh workstation [check]     # doctor: report what's missing, change nothing
 #   ./bootstrap.sh workstation install     # provision (prompts once, records answers)
 #   ./bootstrap.sh proxmox-host install    # IOMMU/VFIO/ZFS/nested-virt + VM creation
+#   ./bootstrap.sh list                    # every group/component flag + its current value
 #
 # Answers live in hosts/$(hostname).conf — re-runs are non-interactive and
 # idempotent; flip a group/component there and re-run install to add it.
@@ -12,7 +13,43 @@ set -uo pipefail
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$KIT_DIR/lib.sh"
 
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+
+# Catalog of every toggleable group_/component_ flag, from the example.conf
+# template (its inline comments are the descriptions), annotated with each
+# flag's CURRENT value in this host's conf. The way to discover what's
+# installable after first run: flip a 'no' to 'yes' here, re-run install.
+list_components() {
+  local tmpl="$KIT_DIR/hosts/example.conf"
+  [[ -f "$tmpl" ]] || { echo "no template at $tmpl"; exit 1; }
+  [[ -f "$HOST_CONF" ]] && echo "host conf: $HOST_CONF" \
+                        || echo "host conf: (none yet — showing template defaults)"
+  # Print one annotated row per template line whose key matches $1 (an
+  # extended-regex prefix alternation). Tolerates `# key=val` lines (commented
+  # cond_* defaults) by stripping a leading comment marker first.
+  _list_rows() {
+    local line key def cur desc
+    while IFS= read -r line; do
+      line="${line#\# }"                                      # uncomment cond_* defaults
+      [[ "$line" =~ ^($1)[a-z0-9_]+= ]] || continue
+      key="${line%%=*}"
+      def="${line#*=}"; def="${def%%#*}"; def="${def//\"/}"; def="${def// /}"
+      desc=""; [[ "$line" == *"#"* ]] && desc="${line#*#}"
+      cur="$(conf_get "$key" "$def")"
+      printf '  %s[%-4s]%s  %-26s %s%s%s\n' \
+        "$([[ "$cur" =~ ^(yes|auto)$ || ( "$cur" != no && -n "$cur" ) ]] && echo "$C_OK" || echo "$C_DIM")" \
+        "$cur" "$C_RST" "$key" "$C_DIM" "${desc# }" "$C_RST"
+    done < "$tmpl"
+  }
+  section "groups & components — configurable on/off ([cur] = value in host conf)"
+  _list_rows 'group_|component_'
+  section "language stacks — configurable"
+  _list_rows 'lang_'
+  section "conditional — INFORMATIONAL, resolved by hardware detection (override only to force)"
+  _list_rows 'cond_'
+  echo
+  echo "  flip a value in $HOST_CONF, then: ./bootstrap.sh workstation install"
+}
 
 cmd="${1:-}"; mode="${2:-check}"
 case "$cmd" in
@@ -137,6 +174,10 @@ case "$cmd" in
       [[ "${PIPESTATUS[0]}" -eq 0 ]] || rc=1
     fi
     exit "$rc"
+    ;;
+
+  list|components|--list)
+    list_components
     ;;
 
   proxmox-host)
