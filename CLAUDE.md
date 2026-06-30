@@ -45,3 +45,33 @@ packages, toolchains, configs — idempotently.
 - Same for **vscode**: the `code` package drops its own `vscode.sources` (signed-by `/usr/share/keyrings/microsoft.gpg`). Never add a `vscode.list` — apt compares keyring *paths*, not keys, so even the identical Microsoft key at a different path is a fatal Signed-By clash that kills all of apt. `01-apt-repos.sh` deliberately omits it and removes any stale `vscode.list`.
 - **All `apt-get install` must be non-interactive** — use the `apt_install` helper (lib.sh) or the `02-apt-install.sh` array (`DEBIAN_FRONTEND=noninteractive` + `--force-confdef --force-confold`). A bare `apt-get install` can hit a dpkg conffile prompt; because phases pipe through `tee` and sudo uses `use_pty`, that prompt is *unanswerable* and wedges the run forever (seen on 24.04 with `systemd-zram-generator`). Configs the kit owns (e.g. `zram-generator.conf`) are reconciled by content, not by answering dpkg.
 - The Android emulator needs `/dev/kvm` (BIOS virt on bare metal; nested virt + `cpu=host` in a Proxmox VM).
+
+## Session conduct
+
+**At session start**, orient from the project's Obsidian memory before acting:
+1. Read `vault/sessions/Session Log.md` → most recent recap.
+2. Read `vault/todos/setup-kit.md` → open work.
+Then proceed with the user's request. Use the `/vault` skill for all memory
+operations (lookup, note, recap, todo). When you discover something durable
+(architecture, a gotcha, a decision and its why), write it back to the vault.
+
+**At session end**, offer `/vault recap` to capture what changed.
+
+## Docs layout
+
+- `docs/` — generated documents: working notes, plans, analyses.
+- `docs/reports/` — persistent, prepared deliverables meant to be kept/shared.
+- `docs/logs/` — transient/ephemeral output of repeatable processes (gitignored).
+
+## Skills available here
+
+- `vault` — persistent Obsidian memory (orient, look up, write back).
+- `gstack` — drive a real browser to research the web and produce results.
+- `code-review` — review the current diff for bugs and cleanups.
+
+## Rules of conduct
+
+(Idempotency, no-silent-sudo, and commit/push rules live in **Conventions** and
+**Git — ABSOLUTE RULE** above.) Additionally:
+- Be brief: no preamble, no recap of what the user knows, no surveying paths not taken.
+- Reversible-by-default; confirm before hard-to-undo or outward-facing actions.

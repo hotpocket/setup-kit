@@ -12,3 +12,12 @@ __pycache__/
 *.pyc
 # session transport (patches/bundles) — never part of the kit
 handoff-to-*/
+
+# Claude conduct
+docs/logs/
+vault/.obsidian/workspace*.json
+vault/.obsidian/plugins/
+vault/.obsidian/themes/
+vault/.obsidian/hotkeys.json
+vault/.obsidian/appearance.json
+vault/.obsidian/graph.json
