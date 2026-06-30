@@ -11,6 +11,7 @@ packages, toolchains, configs — idempotently.
   - `workstation check` — doctor: report drift, change nothing.
   - `workstation install` — provision; prompts once, loops passes until converged, then runs `verify.sh`.
   - `proxmox-host install` — IOMMU/VFIO/ZFS/nested-virt (run as root; reviewed-but-unrun).
+  - `list` — print every group/component/lang flag + its current value (from `hosts/<host>.conf`), plus informational `cond_*`. The way to discover what's installable after first run: flip a flag, re-run install.
 - `get.sh` — one-line fetcher: clones the repo, optionally execs `bootstrap.sh`.
 - `verify.sh` — independent system-vs-manifest check. Deliberately does NOT source `lib.sh` (a shared bug shouldn't lie twice).
 

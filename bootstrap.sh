@@ -36,9 +36,9 @@ list_components() {
       def="${line#*=}"; def="${def%%#*}"; def="${def//\"/}"; def="${def// /}"
       desc=""; [[ "$line" == *"#"* ]] && desc="${line#*#}"
       cur="$(conf_get "$key" "$def")"
-      printf '  %s[%-4s]%s  %-26s %s%s%s\n' \
+      printf '  %s%-7s%s%-26s %s%s%s\n' \
         "$([[ "$cur" =~ ^(yes|auto)$ || ( "$cur" != no && -n "$cur" ) ]] && echo "$C_OK" || echo "$C_DIM")" \
-        "$cur" "$C_RST" "$key" "$C_DIM" "${desc# }" "$C_RST"
+        "[$cur]" "$C_RST" "$key" "$C_DIM" "${desc# }" "$C_RST"
     done < "$tmpl"
   }
   section "groups & components — configurable on/off ([cur] = value in host conf)"
