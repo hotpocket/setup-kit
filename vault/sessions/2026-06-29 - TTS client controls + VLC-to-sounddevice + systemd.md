@@ -45,10 +45,15 @@ plus the matching setup-kit provisioning.
    setup-kit phase `08-claude-skills` now has the real clone URL (was local-only),
    so fresh boxes clone it and symlink `vault`/`conduct` into `~/.claude/skills/`.
    Ran the phase here — both skills linked and resolvable.
+8. **Phase 08 also links `~/bin/vault-digest`** (from the conduct template) — the
+   shared file-based vault reader the global SessionStart router uses for un-owned
+   repos' external vaults. setup-kit itself got the full owned conduct stamp
+   (`scripts/{vault-digest,session-start.sh}` + file-first CLAUDE.md prose), so it
+   orients via the owned path, not the external fallback.
 
-Commits (all unpushed): `.configs` d3c5632 (transport/text/icon), a1d9a5a
-(VLC→sounddevice + systemd); `setup-kit` 6cdec94 (sounddevice provisioning),
-d132745 (claude-conduct remote so vault/conduct skills clone on fresh boxes).
+Commits (all unpushed): `.configs` d3c5632, a1d9a5a, 37b9cef (global router);
+`setup-kit` 6cdec94 (sounddevice provisioning), d132745 (claude-conduct remote),
+b5415d5 (~/bin/vault-digest), 2c852e7 (owned conduct stamp).
 
 ## Discoveries
 - **First-sentence stutter was a VLC clock bug.** VLC verbose log on a cold
