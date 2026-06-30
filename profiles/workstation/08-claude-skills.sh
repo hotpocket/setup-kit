@@ -74,3 +74,16 @@ if [[ " $SKILLS " == *" gstack "* ]] && ! command -v bun >/dev/null 2>&1; then
   warn "gstack browse daemon needs 'bun' to build — not installed"
   miss "claude-skills: gstack linked but 'bun' missing — build the browse daemon"
 fi
+
+# Shared vault-digest in ~/bin: the file-based vault reader used by the global
+# SessionStart router (claude-orient) for repos you don't own (external vaults
+# under ~/Documents/AgentMemory/<repo>). Owned repos carry their own copy in
+# scripts/ via `/conduct init`. Canonical source is the conduct skill template.
+vd="$HOME/git/claude-conduct/skills/conduct/templates/vault-digest"
+if [[ -f "$vd" ]]; then
+  do_or_say mkdir -p "$HOME/bin"
+  do_or_say ln -sfnT "$vd" "$HOME/bin/vault-digest"
+  ok "~/bin/vault-digest linked"
+else
+  warn "vault-digest template missing (claude-conduct not present?)"
+fi
