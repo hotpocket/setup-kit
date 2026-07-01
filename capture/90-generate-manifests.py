@@ -42,7 +42,10 @@ DROPS = {  # pkg: reason
     "packages-microsoft-prod": "MS repo bootstrap — repos were dropped",
     "steam-launcher": "replaced by steam-installer (multiverse). Valve's"
                       " package manages its own apt source; the kit adding"
-                      " one breaks apt entirely (Signed-By clash)",
+                      " one breaks apt entirely (Signed-By clash). Migration"
+                      " leaves a stale user steam.desktop (Exec=/usr/games/steam,"
+                      " nonexistent) that hides Steam in GNOME — healed by"
+                      " 07-components.sh",
     "steam-libs-amd64": "dependency of the launcher — never list directly",
     "steam-libs-i386": "dependency of the launcher — never list directly",
     "virtualbox-7.2": "replaced by unversioned 'virtualbox' (conditional)",

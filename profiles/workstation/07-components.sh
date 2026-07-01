@@ -278,6 +278,36 @@ else
   ok "mtga: opt-in, currently '$MTGA_WANT' (flip component_mtga=yes to enable)"
 fi
 
+# ------------------------------------------------------------- steam launcher entry
+# steam-installer (multiverse) ships a valid SYSTEM entry
+# (/usr/share/applications/steam.desktop, Exec=/usr/bin/steam). A box migrated
+# off the dropped steam-launcher (see manifests/apt/dropped.list) carries a
+# stale USER-level override:
+#   ~/.local/share/applications/steam.desktop -> …/Steam/deb-installer/steam.desktop
+# whose Exec=/usr/games/steam does not exist under the installer. Because a user
+# entry overrides the system one by desktop-ID, GNOME hides Steam entirely — no
+# app-grid icon, unsearchable. Reconcile: drop the stale override so the valid
+# system entry surfaces. Idempotent — once gone (or if the user entry's Exec
+# resolves), nothing to do. Non-destructive: a valid user override is left alone.
+if group_on games; then
+  SYS_STEAM=/usr/share/applications/steam.desktop
+  USR_STEAM="$HOME/.local/share/applications/steam.desktop"
+  if [[ -e "$SYS_STEAM" && ( -e "$USR_STEAM" || -L "$USR_STEAM" ) ]]; then
+    section "steam launcher entry ($MODE)"
+    exec_bin="$(awk -F'[= ]' '/^Exec=/{print $2; exit}' "$USR_STEAM" 2>/dev/null)"
+    if [[ -n "$exec_bin" && ! -x "$exec_bin" ]]; then
+      warn "stale user steam.desktop overrides system entry (Exec=$exec_bin missing) — Steam hidden from GNOME"
+      if (( INSTALL )); then
+        rm -f "$USR_STEAM"
+        update-desktop-database "$HOME/.local/share/applications" 2>/dev/null
+        ok "removed stale steam.desktop override — system entry now surfaces"
+      fi
+    else
+      ok "user steam.desktop Exec resolves ($exec_bin) — leaving as-is"
+    fi
+  fi
+fi
+
 # ------------------------------------------------------------- dictation
 # Speech-to-text chain (CPU-only — vosk lgraph model; NOT GPU-gated like
 # TTS). .configs ships hotkeys + wrapper; this provisions what they call:

@@ -17,7 +17,7 @@ mysql-workbench-community                   #    117.0 MB  install piecemeal if 
 tofu                                        #    109.7 MB  unused
 usermin                                     #     68.4 MB  webmin's per-user sibling — same family, same verdict
 tldr-hs                                     #     26.2 MB  Haskell tldr client; dropped from 26.04 archive — use tealdeer
-steam-launcher                              #     19.5 MB  replaced by steam-installer (multiverse). Valve's package manages its own apt source; the kit adding one breaks apt entirely (Signed-By clash)
+steam-launcher                              #     19.5 MB  replaced by steam-installer (multiverse). Valve's package manages its own apt source; the kit adding one breaks apt entirely (Signed-By clash). Migration leaves a stale user steam.desktop (Exec=/usr/games/steam, nonexistent) that hides Steam in GNOME — healed by 07-components.sh
 grub-customizer                             #      8.7 MB  PPA has no 26.04 builds; bare-metal niche (extras when it returns)
 pulseeffects                                #      4.8 MB  renamed easyeffects (added to media group)
 openjdk-17-jdk                              #      2.4 MB  replaced by default-jdk (track current)
