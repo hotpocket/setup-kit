@@ -361,8 +361,9 @@ fi
 # torch). ALWAYS provisioned, NOT opt-in: .configs ships the clipboard-TTS
 # client (now the Flutter control window, replacing the old Tk client) plus
 # the server symlinks unconditionally, and the client is useless without this
-# backend — so the venv is a baseline dependency. (Heavy but CPU-fine; kokoro
-# ~82M, no GPU gate.) Deps live in a DEDICATED pyenv virtualenv named
+# backend — so the venv is a baseline dependency. (Heavy; kokoro ~82M runs on
+# GPU when torch can drive the card, else CPU — see the torch-backend note
+# below.) Deps live in a DEDICATED pyenv virtualenv named
 # `kokoro-tts` (~/.pyenv/versions/kokoro-tts), NOT pyenv global — so the
 # .configs shebangs (#!~/.pyenv/versions/kokoro-tts/bin/python) resolve regardless
 # of global (which stays system for a clean prompt), the deps don't pollute
@@ -394,6 +395,64 @@ if [[ -x "$TTS_PY" ]]; then
     warn "tts venv deps missing"
     do_or_say "$TTS_PY" -m pip install --quiet kokoro soundfile sounddevice \
       || miss "tts: pip install into tts venv"
+  fi
+  # torch backend: prefer the GPU, fall back to CPU only when it genuinely
+  # can't drive the card. kokoro auto-uses CUDA whenever torch sees a usable
+  # GPU, but the DEFAULT torch wheel tracks the newest cuDNN, which has dropped
+  # older GPUs (cuDNN 9.12 / torch 2.8 removed Pascal sm_61, e.g. GTX 10xx):
+  # pipeline init throws `cuDNN ... not compatible with devices with SM < 7.5`
+  # and the server exits 0 via its fatal handler — systemd sees success, never
+  # restarts, TTS is silently dead. But the cu118 wheel line (through torch
+  # 2.7.1) STILL ships sm_61 kernels + a Pascal-capable cuDNN (9.1), so an old
+  # GPU CAN run kokoro — it just needs that wheel. So we don't guess from the
+  # compute-cap number; we actually RUN a cuDNN op on the GPU and let the result
+  # decide: keep a working default wheel, drop to the cu118 wheel if it fails,
+  # and pin CPU only if even cu118 can't drive the card (or there's no usable
+  # GPU). cu118 install relies on the general torch deps already present from the
+  # kokoro install above (the cu118 index doesn't mirror PyPI), hence its order.
+  gpu_runs_kokoro() {  # 0 = a cuDNN op actually ran on the GPU; nonzero = no
+    "$TTS_PY" - <<'PY' 2>/dev/null
+import sys, torch, torch.nn as nn
+if not torch.cuda.is_available(): sys.exit(3)          # CPU-only wheel / no CUDA
+try:
+    nn.LSTM(16, 16, 2).cuda()(torch.randn(5, 4, 16, device='cuda'))
+    torch.cuda.synchronize()                            # kokoro's exact failing path
+except Exception:
+    sys.exit(1)                                         # CUDA present, cuDNN refuses this GPU
+PY
+  }
+  pin_cpu_torch() {
+    # --force-reinstall --no-deps: the cpu wheel shares the version string with
+    # the cuda one, so pip would otherwise treat the cuda build as satisfying
+    # `torch`; deps are already present, so the cpu-only index needs nothing else.
+    do_or_say "$TTS_PY" -m pip install --quiet --force-reinstall --no-deps \
+      --index-url https://download.pytorch.org/whl/cpu torch \
+      || miss "tts: pin CPU-only torch in kokoro-tts venv"
+  }
+  if nvidia_wanted; then
+    if gpu_runs_kokoro; then
+      ok "tts torch: runs kokoro on the GPU (cuDNN op verified)"
+    else
+      warn "tts torch: default wheel can't drive this GPU — trying Pascal-era cu118 wheel"
+      do_or_say "$TTS_PY" -m pip install --quiet \
+        --index-url https://download.pytorch.org/whl/cu118 torch==2.7.1 \
+        || miss "tts: install cu118 torch (Pascal-supporting)"
+      if gpu_runs_kokoro; then
+        ok "tts torch: GPU via cu118 wheel (older cuDNN, supports Pascal/sm_61)"
+      else
+        warn "tts torch: GPU still unusable after cu118 — pinning CPU-only torch"
+        pin_cpu_torch
+      fi
+    fi
+  else
+    # No usable GPU (none present, or a legacy card the driver won't back): a
+    # CUDA wheel is dead weight that can't run here — pin CPU-only torch.
+    if "$TTS_PY" -c 'import torch,sys; sys.exit(1 if torch.version.cuda else 0)' 2>/dev/null; then
+      ok "tts torch is CPU-only build (no usable GPU)"
+    else
+      warn "tts torch is a CUDA build but no usable GPU — pinning CPU-only torch"
+      pin_cpu_torch
+    fi
   fi
 fi
 

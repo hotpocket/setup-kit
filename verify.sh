@@ -133,6 +133,23 @@ TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
 [[ -x "$TTS_PY" ]] && "$TTS_PY" -c 'import kokoro,soundfile,sounddevice' 2>/dev/null \
   && pass "tts venv: kokoro/soundfile/sounddevice importable" \
   || failv "tts venv missing or incomplete (~/.pyenv/versions/kokoro-tts)"
+# torch must be able to actually run kokoro: either a CUDA build whose cuDNN
+# really drives this GPU, or the CPU-only build. The broken middle case — a CUDA
+# wheel whose cuDNN refuses the card (cuDNN 9.12+/torch 2.8+ dropped Pascal
+# sm_61, GTX 10xx) — still passes the import check above but crashes pipeline
+# init and exits the server silently, so run a real cuDNN op to catch it.
+[[ -x "$TTS_PY" ]] && "$TTS_PY" - <<'PY' 2>/dev/null
+import sys, torch
+if torch.version.cuda is None: sys.exit(0)          # CPU-only build: fine
+import torch.nn as nn
+try:
+    nn.LSTM(16, 16, 2).cuda()(torch.randn(5, 4, 16, device='cuda')); torch.cuda.synchronize()
+    sys.exit(0)                                      # CUDA build that drives the GPU: fine
+except Exception:
+    sys.exit(1)                                      # CUDA build the GPU can't run: broken
+PY
+[[ $? -eq 0 ]] && pass "tts venv: torch can run kokoro (CPU build or GPU cuDNN op verified)" \
+  || failv "tts venv: CUDA torch can't drive this GPU — kokoro crashes (re-run 07-components for the cu118/CPU fallback)"
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
