@@ -178,6 +178,10 @@ ADDITIONS = {
                    "xz-utils", "tk-dev", "libxml2-dev", "libxmlsec1-dev",
                    "libffi-dev", "liblzma-dev"],
     "dev-flutter-deps": ["libgtk-3-dev"],
+    # wireguard-tools: wg/wg-quick for client-side WireGuard tunnels (e.g. the
+    # ephemeral AWS proxy in ~/bin/wgprox.sh). Pure userspace tools — nothing
+    # in a default install Depends them, so they never land in manual.txt.
+    "network": ["wireguard-tools"],
 }
 
 # explicit pkg -> group overrides (beat section mapping)

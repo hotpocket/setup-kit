@@ -31,3 +31,4 @@ network-manager-config-connectivity-ubuntu  #      0.0 MB  net
 gunicorn                                    #      0.0 MB  httpd
 xul-ext-ubufox                              #      0.0 MB  web
 transmission                                #      0.0 MB  net
+wireguard-tools                             #              +new
