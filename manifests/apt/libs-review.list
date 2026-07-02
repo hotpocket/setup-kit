@@ -8,7 +8,6 @@ libqt5webkit5                               #     45.5 MB  libs
 libicu74                                    #     35.3 MB  libs
 libicu70                                    #     33.6 MB  libs
 libflite1                                   #     26.9 MB  libs
-libimage-exiftool-perl                      #     23.1 MB  perl
 libstdc++-12-dev                            #     19.2 MB  libdevel
 python3-pyqt5                               #     15.8 MB  python
 qtbase5-dev                                 #     15.0 MB  libdevel

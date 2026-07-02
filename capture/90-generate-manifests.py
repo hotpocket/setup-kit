@@ -210,6 +210,9 @@ for p in ["wine-stable", "winehq-stable", "winetricks"]:
 # libs-review (never installed); pin it to the default-ON CLI set.
 for p in ["glow", "snapd", "tldr"]:
     OVERRIDES[p] = "cli-system"
+# exiftool: a CLI metadata tool, not a library. apt's 'perl' section would
+# bury it in libs-review (never installed); pin it to the default-ON CLI set.
+OVERRIDES["libimage-exiftool-perl"] = "cli-system"
 # gir deps for the system-monitor GNOME shell extension — the extension is
 # not an apt package, so nothing pulls these in; 'introspection' section
 # would bury them in libs-review (never installed)
