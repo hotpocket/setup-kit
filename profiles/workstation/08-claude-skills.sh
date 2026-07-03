@@ -3,7 +3,11 @@
 # skill into ~/.claude/skills/<name>. Edit skills at their source, never the link.
 # Specs: components/{gstack,vault,conduct}.md
 #   gstack         -> third-party, cloned from its own upstream (~/git/gstack)
-#   vault, conduct -> our canonical repo ~/git/claude-conduct (github: hotpocket/claude-conduct)
+#   vault, conduct -> canonical source is the claude-conduct/ subtree inside
+#                     ~/git/.configs (github: hotpocket/.configs). The standalone
+#                     hotpocket/claude-conduct repo is archived — subtree-merged
+#                     2026-07-03 so config (hooks in settings.json) and the
+#                     scripts they invoke land in ONE repo, atomically.
 SCRIPT_NAME="ws-08-claude-skills"
 source "$(dirname "$0")/../../lib.sh"
 require_user
@@ -19,17 +23,17 @@ section "claude skills ($MODE) — components/{gstack,vault,conduct}.md"
 # registry: source repo, clone url (empty = local-only), skill dir within repo
 skill_repo() { case "$1" in
   gstack)        echo "$HOME/git/gstack" ;;
-  vault|conduct) echo "$HOME/git/claude-conduct" ;;
+  vault|conduct) echo "$HOME/git/.configs" ;;
 esac; }
 skill_url() { case "$1" in
   gstack)        echo "git@github.com:garrytan/gstack.git" ;;
-  vault|conduct) echo "git@github.com:hotpocket/claude-conduct.git" ;;
+  vault|conduct) echo "git@github.com:hotpocket/.configs.git" ;;
   *)             echo "" ;;
 esac; }
 skill_path() { case "$1" in
   gstack)  echo "$HOME/git/gstack" ;;            # SKILL.md lives at the repo root
-  vault)   echo "$HOME/git/claude-conduct/skills/vault" ;;
-  conduct) echo "$HOME/git/claude-conduct/skills/conduct" ;;
+  vault)   echo "$HOME/git/.configs/claude-conduct/skills/vault" ;;
+  conduct) echo "$HOME/git/.configs/claude-conduct/skills/conduct" ;;
 esac; }
 
 ensure_repo() {            # dir url  -> 0 if present after, 1 otherwise
@@ -94,11 +98,25 @@ fi
 # SessionStart router (claude-orient) for repos you don't own (external vaults
 # under ~/Documents/AgentMemory/<repo>). Owned repos carry their own copy in
 # scripts/ via `/conduct init`. Canonical source is the conduct skill template.
-vd="$HOME/git/claude-conduct/skills/conduct/templates/vault-digest"
+vd="$HOME/git/.configs/claude-conduct/skills/conduct/templates/vault-digest"
 if [[ -f "$vd" ]]; then
   do_or_say mkdir -p "$HOME/bin"
   do_or_say ln -sfnT "$vd" "$HOME/bin/vault-digest"
   ok "~/bin/vault-digest linked"
 else
-  warn "vault-digest template missing (claude-conduct not present?)"
+  warn "vault-digest template missing (claude-conduct subtree not present?)"
+fi
+
+# No-push guard in ~/bin: the PreToolUse hook registered in the global
+# .claude/settings.json (same .configs repo) mechanically denies any agent
+# `git push`. The registration and this script MUST land together — that's
+# why conduct lives inside .configs. Canonical source is the conduct template.
+dgp="$HOME/git/.configs/claude-conduct/skills/conduct/templates/deny-git-push.sh"
+if [[ -f "$dgp" ]]; then
+  do_or_say chmod +x "$dgp"
+  do_or_say ln -sfnT "$dgp" "$HOME/bin/deny-git-push.sh"
+  ok "~/bin/deny-git-push.sh linked"
+else
+  warn "deny-git-push template missing (claude-conduct subtree not present?)"
+  miss "claude-skills: settings.json registers deny-git-push.sh but script is absent"
 fi

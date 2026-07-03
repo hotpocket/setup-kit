@@ -4,7 +4,7 @@ Persistent Obsidian-based memory skill for coding agents: orient from a
 knowledge vault at session start, look up architecture/component notes, and
 write discoveries back across sessions.
 
-- Source: `~/git/claude-conduct/skills/vault` (our canonical copy)
+- Source: `~/git/.configs/claude-conduct/skills/vault` (canonical; the claude-conduct subtree inside .configs)
 - Origin: MIT, vendored out of a private repo (upstream
   adamtylerlynch/obsidian-agent-memory-skills). We own the copy now.
 - Skill link: `~/.claude/skills/vault`
@@ -19,9 +19,10 @@ write discoveries back across sessions.
 ## Setup-kit integration
 
 - Installed by `profiles/workstation/08-claude-skills.sh` (clones
-  `~/git/claude-conduct`, symlinks the skill).
+  `~/git/.configs`, symlinks the skill).
 - Do NOT track Obsidian runtime state: `~/.config/obsidian/obsidian.json`
   (GUIDs, absolute paths, open-state) is machine-specific — let Obsidian
   regenerate it.
-- claude-conduct lives at `git@github.com:hotpocket/claude-conduct.git`; phase 08
-  clones it on a fresh box and symlinks the skill into `~/.claude/skills/vault`.
+- Canonical home is the `claude-conduct/` subtree of `hotpocket/.configs`
+  (standalone repo archived 2026-07-03); phase 08 clones `.configs` and
+  symlinks the skill into `~/.claude/skills/vault`.
