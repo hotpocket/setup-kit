@@ -77,6 +77,29 @@ if [[ -n "$SKIPS" ]]; then
   ok "honoring skip_pkgs: $SKIPS"
 fi
 
+# ---- release reconciliation: manifests target 26.04; a box provisioned
+# ---- before a package swap needs the old package handled, not fought --------
+# steam: a box already running Valve's steam-launcher (self-managed repo) has
+# steam-libs newer than the exact version multiverse's steam-installer pins —
+# installing it is an unmet-dep abort that sinks the WHOLE apt transaction
+# (caught on 24.04: steam-libs-i386 1.0.0.85 installed, = 1.0.0.79~ds-2
+# required). Valve keeps itself updated; never migrate an existing install.
+if pkg_installed steam-launcher; then
+  mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv steam-installer)
+  ok "steam: Valve steam-launcher installed — steam-installer not applicable"
+fi
+# tldr: tealdeer replaces the Haskell client (tldr/tldr-hs — gone from 26.04,
+# and its page downloader is broken upstream). The legacy pair owns
+# /usr/bin/tldr via update-alternatives; remove it BEFORE tealdeer lands so
+# tealdeer's real /usr/bin/tldr never fights the alternatives symlink.
+# (process substitution, not a pipe: grep -q exits at first match, printf's
+# SIGPIPE would fail the pipeline under pipefail — a timing-dependent miss)
+if grep -Fxq tealdeer < <(printf '%s\n' "${WANT[@]}") && ! pkg_installed tealdeer \
+   && { pkg_installed tldr || pkg_installed tldr-hs; }; then
+  warn "tldr: legacy Haskell client present — removing (tealdeer replaces it)"
+  do_or_say sudo "${APT_NI[@]}" remove -y tldr tldr-hs
+fi
+
 # ---- what's missing ---------------------------------------------------------
 MISSING=()
 for p in "${WANT[@]}"; do
@@ -175,15 +198,29 @@ for attempt in 1 2 3; do
   mapfile -t BAD < <({ grep -oP 'Unable to locate package \K\S+' "$LOG_DIR/apt-install-out.tmp"
                        grep -oP "Package '\K[^']+(?=' has no installation candidate)" "$LOG_DIR/apt-install-out.tmp"
                      } | sort -u)
+  # unmet-dependency offenders (indented ' pkg : Depends: ...' lines) abort
+  # the ENTIRE transaction — one bad version pin fails all N packages. Prune
+  # them like no-candidates and retry so they can't sink the innocent rest.
+  # Intersected with MISSING: dep lines can name packages we never asked for.
+  mapfile -t UNMET < <(awk '/unmet dependencies:/{f=1;next} f&&/^ [^ ]/{print $1} f&&!/^ /{f=0}' \
+                         "$LOG_DIR/apt-install-out.tmp" \
+                       | grep -Fxf <(printf '%s\n' "${MISSING[@]}") | sort -u)
   rm -f "$LOG_DIR/apt-install-out.tmp"
-  (( ${#BAD[@]} )) || break
+  (( ${#BAD[@]} + ${#UNMET[@]} )) || break
   for p in "${BAD[@]}"; do miss "apt: $p (no candidate)"; done
+  for p in "${UNMET[@]}"; do miss "apt: $p (unmet dependencies — pruned so the rest can install)"; done
+  BAD+=("${UNMET[@]}")
   mapfile -t MISSING < <(printf '%s\n' "${MISSING[@]}" | grep -Fxv -f <(printf '%s\n' "${BAD[@]}"))
   log "retrying without ${#BAD[@]} unavailable packages"
 done
 
+# every survivor that still isn't installed goes to missing.log — the FAIL
+# below points there, so the file must actually name them
 left=0
-for p in "${MISSING[@]}"; do pkg_installed "$p" || ((left++)); done
+for p in "${MISSING[@]}"; do
+  pkg_installed "$p" && continue
+  ((left++)); miss "apt: $p (still missing after ${attempt} attempt(s))"
+done
 if (( left )); then
   fail "$left packages still missing — see $LOG_DIR/missing.log"
 else

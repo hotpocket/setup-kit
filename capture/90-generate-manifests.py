@@ -161,6 +161,10 @@ ADDITIONS = {
     # standalone too. amdgpu_top (its AMD-GPU backend) is a deb (debs.list).
     "cli-system": ["lsof", "wl-clipboard", "scdaemon", "pcscd", "tealdeer",
                    "nethogs", "lm-sensors"],
+    # steam-installer: 26.04's steam (multiverse). 02-apt-install skips it on
+    # boxes already running Valve's steam-launcher — its exact steam-libs pin
+    # is unsatisfiable next to Valve's newer libs, and that unmet dep would
+    # abort the whole apt transaction.
     "games": ["steam-installer"],
     "media": ["easyeffects"],          # pulseeffects' successor
     "dev-core": ["shellcheck", "git-lfs",

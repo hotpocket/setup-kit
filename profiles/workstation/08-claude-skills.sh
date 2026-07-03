@@ -34,7 +34,22 @@ esac; }
 
 ensure_repo() {            # dir url  -> 0 if present after, 1 otherwise
   local dir="$1" url="$2" name; name="$(basename "$dir")"
-  [[ -d "$dir/.git" ]] && { ok "repo $name present"; return 0; }
+  if [[ -d "$dir/.git" ]]; then
+    # keep it fresh: a stale clone means missing templates/skills (caught in
+    # the wild: a pre-vault-digest claude-conduct left ~/bin/vault-digest
+    # unlinkable forever). ff-only + soft-fail: offline or locally-diverged
+    # just uses what's there.
+    if (( INSTALL )) && [[ -n "$url" ]]; then
+      if git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
+        ok "repo $name present (fresh)"
+      else
+        warn "repo $name present but not updated (offline / diverged) — using as-is"
+      fi
+    else
+      ok "repo $name present"
+    fi
+    return 0
+  fi
   if [[ -z "$url" ]]; then
     warn "repo $name missing and local-only (no remote to clone)"
     miss "claude-skills: $name is local-only — create/restore it manually at $dir"
