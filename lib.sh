@@ -83,7 +83,10 @@ conf_set() {
 group_on() { [[ "$(conf_get "group_${1//-/_}" no)" == yes ]]; }
 
 # ---------------------------------------------------------------- detection
-has_nvidia()   { lspci 2>/dev/null | grep -qi nvidia; }
+# grep -q would exit at first match → SIGPIPE kills the producer → pipefail
+# (line 6) fails the whole pipeline whenever output exceeds the pipe buffer.
+# Redirecting instead of -q makes grep read to EOF: no SIGPIPE, no flake.
+has_nvidia()   { lspci 2>/dev/null | grep -i nvidia >/dev/null; }
 # nvidia stack wanted? GPU present AND (cond_nvidia=yes forces, =no blocks,
 # auto requires ubuntu-drivers to back the card). Legacy GPUs the current
 # driver dropped (e.g. Kepler) get nouveau, not a restart-looping 580 stack.
@@ -93,7 +96,7 @@ nvidia_wanted() {
     no)  return 1 ;;
     yes) return 0 ;;
   esac
-  ubuntu-drivers devices 2>/dev/null | grep -q 'nvidia-driver'
+  ubuntu-drivers devices 2>/dev/null | grep 'nvidia-driver' >/dev/null
 }
 virt_context() { local v; v="$(systemd-detect-virt 2>/dev/null)"; echo "${v:-none}"; }  # none|kvm|lxc|...
 is_vm()        { [[ "$(virt_context)" != none ]]; }

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram/uutils-ls (default ON), docker, herdr/ollama (opt-in), dictation/ocr/tts.
+# Components: oom-zram/uutils-ls (default ON), docker, herdr/ollama/whisper (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -270,6 +270,53 @@ if [[ "$OLLAMA_WANT" == yes ]]; then
   fi
 else
   ok "ollama: opt-in, currently '$OLLAMA_WANT' (flip component_ollama=yes to enable)"
+fi
+
+# ------------------------------------------------------------- whisper
+# Speech-to-text for the audio archive (yda downloads → searchable text).
+# faster-whisper via the whisper-ctranslate2 CLI: on NVIDIA it beats
+# whisper.cpp (~12x vs ~8x realtime, same weights); CUDA runtime comes as pip
+# wheels inside the pipx venv — no system CUDA toolkit. Opt-in: the model is
+# the real cost (~3 GB). .configs ships the `transcribe`/`ydat` glue.
+WHISPER_WANT="$(conf_get component_whisper no)"
+if [[ "$WHISPER_WANT" == yes ]]; then
+  section "whisper ($MODE) — components/whisper.md"
+  WHISPER_VENV="$HOME/.local/share/pipx/venvs/whisper-ctranslate2"
+  if command -v whisper-ctranslate2 >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/whisper-ctranslate2" ]]; then
+    ok "whisper-ctranslate2 installed"
+  else
+    warn "whisper-ctranslate2 missing"
+    do_or_say pipx install whisper-ctranslate2 || miss "whisper: pipx install whisper-ctranslate2"
+  fi
+  # CUDA runtime as venv-local pip wheels (cuBLAS + cuDNN 9); the .configs
+  # `transcribe` wrapper exports LD_LIBRARY_PATH into these — CTranslate2
+  # dlopens them, nothing system-wide changes.
+  if nvidia_wanted; then
+    if [[ -x "$WHISPER_VENV/bin/python" ]] \
+       && "$WHISPER_VENV/bin/python" -c 'import nvidia.cublas.lib, nvidia.cudnn.lib' 2>/dev/null; then
+      ok "whisper CUDA wheels present (cuBLAS/cuDNN in venv)"
+    else
+      warn "whisper CUDA wheels missing (GPU run would fail; CPU still works)"
+      do_or_say pipx inject whisper-ctranslate2 nvidia-cublas-cu12 'nvidia-cudnn-cu12==9.*' \
+        || miss "whisper: pipx inject nvidia-cublas-cu12 nvidia-cudnn-cu12"
+    fi
+  fi
+  # Pre-warm the model cache so first real use isn't a surprise ~3 GB pull.
+  # local_files_only=True is an offline cache probe; it also resolves the
+  # distil naming (distil-large-v3 -> Systran/faster-distil-whisper-…), so
+  # don't guess the hub dir by hand. Keep whisper_model in sync with the
+  # .configs transcribe wrapper's default.
+  WHISPER_MODEL="$(conf_get whisper_model large-v3)"
+  if [[ -x "$WHISPER_VENV/bin/python" ]] \
+     && "$WHISPER_VENV/bin/python" -c "from faster_whisper import download_model; download_model('$WHISPER_MODEL', local_files_only=True)" 2>/dev/null; then
+    ok "whisper model $WHISPER_MODEL cached"
+  else
+    warn "whisper model $WHISPER_MODEL not cached (~3 GB download)"
+    do_or_say "$WHISPER_VENV/bin/python" -c "from faster_whisper import download_model; download_model('$WHISPER_MODEL')" \
+      || miss "whisper: download model $WHISPER_MODEL"
+  fi
+else
+  ok "whisper: opt-in, currently '$WHISPER_WANT' (flip component_whisper=yes to enable)"
 fi
 
 # ------------------------------------------------------------- mtga (wine)
