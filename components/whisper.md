@@ -39,8 +39,9 @@ replacement for the openai `whisper` command.
   `whisper_model=distil-large-v3` in the host conf for ~6× faster
   English-only.
 - Usage glue lives in `.configs` (two-repo rule): `bin/transcribe` (sets
-  `LD_LIBRARY_PATH` to the venv's nvidia wheel dirs, writes .txt/.srt/… next
-  to each audio file) and the `ydat` alias (`yda` + transcribe in one step).
+  `LD_LIBRARY_PATH` to the venv's nvidia wheel dirs, writes one .srt next to
+  each file — greppable text + timestamps) and the `ydat`/`ydv` functions
+  (download audio/video + transcribe in one step).
 
 ## Notes
 
