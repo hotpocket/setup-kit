@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram (default ON), docker, herdr/ollama (opt-in), dictation/ocr/tts.
+# Components: oom-zram/uutils-ls (default ON), docker, herdr/ollama (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -190,6 +190,58 @@ if [[ "$HERDR_WANT" == yes ]]; then
   fi
 else
   ok "herdr: opt-in, currently '$HERDR_WANT' (flip component_herdr=yes to enable)"
+fi
+
+# ---------------------------------------------------------- uutils-ls
+# TEMPORARY distro-bug shim (components/uutils-ls.md): resolute's uutils 0.8.0
+# `ls --group-directories-first` breaks -t sorting (uutils #12393; fixed in
+# 0.9.0). Shadow ONLY ls: pinned 0.9.0 multicall parked OFF-PATH at
+# /usr/local/lib/uutils/coreutils, /usr/local/bin/ls symlinked to it.
+# Self-removes once dpkg's rust-coreutils >= the pinned version.
+UUTILS_VER=0.9.0
+UUTILS_SHA256=7fffbe9c835054f1143a5f2a68ef478efb427417163e0410c26c901da15647e5
+UUTILS_TGZ="coreutils-${UUTILS_VER}-x86_64-unknown-linux-musl.tar.gz"
+UUTILS_URL="https://github.com/uutils/coreutils/releases/download/${UUTILS_VER}/${UUTILS_TGZ}"
+UUTILS_BIN=/usr/local/lib/uutils/coreutils
+UUTILS_LINK=/usr/local/bin/ls
+if [[ "$(conf_get component_uutils_ls yes)" == yes ]]; then
+  section "uutils-ls ($MODE) — components/uutils-ls.md"
+  PKG_VER="$(dpkg-query -Wf '${Version}' rust-coreutils 2>/dev/null | cut -d- -f1)"
+  if [[ "$(uname -m)" != x86_64 ]]; then
+    warn "uutils-ls: shim is pinned to x86_64 only — skipping"
+  elif dpkg --compare-versions "${PKG_VER:-0}" ge "$UUTILS_VER"; then
+    # distro caught up — the shim is obsolete; drop it
+    if [[ -e "$UUTILS_LINK" || -e "$UUTILS_BIN" ]]; then
+      warn "uutils-ls: distro rust-coreutils ${PKG_VER} >= ${UUTILS_VER} — shim obsolete"
+      do_or_say sudo rm -f "$UUTILS_LINK" "$UUTILS_BIN"
+      (( INSTALL )) && sudo rmdir --ignore-fail-on-non-empty /usr/local/lib/uutils
+    else
+      ok "uutils-ls: distro >= ${UUTILS_VER}, shim not needed (flip component_uutils_ls=no to retire the flag)"
+    fi
+  elif [[ -x "$UUTILS_BIN" && "$(readlink -f "$UUTILS_LINK" 2>/dev/null)" == "$UUTILS_BIN" ]] \
+       && "$UUTILS_BIN" ls --version 2>/dev/null | grep -q "$UUTILS_VER"; then
+    ok "uutils-ls: ls shadowed at ${UUTILS_VER} (distro has ${PKG_VER:-none})"
+  elif (( INSTALL )); then
+    warn "uutils-ls: shadow missing — installing ${UUTILS_VER}"
+    UUTILS_TMP=$(mktemp -d)
+    if curl -fsSL "$UUTILS_URL" -o "$UUTILS_TMP/$UUTILS_TGZ" \
+       && echo "$UUTILS_SHA256  $UUTILS_TMP/$UUTILS_TGZ" | sha256sum -c --quiet - \
+       && tar -xzf "$UUTILS_TMP/$UUTILS_TGZ" -C "$UUTILS_TMP" --strip-components=1 \
+             "${UUTILS_TGZ%.tar.gz}/coreutils"; then
+      do_or_say sudo install -D -m 0755 "$UUTILS_TMP/coreutils" "$UUTILS_BIN"
+      do_or_say sudo ln -sfn "$UUTILS_BIN" "$UUTILS_LINK"
+      "$UUTILS_LINK" --version | grep -q "$UUTILS_VER" \
+        && ok "uutils-ls: /usr/local/bin/ls -> ${UUTILS_VER}" \
+        || miss "uutils-ls: shadow installed but ls --version mismatch"
+    else
+      miss "uutils-ls: download/sha256/extract failed ($UUTILS_URL)"
+    fi
+    rm -rf "$UUTILS_TMP"
+  else
+    warn "uutils-ls: shadow missing (would download ${UUTILS_VER} and shadow /usr/local/bin/ls)"
+  fi
+else
+  ok "uutils-ls: disabled (component_uutils_ls=no)"
 fi
 
 # ------------------------------------------------------------- ollama
