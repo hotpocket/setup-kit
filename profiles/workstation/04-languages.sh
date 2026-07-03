@@ -68,6 +68,18 @@ if [[ "$(conf_get lang_python yes)" == yes ]]; then
       do_or_say pipx install "$tool" || miss "pipx: $tool"
     fi
   done < <(manifest_pkgs "$LANG_M/python.list")
+
+  # deno — yt-dlp's JS runtime (YouTube extraction is deprecated without one;
+  # nsig challenges need it). Single binary; official script into ~/.local/bin
+  # (already on PATH — same dir pipx uses). No snap/apt package exists. The
+  # installer only prompts on a tty, so the pipe keeps it non-interactive.
+  if command -v deno >/dev/null 2>&1; then
+    ok "deno (yt-dlp JS runtime)"
+  else
+    warn "deno missing — yt-dlp YouTube extraction degraded"
+    do_or_say bash -c 'curl -fsSL https://deno.land/install.sh | DENO_INSTALL="$HOME/.local" sh' \
+      || miss "deno: install script"
+  fi
 fi
 
 # ---------------------------------------------------------------- node
