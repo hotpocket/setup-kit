@@ -9,3 +9,4 @@ Most-recent-last index of session recaps for setup-kit.
 | 2026-06-30 | main | `bootstrap.sh list` discoverability subcommand + purpose-first conf descriptions — [[2026-06-30 - bootstrap list subcommand + purpose-first conf descriptions]] |
 | 2026-06-30 | main | TTS GPU-first torch backend: cuDNN-op probe → default/cu118-Pascal/CPU; fixed silent sm_61 death — [[2026-06-30 - TTS GPU-first torch backend (cu118 Pascal fallback)]] |
 | 2026-07-03 | main | Phase 08 installs skills from .configs claude-conduct subtree + links deny-git-push.sh — [[2026-07-03 - claude skills source moved to .configs subtree]] |
+| 2026-07-03 | main | component_whisper (faster-whisper via pipx, srt output, ydat/ydv) + lib.sh grep -q/pipefail GPU-detection fix + deno for yt-dlp — [[2026-07-03 - whisper transcription component + lib.sh pipefail fix]] |
