@@ -83,7 +83,7 @@ cp "$TAR_LIST" "$OUT/included.txt"
 # Capture SSH key fingerprints (NOT the keys — those are in the tarball
 # already if you included .ssh/, but it's worth a manifest for verifying).
 ssh-add -l > "$OUT/ssh-keys-loaded.txt" 2>/dev/null || true
-for k in "$HOME"/.ssh/id_*.pub; do
+for k in "$HOME"/.ssh/id_*.pub "$HOME"/.ssh/github_yub_*.pub; do
   [[ -e "$k" ]] || continue
   ssh-keygen -lf "$k" 2>/dev/null
 done > "$OUT/ssh-pubkey-fingerprints.txt"

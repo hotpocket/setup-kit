@@ -45,14 +45,42 @@ disable_gnome_ssh_agent() {
 }
 disable_gnome_ssh_agent
 
-# Path of a resident FIDO2 (-sk) key recovered from a YubiKey, if one exists —
-# this is the preferred github identity. Prints nothing / returns 1 if none.
-gh_resident_key() {
-  local f
-  for f in "$HOME"/.ssh/id_*_sk_rk*; do
-    [[ -f "$f" && "$f" != *.pub ]] && { printf '%s\n' "$f"; return 0; }
+# Canonical filename per YubiKey serial for the recovered github sk key.
+# Both YubiKeys store the credential under the same application (ssh:github),
+# so ssh-keygen -K derives the SAME filename for either token — recovering
+# straight into ~/.ssh can only ever hold one of the two keys. We recover
+# into a temp dir and rename by serial instead. Mirrors the SK_KEY inventory
+# in .configs/bin/yubikey-audit (can't source it: this preamble runs before
+# .configs is cloned) — update both when keys rotate.
+declare -A SK_NAME=(
+  [37183681]="github_yub_primary"
+  [37183574]="github_yub_backup"
+)
+
+# Paths of all resident FIDO2 (-sk) github keys present locally, one per
+# line — the preferred github identities. Canonical names first, legacy
+# ssh-keygen -K default names as fallback. Returns 1 if none.
+gh_resident_keys() {
+  local f rc=1
+  for f in "$HOME"/.ssh/github_yub_* "$HOME"/.ssh/id_*_sk_rk*; do
+    [[ -f "$f" && "$f" != *.pub ]] && { printf '%s\n' "$f"; rc=0; }
   done
-  return 1
+  return $rc
+}
+
+# Idempotently pin every resident key into an existing github stanza.
+pin_resident_keys() {
+  local f pinned=0
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    grep -qF "IdentityFile $f" "$CFG" 2>/dev/null && continue
+    sed -i "/^Host github\.com$/a\\  IdentityFile $f" "$CFG"
+    pinned=1
+  done < <(gh_resident_keys || true)
+  if (( pinned )) && ! grep -qF "IdentitiesOnly yes" "$CFG"; then
+    sed -i "/^Host github\.com$/a\\  IdentitiesOnly yes\n  IdentityAgent none" "$CFG"
+  fi
+  return $(( ! pinned ))
 }
 
 # ---- 1. host keys: GitHub's published values, for both the real host and
@@ -88,7 +116,7 @@ ok "known_hosts: GitHub host keys"
 # key loaded in an agent still works). This reconciles every run — it no longer
 # matters that .configs may already be cloned.
 CFG="$HOME/.ssh/config"
-GH_SK="$(gh_resident_key || true)"
+GH_SKS="$(gh_resident_keys || true)"
 if ! grep -qE '^[[:space:]]*Host[[:space:]]+github\.com' "$CFG" 2>/dev/null; then
   if (( INSTALL )); then
     { echo
@@ -96,26 +124,28 @@ if ! grep -qE '^[[:space:]]*Host[[:space:]]+github\.com' "$CFG" 2>/dev/null; the
       echo "  HostName ssh.github.com"
       echo "  Port 443"
       echo "  PreferredAuthentications publickey"
-      if [[ -n "$GH_SK" ]]; then
+      if [[ -n "$GH_SKS" ]]; then
         echo "  IdentitiesOnly yes"
         echo "  IdentityAgent none"
-        echo "  IdentityFile $GH_SK"
+        while IFS= read -r f; do echo "  IdentityFile $f"; done <<<"$GH_SKS"
       fi
     } >> "$CFG"
     chmod 600 "$CFG"
-    log "wrote github.com stanza${GH_SK:+ (pinned $GH_SK)}"
+    log "wrote github.com stanza${GH_SKS:+ (pinned resident keys)}"
   else
     warn "~/.ssh/config: no github.com stanza"
   fi
 else
   ok "ssh config: github.com stanza present"
-  # idempotently pin a resident key into an existing stanza if absent
-  if [[ -n "$GH_SK" ]] && ! grep -qF "IdentityFile $GH_SK" "$CFG"; then
+  # idempotently pin any unpinned resident keys into the existing stanza
+  if [[ -n "$GH_SKS" ]]; then
     if (( INSTALL )); then
-      sed -i "/^Host github\.com$/a\\  IdentitiesOnly yes\n  IdentityAgent none\n  IdentityFile $GH_SK" "$CFG"
-      log "pinned resident key in existing github stanza ($GH_SK)"
+      pin_resident_keys && log "pinned resident key(s) in existing github stanza"
     else
-      warn "github stanza present but resident key $GH_SK not pinned"
+      while IFS= read -r f; do
+        grep -qF "IdentityFile $f" "$CFG" 2>/dev/null \
+          || warn "github stanza present but resident key $f not pinned"
+      done <<<"$GH_SKS"
     fi
   fi
 fi
@@ -136,18 +166,38 @@ fi
 log "cloning .configs (touch the YubiKey if it blinks)..."
 if try_clone; then ok ".configs cloned"; exit 0; fi
 
-# clone failed → recover resident keys from a plugged security key
+# clone failed → recover resident keys from a plugged security key.
+# Recover into a temp dir, then rename the github key to its serial's
+# canonical name (see SK_NAME) — never overwrites an existing key, so the
+# other YubiKey's stub survives when you re-run with the second token.
 if lsusb 2>/dev/null | grep -qiE 'yubico|fido'; then
   warn "clone failed — recovering resident ssh keys from YubiKey (PIN, then touch)"
-  (cd "$HOME/.ssh" && ssh-keygen -K) || warn "ssh-keygen -K failed (keys not resident on this YubiKey?)"
+  serial="$(command -v ykman >/dev/null 2>&1 && ykman list --serials 2>/dev/null | head -1 || true)"
+  name="${SK_NAME[${serial:-none}]:-}"
+  tmp="$(mktemp -d "$HOME/.ssh/recover.XXXXXX")"
   found=0
-  for f in "$HOME"/.ssh/id_*_sk_rk*; do
-    [[ -f "$f" && "$f" != *.pub ]] || continue
-    chmod 600 "$f"; found=1
-    grep -qF "IdentityFile $f" "$HOME/.ssh/config" 2>/dev/null \
-      || sed -i "/^Host github\.com$/a\\  IdentitiesOnly yes\n  IdentityAgent none\n  IdentityFile $f" "$HOME/.ssh/config"
-  done
+  if (cd "$tmp" && ssh-keygen -K); then
+    for f in "$tmp"/id_*_sk_rk*; do
+      [[ -f "$f" && "$f" != *.pub ]] || continue
+      if [[ -n "$name" && "$(basename "$f")" == id_*_sk_rk_github ]]; then
+        dst="$HOME/.ssh/$name"
+      else
+        dst="$HOME/.ssh/$(basename "$f")"
+        [[ -z "$name" ]] && warn "serial ${serial:-unknown} not in SK_NAME — keeping default filename"
+      fi
+      if [[ -e "$dst" ]]; then
+        warn "$(basename "$dst") already exists — keeping it (not overwriting)"
+      else
+        mv "$f" "$dst"; [[ -f "$f.pub" ]] && mv "$f.pub" "$dst.pub"
+        chmod 600 "$dst"; found=1
+      fi
+    done
+  else
+    warn "ssh-keygen -K failed (keys not resident on this YubiKey?)"
+  fi
+  rm -rf "$tmp"
   if (( found )); then
+    pin_resident_keys || true
     log "recovered key(s) pinned in ssh config — retrying clone (touch again)"
     try_clone && { ok ".configs cloned (recovered resident key)"; exit 0; }
   fi
