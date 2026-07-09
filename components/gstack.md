@@ -46,6 +46,20 @@ hatch, not the fix.
 
 - Installed by `profiles/workstation/08-claude-skills.sh` when listed in
   `claude_skills` and `component_claude_skills=yes`.
-- The phase clones `~/git/gstack` from upstream and symlinks the skill. It does
-  NOT build the daemon — only flags the missing `bun`.
-- Idempotent: re-runs are no-ops once the repo is cloned and the link exists.
+- The phase clones `~/git/gstack` from upstream, symlinks the skill, and builds
+  the browse daemon (`bun install && bun run build`) when `bun` is present —
+  rebuilding when `browse/dist/.version` (the built-from HEAD sha) no longer
+  matches the repo HEAD. Without `bun` it flags the gap in `missing.log`.
+- Idempotent: re-runs are no-ops once the repo is cloned, the link exists, and
+  the built daemon matches HEAD.
+
+## Browser provisioning gotchas (from the field)
+
+- Playwright refuses `playwright install chromium` on Ubuntu releases it does
+  not recognize (seen on 26.04: "does not support chromium on ubuntu26.04-x64").
+  Workarounds: `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 playwright
+  install chromium`, or point gstack at system Chrome with
+  `GSTACK_CHROMIUM_PATH=/opt/google/chrome/chrome` (needs the hotpocket/gstack
+  patch honoring it in headless mode — branch `fix/headless-custom-chromium`).
+- On recognized releases (24.04) the Playwright cache at `~/.cache/ms-playwright`
+  is all the daemon needs; no system Chrome required.

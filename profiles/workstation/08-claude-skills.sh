@@ -157,12 +157,35 @@ fi
 
 # gstack's browse daemon is built with bun; the skill is useless without it.
 # bun's official installer lands in ~/.bun/bin (the .configs bashrc adds it).
+# Build it (and rebuild on repo updates: dist/.version records the HEAD sha the
+# binaries were built from). Caught in the wild 2026-07-09: gstack cloned +
+# linked but dist/browse never built → every downstream consumer (wbt chapter
+# fetch) crashed with FileNotFoundError.
 if [[ " $SKILLS " == *" gstack "* ]]; then
+  gsdir="$(skill_repo gstack)"
   if command -v bun >/dev/null 2>&1 || [[ -x "$HOME/.bun/bin/bun" ]]; then
     ok "bun present (gstack browse daemon builds)"
   else
     warn "bun missing — gstack's browse daemon needs it to build"
     do_or_say bash -c 'curl -fsSL https://bun.sh/install | bash' || miss "claude-skills: bun install failed"
+  fi
+  # A bun installed just now is not on this shell's PATH yet.
+  [[ -x "$HOME/.bun/bin/bun" ]] && export PATH="$HOME/.bun/bin:$PATH"
+  if ! command -v bun >/dev/null 2>&1; then
+    miss "claude-skills: gstack linked but 'bun' missing — build the browse daemon"
+  elif [[ -d "$gsdir/.git" ]]; then
+    built_sha="$(cat "$gsdir/browse/dist/.version" 2>/dev/null || true)"
+    head_sha="$(git -C "$gsdir" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -x "$gsdir/browse/dist/browse" && -n "$head_sha" && "$built_sha" == "$head_sha" ]]; then
+      ok "gstack browse daemon built (${head_sha:0:8})"
+    else
+      warn "gstack browse daemon missing or stale — building"
+      if do_or_say bash -c "cd '$gsdir' && bun install && bun run build"; then
+        ok "gstack browse daemon built"
+      else
+        miss "claude-skills: gstack browse build failed — cd $gsdir && bun install && bun run build"
+      fi
+    fi
   fi
 fi
 
