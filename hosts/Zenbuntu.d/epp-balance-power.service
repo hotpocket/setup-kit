@@ -1,0 +1,10 @@
+[Unit]
+Description=Sane thermal defaults: EPP balance_performance + RAPL PL1 22W / PL2 35W
+After=power-profiles-daemon.service multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for p in /sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference; do echo balance_performance > "$p"; done; echo 22000000 > /sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw; echo 35000000 > /sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw'
+
+[Install]
+WantedBy=multi-user.target
