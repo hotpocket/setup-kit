@@ -124,6 +124,11 @@ if ! grep -qE '^[[:space:]]*Host[[:space:]]+github\.com' "$CFG" 2>/dev/null; the
       echo "  HostName ssh.github.com"
       echo "  Port 443"
       echo "  PreferredAuthentications publickey"
+      echo "  # Multiplex: one YubiKey touch per burst of git commands; master"
+      echo "  # connection closes after 10s idle."
+      echo "  ControlMaster auto"
+      echo "  ControlPath ~/.ssh/cm-%C"
+      echo "  ControlPersist 10"
       if [[ -n "$GH_SKS" ]]; then
         echo "  IdentitiesOnly yes"
         echo "  IdentityAgent none"
@@ -147,6 +152,26 @@ else
           || warn "github stanza present but resident key $f not pinned"
       done <<<"$GH_SKS"
     fi
+  fi
+  # idempotently add connection multiplexing (one YubiKey touch per burst of
+  # git commands instead of one per connection)
+  if awk '/^[[:space:]]*Host[[:space:]]+github\.com/{g=1; next}
+          /^[[:space:]]*Host[[:space:]]/{g=0}
+          g && /ControlMaster/{f=1} END{exit !f}' "$CFG"; then
+    ok "ssh config: github multiplexing present"
+  elif (( INSTALL )); then
+    awk '{print}
+         /^[[:space:]]*Host[[:space:]]+github\.com/ && !done {
+           print "  # Multiplex: one YubiKey touch per burst of git commands; master"
+           print "  # connection closes after 10s idle."
+           print "  ControlMaster auto"
+           print "  ControlPath ~/.ssh/cm-%C"
+           print "  ControlPersist 10"
+           done=1
+         }' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG" && chmod 600 "$CFG"
+    log "added ssh multiplexing to existing github stanza"
+  else
+    warn "github stanza present but no ControlMaster multiplexing"
   fi
 fi
 
