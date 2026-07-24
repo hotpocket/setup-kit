@@ -31,6 +31,18 @@ done
 if nvidia_wanted; then
   mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/conditional/nvidia.list")
   ok "conditional nvidia: supported GPU detected — included"
+  # A working driver of ANY version satisfies the driver requirement. The
+  # manifest's exact pin is only for boxes with NO driver: installing a
+  # different series over a live one makes apt REMOVE the running stack —
+  # userspace swaps immediately but the old kernel module stays loaded, so
+  # GL/NVML die until reboot (caught 2026-07-24: pin 580 vs running 595
+  # removed 17 packages mid-session and broke OpenGL for every app).
+  PIN_DRV="$(printf '%s\n' "${WANT[@]}" | grep -m1 -E '^nvidia-driver-[0-9]+' || true)"
+  CUR_DRV="$(dpkg -l 'nvidia-driver-*' 2>/dev/null | awk '/^ii  nvidia-driver-[0-9]/{print $2; exit}')"
+  if [[ -n "$PIN_DRV" && -n "$CUR_DRV" && "$PIN_DRV" != "$CUR_DRV" ]]; then
+    mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv "$PIN_DRV")
+    ok "nvidia: $CUR_DRV already active — working driver satisfies manifest ($PIN_DRV not forced)"
+  fi
 elif has_nvidia && [[ "$(conf_get cond_nvidia auto)" != no ]]; then
   warn "conditional nvidia: GPU present but unsupported by current driver (legacy card) — skipped, nouveau it is"
 else
@@ -191,8 +203,20 @@ APT_INSTALL=(sudo DEBIAN_FRONTEND=noninteractive apt-get
 for attempt in 1 2 3; do
   (( ${#MISSING[@]} )) || break
   log "apt install attempt $attempt (${#MISSING[@]} packages)"
-  sudo apt-get install -s --no-install-recommends "${MISSING[@]}" 2>&1 \
-    | grep -E '^(After this|[0-9]+ upgraded)' || true
+  # HARD GUARD: an install phase must never remove packages. If the resolver
+  # wants removals (a manifest pin conflicting with something installed, like
+  # a different nvidia driver series), abort THIS transaction loudly — the box
+  # keeps working, the human decides. Deliberate removals (tealdeer above)
+  # are explicit `remove` commands, never resolver side effects.
+  SIM_OUT="$(sudo apt-get install -s --no-install-recommends "${MISSING[@]}" 2>&1)" || true
+  grep -E '^(After this|[0-9]+ upgraded)' <<<"$SIM_OUT" || true
+  mapfile -t REMV < <(awk '/^Remv /{print $2}' <<<"$SIM_OUT")
+  if (( ${#REMV[@]} )); then
+    fail "apt transaction would REMOVE ${#REMV[@]} installed packages — NOT applying:"
+    printf '          %s\n' "${REMV[@]}" | head -20
+    miss "apt: refused transaction (would remove: ${REMV[*]:0:6} ...) — resolve by hand or skip_pkgs the trigger"
+    exit 1
+  fi
   "${APT_INSTALL[@]}" "${MISSING[@]}" \
     2>&1 | tee "$LOG_DIR/apt-install-out.tmp" | tail -3
   mapfile -t BAD < <({ grep -oP 'Unable to locate package \K\S+' "$LOG_DIR/apt-install-out.tmp"
