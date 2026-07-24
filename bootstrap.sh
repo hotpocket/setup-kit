@@ -4,6 +4,7 @@
 #   ./bootstrap.sh survey                  # read-only hardware report (live-CD friendly)
 #   ./bootstrap.sh workstation [check]     # doctor: report what's missing, change nothing
 #   ./bootstrap.sh workstation install     # provision (prompts once, records answers)
+#   ./bootstrap.sh workstation check -v    # verbose: per-line [ OK ] (also verbose=yes in host conf)
 #   ./bootstrap.sh proxmox-host install    # IOMMU/VFIO/ZFS/nested-virt + VM creation
 #   ./bootstrap.sh list                    # every group/component flag + its current value
 #
@@ -83,6 +84,9 @@ case "$cmd" in
   workstation)
     [[ "$mode" == doctor ]] && mode=check   # alias — same thing
     case "$mode" in check|install) ;; *) usage ;; esac
+    # -v (or verbose=yes in host conf): per-line [ OK ] output instead of the
+    # quiet per-section rollup. Detail always lands in the run log either way.
+    [[ "${3:-}" == "-v" || "$(conf_get verbose no)" == yes ]] && export KIT_VERBOSE=1
     # first run: create the host answer file from the template
     if [[ ! -f "$HOST_CONF" ]]; then
       cp "$KIT_DIR/hosts/example.conf" "$HOST_CONF"
@@ -129,6 +133,7 @@ case "$cmd" in
     rc=0; settled=0
     for pass in 1 2 3; do
       RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S)-p$pass.log"
+      export KIT_RUN_LOG="$RUN_LOG"   # quiet mode routes [ OK ] detail here
       for phase in "$KIT_DIR/profiles/workstation/"[0-9][0-9]*-*.sh; do
         bash "$phase" "$mode" 2>&1 | tee -a "$RUN_LOG"
         [[ "${PIPESTATUS[0]}" -eq 0 ]] || rc=1

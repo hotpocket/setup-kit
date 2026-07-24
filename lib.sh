@@ -20,11 +20,43 @@ else
   C_OK=''; C_WARN=''; C_FAIL=''; C_HDR=''; C_DIM=''; C_RST=''
 fi
 DOCTOR_WARN=0; DOCTOR_FAIL=0
-section() { printf '\n%s%s%s\n' "$C_HDR" "$*" "$C_RST"; }
-ok()      { printf '  %s[ OK ]%s  %s\n' "$C_OK"   "$C_RST" "$*"; }
-warn()    { printf '  %s[WARN]%s  %s\n' "$C_WARN" "$C_RST" "$*"; DOCTOR_WARN=$((DOCTOR_WARN+1)); }
-fail()    { printf '  %s[FAIL]%s  %s\n' "$C_FAIL" "$C_RST" "$*"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); }
-hint()    { printf '          %s↳ %s%s\n' "$C_DIM" "$*" "$C_RST"; }
+
+# Quiet mode: per-line [ OK ] confirmations are noise on the terminal — signal
+# is drift and actions. Under bootstrap (KIT_RUN_LOG set) each ok() goes to the
+# run log only (so summary counts and the audit trail are unchanged) and the
+# terminal gets one dim "N ok" rollup per section. warn/fail/hints/actions
+# always print. KIT_VERBOSE=1 (bootstrap -v, or verbose=yes in host conf)
+# restores per-line output; standalone phase runs are always verbose.
+KIT_QUIET=0
+[[ -n "${KIT_RUN_LOG:-}" && "${KIT_VERBOSE:-0}" != 1 ]] && KIT_QUIET=1
+SECTION_OK=0
+_flush_ok() {
+  (( KIT_QUIET && SECTION_OK )) && printf '  %s%d ok%s\n' "$C_DIM" "$SECTION_OK" "$C_RST"
+  SECTION_OK=0
+}
+trap _flush_ok EXIT
+
+section() { _flush_ok; printf '\n%s%s%s\n' "$C_HDR" "$*" "$C_RST"; }
+ok() {
+  if (( KIT_QUIET )); then
+    printf '  [ OK ]  %s\n' "$*" >> "$KIT_RUN_LOG"
+    SECTION_OK=$((SECTION_OK+1)); LAST_OK=1
+  else
+    printf '  %s[ OK ]%s  %s\n' "$C_OK" "$C_RST" "$*"
+  fi
+}
+warn()    { printf '  %s[WARN]%s  %s\n' "$C_WARN" "$C_RST" "$*"; DOCTOR_WARN=$((DOCTOR_WARN+1)); LAST_OK=0; }
+fail()    { printf '  %s[FAIL]%s  %s\n' "$C_FAIL" "$C_RST" "$*"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); LAST_OK=0; }
+# a hint annotates the line above it — if that was a quiet-suppressed ok(),
+# the hint follows it into the log instead of dangling on the terminal
+LAST_OK=0
+hint() {
+  if (( KIT_QUIET )) && (( LAST_OK )); then
+    printf '          ↳ %s\n' "$*" >> "$KIT_RUN_LOG"
+  else
+    printf '          %s↳ %s%s\n' "$C_DIM" "$*" "$C_RST"
+  fi
+}
 
 log() {
   local msg="[$(date -Iseconds)] $*"
