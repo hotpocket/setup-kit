@@ -123,8 +123,8 @@ if (( ${#MISSING[@]} == 0 )); then
 fi
 warn "${#MISSING[@]} of ${#WANT[@]} wanted packages not installed"
 if (( ! INSTALL )); then
-  printf '  %s\n' "${MISSING[@]}" | head -40
-  (( ${#MISSING[@]} > 40 )) && echo "  ... and $(( ${#MISSING[@]} - 40 )) more"
+  { printf '  %s\n' "${MISSING[@]}" | head -40
+    (( ${#MISSING[@]} > 40 )) && echo "  ... and $(( ${#MISSING[@]} - 40 )) more"; } | extout
   exit 0
 fi
 

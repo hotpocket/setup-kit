@@ -21,12 +21,24 @@ for a in "$@"; do
 done
 VLOG="logs/verify-last.log"
 mkdir -p logs; : > "$VLOG"
+# Quiet mode is a pytest-style stream — '.' per pass, 'x' per fail — with the
+# FAIL detail replayed as a report before the summary. fnote() attaches
+# indented context lines to the preceding failv.
+declare -a FAILS=()
 pass() {
   printf 'PASS  %s\n' "$*" >> "$VLOG"
-  (( VERBOSE )) && printf 'PASS  %s\n' "$*"
+  if (( VERBOSE )); then printf 'PASS  %s\n' "$*"; else printf '.'; fi
   PASS=$((PASS+1))
 }
-failv() { printf 'FAIL  %s\n' "$*"; printf 'FAIL  %s\n' "$*" >> "$VLOG"; FAILN=$((FAILN+1)); }
+failv() {
+  printf 'FAIL  %s\n' "$*" >> "$VLOG"
+  if (( VERBOSE )); then printf 'FAIL  %s\n' "$*"; else printf 'x'; FAILS+=("FAIL  $*"); fi
+  FAILN=$((FAILN+1))
+}
+fnote() {
+  printf '%s\n' "$*" >> "$VLOG"
+  if (( VERBOSE )); then printf '%s\n' "$*"; else FAILS+=("$*"); fi
+}
 
 # -- tiny, independent conf reader ------------------------------------------
 # trim edges only — list values (skip_pkgs) are space-separated inside
@@ -333,10 +345,11 @@ fi
 # 7a. failed units
 nf=$(systemctl --failed --no-legend --plain 2>/dev/null | wc -l)
 (( nf == 0 )) && pass "calm: no failed systemd units" \
-  || { failv "calm: $nf failed unit(s):"; systemctl --failed --no-legend --plain | sed 's/^/        /'
+  || { failv "calm: $nf failed unit(s):"
+       fnote "$(systemctl --failed --no-legend --plain | sed 's/^/        /')"
        systemctl --failed --no-legend --plain | grep -q not-found \
-         && echo "        ('not-found' = unit was removed mid-failure; a tombstone —" \
-         && echo "         sudo systemctl reset-failed clears it)"; }
+         && fnote "        ('not-found' = unit was removed mid-failure; a tombstone —" \
+         && fnote "         sudo systemctl reset-failed clears it)"; }
 
 # 7b. flapping units — restart counter is the loop detector ("activating"
 # units never show in --failed while systemd is busy restarting them)
@@ -360,8 +373,8 @@ if (( jw <= JWMAX )); then
   pass "calm: journal quiet ($jw warnings+ in 5 min, max $JWMAX)"
 else
   failv "calm: journal noisy ($jw warnings+ in 5 min, max $JWMAX) — top repeats:"
-  journalctl -p warning --since "-5 min" -o cat 2>/dev/null \
-    | sort | uniq -c | sort -rn | head -3 | sed 's/^/        /'
+  fnote "$(journalctl -p warning --since "-5 min" -o cat 2>/dev/null \
+    | sort | uniq -c | sort -rn | head -3 | sed 's/^/        /')"
 fi
 
 # 7e. coredumps in the last hour
@@ -374,6 +387,7 @@ fi
 # 7f/7g. load + churn — only with --settle N (needs a quiet sample window;
 # pointless straight after an install while apt/snapd are still digesting)
 if (( SETTLE > 0 )); then
+  (( VERBOSE )) || echo
   echo "    (settling ${SETTLE}s before load/churn sampling...)"
   sleep "$SETTLE"
   CORES=$(nproc)
@@ -382,7 +396,7 @@ if (( SETTLE > 0 )); then
   (( l1 / CORES <= LMAX )) \
     && pass "calm: load $(awk '{print $1}' /proc/loadavg) on $CORES cores" \
     || { failv "calm: load high for idle: $(awk '{print $1}' /proc/loadavg) on $CORES cores — top consumers:"
-         ps aux --sort=-%cpu | awk 'NR>1&&NR<6{printf "        %s%% %s\n",$3,$11}'; }
+         fnote "$(ps aux --sort=-%cpu | awk 'NR>1&&NR<6{printf "        %s%% %s\n",$3,$11}')"; }
   # fork churn: kernel total-process counter, 5s apart. A respawn loop
   # (modprobe every second) shows here even when each child dies instantly.
   f0=$(awk '/^processes/{print $2}' /proc/stat); sleep 5
@@ -393,5 +407,9 @@ if (( SETTLE > 0 )); then
     || failv "calm: high fork churn ${rate}/s (max $FMAX) — something is respawning"
 fi
 
+if (( ! VERBOSE )); then
+  echo
+  (( ${#FAILS[@]} )) && printf '%s\n' "${FAILS[@]}"
+fi
 echo "=== verify done: $PASS pass, $FAILN fail — detail: logs/verify-last.log ==="
 exit $(( FAILN > 0 ))

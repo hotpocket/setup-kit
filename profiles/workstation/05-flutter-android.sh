@@ -105,5 +105,5 @@ fi
 
 if [[ -x "$FLUTTER_DIR/bin/flutter" ]] && (( ! INSTALL )); then
   section "flutter doctor (informational)"
-  "$FLUTTER_DIR/bin/flutter" doctor 2>/dev/null | sed 's/^/  /' || true
+  "$FLUTTER_DIR/bin/flutter" doctor 2>/dev/null | sed 's/^/  /' | extout || true
 fi

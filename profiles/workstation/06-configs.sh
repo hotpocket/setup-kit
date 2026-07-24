@@ -54,10 +54,10 @@ fi
 if [[ -x "$DEST/setup.sh" ]]; then
   if (( INSTALL )) && [[ "$(conf_get configs_run_setup yes)" == yes ]]; then
     log "running .configs/setup.sh install..."
-    (cd "$DEST" && ./setup.sh install) 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
+    (cd "$DEST" && ./setup.sh install) 2>&1 | extout
   else
     log ".configs doctor:"
-    (cd "$DEST" && ./setup.sh check) || true
+    (cd "$DEST" && ./setup.sh check) 2>&1 | extout || true
   fi
 else
   [[ -d "$DEST" ]] && warn ".configs has no setup.sh (old checkout?)"

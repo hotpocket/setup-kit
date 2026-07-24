@@ -21,45 +21,47 @@ else
 fi
 DOCTOR_WARN=0; DOCTOR_FAIL=0
 
-# Quiet mode: per-line [ OK ] confirmations are noise on the terminal — signal
-# is drift and actions. Under bootstrap (KIT_RUN_LOG set) each ok() goes to the
-# run log only (so summary counts and the audit trail are unchanged) and the
-# terminal gets one dim "N ok" rollup per section. warn/fail/hints/actions
-# always print. KIT_VERBOSE=1 (bootstrap -v, or verbose=yes in host conf)
-# restores per-line output; standalone phase runs are always verbose.
+# Quiet mode (under bootstrap: KIT_RUN_LOG set, KIT_VERBOSE unset): pytest-style
+# progress marks — '.' ok, '!' warn, 'x' fail — written straight to the tty so
+# the tee'd run log stays clean. Full detail lines go to the run log, and the
+# bootstrap summary replays every unique WARN/FAIL at the end (the report).
+# Actions (log/do_or_say) still print inline on their own lines, breaking the
+# mark stream. KIT_VERBOSE=1 (bootstrap -v, or verbose=yes in host conf) and
+# standalone phase runs: full per-line output, no marks.
 KIT_QUIET=0
 [[ -n "${KIT_RUN_LOG:-}" && "${KIT_VERBOSE:-0}" != 1 ]] && KIT_QUIET=1
-SECTION_OK=0
-_flush_ok() {
-  (( KIT_QUIET && SECTION_OK )) && printf '  %s%d ok%s\n' "$C_DIM" "$SECTION_OK" "$C_RST"
-  SECTION_OK=0
-}
-trap _flush_ok EXIT
+DOTS=0
+_mark()       { { printf '%s' "$1" > /dev/tty; } 2>/dev/null || true; DOTS=1; }
+_break_dots() { (( DOTS )) && { { printf '\n' > /dev/tty; } 2>/dev/null || true; }; DOTS=0; }
+_rlog()       { printf '%s\n' "$*" >> "$KIT_RUN_LOG"; }
+trap _break_dots EXIT
 
-section() { _flush_ok; printf '\n%s%s%s\n' "$C_HDR" "$*" "$C_RST"; }
-ok() {
-  if (( KIT_QUIET )); then
-    printf '  [ OK ]  %s\n' "$*" >> "$KIT_RUN_LOG"
-    SECTION_OK=$((SECTION_OK+1)); LAST_OK=1
-  else
-    printf '  %s[ OK ]%s  %s\n' "$C_OK" "$C_RST" "$*"
-  fi
+section() {
+  if (( KIT_QUIET )); then _rlog ""; _rlog "$*"
+  else printf '\n%s%s%s\n' "$C_HDR" "$*" "$C_RST"; fi
 }
-warn()    { printf '  %s[WARN]%s  %s\n' "$C_WARN" "$C_RST" "$*"; DOCTOR_WARN=$((DOCTOR_WARN+1)); LAST_OK=0; }
-fail()    { printf '  %s[FAIL]%s  %s\n' "$C_FAIL" "$C_RST" "$*"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); LAST_OK=0; }
-# a hint annotates the line above it — if that was a quiet-suppressed ok(),
-# the hint follows it into the log instead of dangling on the terminal
-LAST_OK=0
+ok() {
+  if (( KIT_QUIET )); then _rlog "  [ OK ]  $*"; _mark '.'
+  else printf '  %s[ OK ]%s  %s\n' "$C_OK" "$C_RST" "$*"; fi
+}
+warn() {
+  if (( KIT_QUIET )); then _rlog "  [WARN]  $*"; _mark '!'
+  else printf '  %s[WARN]%s  %s\n' "$C_WARN" "$C_RST" "$*"; fi
+  DOCTOR_WARN=$((DOCTOR_WARN+1))
+}
+fail() {
+  if (( KIT_QUIET )); then _rlog "  [FAIL]  $*"; _mark 'x'
+  else printf '  %s[FAIL]%s  %s\n' "$C_FAIL" "$C_RST" "$*"; fi
+  DOCTOR_FAIL=$((DOCTOR_FAIL+1))
+}
 hint() {
-  if (( KIT_QUIET )) && (( LAST_OK )); then
-    printf '          ↳ %s\n' "$*" >> "$KIT_RUN_LOG"
-  else
-    printf '          %s↳ %s%s\n' "$C_DIM" "$*" "$C_RST"
-  fi
+  if (( KIT_QUIET )); then _rlog "          ↳ $*"
+  else printf '          %s↳ %s%s\n' "$C_DIM" "$*" "$C_RST"; fi
 }
 
 log() {
   local msg="[$(date -Iseconds)] $*"
+  (( KIT_QUIET )) && _break_dots
   echo "$msg"
   echo "$msg" >> "$LOG_DIR/${SCRIPT_NAME:-unknown}.log"
 }
@@ -89,8 +91,17 @@ do_or_say() {
     "$@" 2>&1 | tee -a "$LOG_DIR/${SCRIPT_NAME:-unknown}.log"
     return "${PIPESTATUS[0]}"
   else
+    (( KIT_QUIET )) && _break_dots
     printf '  %s[would]%s %s\n' "$C_DIM" "$C_RST" "$*"
   fi
+}
+
+# External-tool output (flutter doctor, .configs setup.sh, listings): always
+# captured in the script log; shown on the terminal only in verbose mode.
+#   some_tool 2>&1 | extout
+extout() {
+  tee -a "$LOG_DIR/${SCRIPT_NAME:-unknown}.log" \
+    | { if (( KIT_QUIET )); then cat >/dev/null; else cat; fi; }
 }
 
 # ---------------------------------------------------------------- host conf
