@@ -570,9 +570,27 @@ PY
     if gpu_runs_kokoro; then
       rm -f "$TORCH_CPU_MARK"
       ok "tts torch: runs kokoro on the GPU (cuDNN op verified)"
+    elif ! nvidia-smi -L >/dev/null 2>&1; then
+      # NO VERDICT from a broken driver: a failed probe here says nothing about
+      # the GPU. Deciding anyway is how a transient outage got CPU torch pinned
+      # on a healthy RTX 3090 (2026-07-24). Leave torch alone, flag it.
+      warn "tts torch: nvidia driver not operational — GPU probe unusable, leaving torch as-is"
+      miss "tts: GPU probe skipped (driver down) — re-run install once nvidia-smi works"
     elif [[ -f "$TORCH_CPU_MARK" ]] && [[ "$(cat "$TORCH_CPU_MARK")" == "$(gpu_fp)" ]] \
          && torch_is_cpu; then
       ok "tts torch: CPU-only pinned (cu118 already failed on this GPU)"
+    elif torch_is_cpu; then
+      # CPU wheel on a live GPU with no pin verdict (e.g. pinned during a
+      # driver outage): restore the default wheel; next branch/pass judges it.
+      warn "tts torch: CPU wheel but the GPU driver works — restoring default CUDA wheel"
+      do_or_say "$TTS_PY" -m pip install --quiet --force-reinstall torch \
+        || miss "tts: restore default torch wheel"
+      if gpu_runs_kokoro; then
+        rm -f "$TORCH_CPU_MARK"
+        ok "tts torch: runs kokoro on the GPU (default wheel restored)"
+      else
+        warn "tts torch: default wheel restored but probe still failing — next pass tries cu118"
+      fi
     else
       warn "tts torch: default wheel can't drive this GPU — trying Pascal-era cu118 wheel"
       do_or_say "$TTS_PY" -m pip install --quiet \

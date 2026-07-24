@@ -140,7 +140,7 @@ TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
 # init and exits the server silently, so run a real cuDNN op to catch it.
 [[ -x "$TTS_PY" ]] && "$TTS_PY" - <<'PY' 2>/dev/null
 import sys, torch
-if torch.version.cuda is None: sys.exit(0)          # CPU-only build: fine
+if torch.version.cuda is None: sys.exit(2)          # CPU-only build: caller judges
 import torch.nn as nn
 try:
     nn.LSTM(16, 16, 2).cuda()(torch.randn(5, 4, 16, device='cuda')); torch.cuda.synchronize()
@@ -148,8 +148,21 @@ try:
 except Exception:
     sys.exit(1)                                      # CUDA build the GPU can't run: broken
 PY
-[[ $? -eq 0 ]] && pass "tts venv: torch can run kokoro (CPU build or GPU cuDNN op verified)" \
-  || failv "tts venv: CUDA torch can't drive this GPU — kokoro crashes (re-run 07-components for the cu118/CPU fallback)"
+case $? in
+  0) pass "tts venv: torch runs kokoro on the GPU (cuDNN op verified)" ;;
+  2) # CPU build is correct ONLY when there's no working GPU driver, or the kit
+     # deliberately pinned CPU (marker written after cu118 failed on this GPU).
+     # A CPU build on a live GPU means something pinned it by mistake — e.g.
+     # a GPU probe that ran during a driver outage (caught 2026-07-24).
+     if ! nvidia-smi -L >/dev/null 2>&1; then
+       pass "tts venv: torch CPU build (no operational nvidia driver)"
+     elif [[ -f "$HOME/.pyenv/versions/kokoro-tts/.torch-cpu-pinned" ]]; then
+       pass "tts venv: torch CPU build (deliberately pinned — cu118 can't drive this GPU)"
+     else
+       failv "tts venv: torch is CPU-only but the GPU driver works — kokoro should run on the GPU (re-run 07-components)"
+     fi ;;
+  *) failv "tts venv: CUDA torch can't drive this GPU — kokoro crashes (re-run 07-components for the cu118/CPU fallback)" ;;
+esac
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
