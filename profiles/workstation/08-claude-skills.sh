@@ -36,16 +36,34 @@ skill_path() { case "$1" in
   conduct) echo "$HOME/git/.configs/claude-conduct/skills/conduct" ;;
 esac; }
 
+# Everything this phase links out of the repos. A checkout that already has all
+# of it is complete — no pull. Pulling costs a YubiKey PIN + touch per repo
+# (ssh with the resident -sk key), so freshness is bought only when a wanted
+# path is actually missing (the stale-clone failure the pull exists to fix:
+# a pre-vault-digest claude-conduct left ~/bin/vault-digest unlinkable forever).
+VD_SRC="$HOME/git/.configs/claude-conduct/skills/conduct/templates/vault-digest"
+DGP_SRC="$HOME/git/.configs/claude-conduct/skills/conduct/templates/deny-git-push.sh"
+WANT_PATHS=("$VD_SRC" "$DGP_SRC")
+for s in $SKILLS; do
+  p="$(skill_path "$s")"; [[ -n "$p" ]] && WANT_PATHS+=("$p")
+done
+
+repo_stale() {             # dir -> 0 if a wanted path inside dir is absent
+  local dir="$1" p
+  for p in "${WANT_PATHS[@]}"; do
+    [[ "$p" == "$dir" || "$p" == "$dir"/* ]] || continue
+    [[ -e "$p" ]] || return 0
+  done
+  return 1
+}
+
 ensure_repo() {            # dir url  -> 0 if present after, 1 otherwise
   local dir="$1" url="$2" name; name="$(basename "$dir")"
   if [[ -d "$dir/.git" ]]; then
-    # keep it fresh: a stale clone means missing templates/skills (caught in
-    # the wild: a pre-vault-digest claude-conduct left ~/bin/vault-digest
-    # unlinkable forever). ff-only + soft-fail: offline or locally-diverged
-    # just uses what's there.
-    if (( INSTALL )) && [[ -n "$url" ]]; then
+    if (( INSTALL )) && [[ -n "$url" ]] && repo_stale "$dir"; then
+      # ff-only + soft-fail: offline or locally-diverged just uses what's there.
       if git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
-        ok "repo $name present (fresh)"
+        ok "repo $name present (pulled — wanted path was missing)"
       else
         warn "repo $name present but not updated (offline / diverged) — using as-is"
       fi
@@ -149,11 +167,15 @@ fi
 # SessionStart router (claude-orient) for repos you don't own (external vaults
 # under ~/Documents/AgentMemory/<repo>). Owned repos carry their own copy in
 # scripts/ via `/conduct init`. Canonical source is the conduct skill template.
-vd="$HOME/git/.configs/claude-conduct/skills/conduct/templates/vault-digest"
-if [[ -f "$vd" ]]; then
-  do_or_say mkdir -p "$HOME/bin"
-  do_or_say ln -sfnT "$vd" "$HOME/bin/vault-digest"
-  ok "~/bin/vault-digest linked"
+if [[ -f "$VD_SRC" ]]; then
+  if [[ -L "$HOME/bin/vault-digest" \
+        && "$(readlink -f "$HOME/bin/vault-digest")" == "$(readlink -f "$VD_SRC")" ]]; then
+    ok "~/bin/vault-digest linked"
+  else
+    warn "~/bin/vault-digest not linked"
+    do_or_say mkdir -p "$HOME/bin"
+    do_or_say ln -sfnT "$VD_SRC" "$HOME/bin/vault-digest"
+  fi
 else
   warn "vault-digest template missing (claude-conduct subtree not present?)"
 fi
@@ -162,11 +184,16 @@ fi
 # .claude/settings.json (same .configs repo) mechanically denies any agent
 # `git push`. The registration and this script MUST land together — that's
 # why conduct lives inside .configs. Canonical source is the conduct template.
-dgp="$HOME/git/.configs/claude-conduct/skills/conduct/templates/deny-git-push.sh"
-if [[ -f "$dgp" ]]; then
-  do_or_say chmod +x "$dgp"
-  do_or_say ln -sfnT "$dgp" "$HOME/bin/deny-git-push.sh"
-  ok "~/bin/deny-git-push.sh linked"
+if [[ -f "$DGP_SRC" ]]; then
+  [[ -x "$DGP_SRC" ]] || do_or_say chmod +x "$DGP_SRC"
+  if [[ -L "$HOME/bin/deny-git-push.sh" \
+        && "$(readlink -f "$HOME/bin/deny-git-push.sh")" == "$(readlink -f "$DGP_SRC")" ]]; then
+    ok "~/bin/deny-git-push.sh linked"
+  else
+    warn "~/bin/deny-git-push.sh not linked"
+    do_or_say mkdir -p "$HOME/bin"
+    do_or_say ln -sfnT "$DGP_SRC" "$HOME/bin/deny-git-push.sh"
+  fi
 else
   warn "deny-git-push template missing (claude-conduct subtree not present?)"
   miss "claude-skills: settings.json registers deny-git-push.sh but script is absent"

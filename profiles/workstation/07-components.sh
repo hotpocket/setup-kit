@@ -558,19 +558,33 @@ PY
       --index-url https://download.pytorch.org/whl/cpu torch \
       || miss "tts: pin CPU-only torch in kokoro-tts venv"
   }
+  # When even cu118 can't drive the card, the CPU wheel is the deliberate end
+  # state — but a later pass can't tell that from a wrong wheel, so it would
+  # retry cu118 + re-pin CPU forever (breaks convergence). Remember the verdict
+  # in a marker keyed by GPU identity (content, not mtime): same GPU → settled;
+  # different GPU → probe again.
+  TORCH_CPU_MARK="$HOME/.pyenv/versions/kokoro-tts/.torch-cpu-pinned"
+  gpu_fp() { lspci -nn 2>/dev/null | grep -iE 'vga|3d controller' | sort; }
+  torch_is_cpu() { "$TTS_PY" -c 'import torch,sys; sys.exit(1 if torch.version.cuda else 0)' 2>/dev/null; }
   if nvidia_wanted; then
     if gpu_runs_kokoro; then
+      rm -f "$TORCH_CPU_MARK"
       ok "tts torch: runs kokoro on the GPU (cuDNN op verified)"
+    elif [[ -f "$TORCH_CPU_MARK" ]] && [[ "$(cat "$TORCH_CPU_MARK")" == "$(gpu_fp)" ]] \
+         && torch_is_cpu; then
+      ok "tts torch: CPU-only pinned (cu118 already failed on this GPU)"
     else
       warn "tts torch: default wheel can't drive this GPU — trying Pascal-era cu118 wheel"
       do_or_say "$TTS_PY" -m pip install --quiet \
         --index-url https://download.pytorch.org/whl/cu118 torch==2.7.1 \
         || miss "tts: install cu118 torch (Pascal-supporting)"
       if gpu_runs_kokoro; then
+        rm -f "$TORCH_CPU_MARK"
         ok "tts torch: GPU via cu118 wheel (older cuDNN, supports Pascal/sm_61)"
       else
         warn "tts torch: GPU still unusable after cu118 — pinning CPU-only torch"
         pin_cpu_torch
+        (( INSTALL )) && gpu_fp > "$TORCH_CPU_MARK"
       fi
     fi
   else
