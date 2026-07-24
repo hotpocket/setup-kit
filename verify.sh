@@ -9,8 +9,24 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 CONF="hosts/$(hostname).conf"
 PASS=0; FAILN=0
-pass() { printf 'PASS  %s\n' "$*"; PASS=$((PASS+1)); }
-failv() { printf 'FAIL  %s\n' "$*"; FAILN=$((FAILN+1)); }
+# Quiet by default (mirrors bootstrap): FAILs and the summary print; per-line
+# PASS detail goes to logs/verify-last.log. -v (or KIT_VERBOSE=1) restores
+# per-line PASS output. Deliberately self-contained — no lib.sh (see above).
+VERBOSE="${KIT_VERBOSE:-0}"; SETTLE=0; prev=""
+for a in "$@"; do
+  [[ "$a" == -v ]] && VERBOSE=1
+  [[ "$a" == --settle ]] && SETTLE=30
+  [[ "$prev" == --settle && "$a" =~ ^[0-9]+$ ]] && SETTLE="$a"
+  prev="$a"
+done
+VLOG="logs/verify-last.log"
+mkdir -p logs; : > "$VLOG"
+pass() {
+  printf 'PASS  %s\n' "$*" >> "$VLOG"
+  (( VERBOSE )) && printf 'PASS  %s\n' "$*"
+  PASS=$((PASS+1))
+}
+failv() { printf 'FAIL  %s\n' "$*"; printf 'FAIL  %s\n' "$*" >> "$VLOG"; FAILN=$((FAILN+1)); }
 
 # -- tiny, independent conf reader ------------------------------------------
 # trim edges only — list values (skip_pkgs) are space-separated inside
@@ -312,8 +328,7 @@ fi
 # misbehaving": restart loops, journal spam, busy processes. Caught in the
 # wild: nvidia-cdi-refresh.service restart-looping 1500+ times against a
 # driver that didn't support the GPU.
-SETTLE=0
-[[ "${1:-}" == --settle ]] && SETTLE="${2:-30}"
+# SETTLE parsed with the other args at the top of the script
 
 # 7a. failed units
 nf=$(systemctl --failed --no-legend --plain 2>/dev/null | wc -l)
@@ -378,5 +393,5 @@ if (( SETTLE > 0 )); then
     || failv "calm: high fork churn ${rate}/s (max $FMAX) — something is respawning"
 fi
 
-echo "=== verify done: $PASS pass, $FAILN fail ==="
+echo "=== verify done: $PASS pass, $FAILN fail — detail: logs/verify-last.log ==="
 exit $(( FAILN > 0 ))
