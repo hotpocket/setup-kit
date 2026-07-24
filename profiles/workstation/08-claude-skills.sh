@@ -94,6 +94,57 @@ if [[ " $SKILLS " == *" gstack "* ]] && ! command -v bun >/dev/null 2>&1; then
   miss "claude-skills: gstack linked but 'bun' missing — build the browse daemon"
 fi
 
+# gstack browse runs Playwright-managed Chromium. Two host-level traps
+# (both hit 2026-07-16 on Ubuntu 26.04 — see components/gstack.md):
+#   1. playwright < 1.61 has no ubuntu26.04 browser registry: `npx playwright
+#      install` fails AND garbage-collects working cached browsers first.
+#   2. Ubuntu 24.04+ sets kernel.apparmor_restrict_unprivileged_userns=1;
+#      Playwright-downloaded browsers ship no AppArmor profile, so their
+#      sandbox aborts at launch ("No usable sandbox!"). Ship them the same
+#      unconfined+userns profile the google-chrome deb installs for itself.
+if [[ " $SKILLS " == *" gstack "* ]]; then
+  OS_VER="$(. /etc/os-release && echo "$VERSION_ID")"
+  PW_MIN="$(grep -oP '"playwright":\s*"\^?1\.\K[0-9]+' "$HOME/git/gstack/package.json" 2>/dev/null || true)"
+  if [[ -n "$PW_MIN" && "${OS_VER%%.*}" -ge 26 && "$PW_MIN" -lt 61 ]]; then
+    warn "gstack pins playwright 1.$PW_MIN (< 1.61) — browsers can't install on Ubuntu $OS_VER."
+    warn "  Fix: bump to ^1.61 in ~/git/gstack/package.json, bun install, bun run build."
+    warn "  NEVER 'npx playwright install' before bumping — it deletes cached browsers first."
+    miss "claude-skills: gstack playwright pin 1.$PW_MIN too old for Ubuntu $OS_VER"
+  fi
+
+  if [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null)" == "1" ]]; then
+    AA_FILE=/etc/apparmor.d/playwright-chrome
+    AA_WANT=$(cat <<'EOF'
+# Allow Playwright-managed Chromium builds to use unprivileged user
+# namespaces for their sandbox (Ubuntu 24.04+ AppArmor restriction).
+# Mirrors /etc/apparmor.d/chrome shipped by the google-chrome deb.
+
+abi <abi/5.0>,
+include <tunables/global>
+
+profile playwright-chrome /home/*/.cache/ms-playwright/**/chrome{,-headless-shell} flags=(unconfined) {
+  userns,
+  @{exec_path} mr,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/playwright-chrome>
+}
+EOF
+)
+    if [[ -f "$AA_FILE" && "$(cat "$AA_FILE")" == "$AA_WANT" ]]; then
+      ok "playwright-chrome AppArmor profile present"
+    else
+      [[ -f "$AA_FILE" ]] \
+        && warn "playwright-chrome AppArmor profile drifted — reconciling" \
+        || warn "Playwright browsers blocked by AppArmor userns restriction — installing profile"
+      if (( INSTALL )); then
+        printf '%s\n' "$AA_WANT" | sudo tee "$AA_FILE" >/dev/null
+        sudo apparmor_parser -r "$AA_FILE"
+      fi
+    fi
+  fi
+fi
+
 # Shared vault-digest in ~/bin: the file-based vault reader used by the global
 # SessionStart router (claude-orient) for repos you don't own (external vaults
 # under ~/Documents/AgentMemory/<repo>). Owned repos carry their own copy in
