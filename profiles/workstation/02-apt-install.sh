@@ -37,8 +37,11 @@ if nvidia_wanted; then
   # userspace swaps immediately but the old kernel module stays loaded, so
   # GL/NVML die until reboot (caught 2026-07-24: pin 580 vs running 595
   # removed 17 packages mid-session and broke OpenGL for every app).
+  # dpkg-query, not `dpkg -l`: the latter formats to terminal width and can
+  # truncate long package names (nvidia-driver-595-open-kernel-source-…).
   PIN_DRV="$(printf '%s\n' "${WANT[@]}" | grep -m1 -E '^nvidia-driver-[0-9]+' || true)"
-  CUR_DRV="$(dpkg -l 'nvidia-driver-*' 2>/dev/null | awk '/^ii  nvidia-driver-[0-9]/{print $2; exit}')"
+  CUR_DRV="$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'nvidia-driver-*' 2>/dev/null \
+             | awk '/^ii /{print $2; exit}')"
   if [[ -n "$PIN_DRV" && -n "$CUR_DRV" && "$PIN_DRV" != "$CUR_DRV" ]]; then
     mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv "$PIN_DRV")
     ok "nvidia: $CUR_DRV already active — working driver satisfies manifest ($PIN_DRV not forced)"
@@ -208,7 +211,16 @@ for attempt in 1 2 3; do
   # a different nvidia driver series), abort THIS transaction loudly — the box
   # keeps working, the human decides. Deliberate removals (tealdeer above)
   # are explicit `remove` commands, never resolver side effects.
-  SIM_OUT="$(sudo apt-get install -s --no-install-recommends "${MISSING[@]}" 2>&1)" || true
+  # FAIL CLOSED: if the simulation itself fails (lock held, sources broken,
+  # sudo gone) its empty output would show zero removals and wave the real
+  # transaction through — the guard would be decorative exactly when the
+  # system is already unhealthy. No simulation = no permission to install.
+  if ! SIM_OUT="$(sudo apt-get install -s --no-install-recommends "${MISSING[@]}" 2>&1)"; then
+    fail "apt dry-run failed — refusing to install blind (can't prove it removes nothing):"
+    printf '          %s\n' "$(grep -E '^(E:|Err)' <<<"$SIM_OUT" | head -3)"
+    miss "apt: dry-run failed, install skipped — fix apt, then re-run"
+    exit 1
+  fi
   grep -E '^(After this|[0-9]+ upgraded)' <<<"$SIM_OUT" || true
   mapfile -t REMV < <(awk '/^Remv /{print $2}' <<<"$SIM_OUT")
   if (( ${#REMV[@]} )); then
@@ -219,6 +231,19 @@ for attempt in 1 2 3; do
   fi
   "${APT_INSTALL[@]}" "${MISSING[@]}" \
     2>&1 | tee "$LOG_DIR/apt-install-out.tmp" | tail -3
+  # Installing GPU kernel modules on a LIVE desktop is not inert: once dpkg
+  # runs depmod, udev autoloads the new module into the running session —
+  # it seizes the framebuffer from the compositor and the GPU can wedge
+  # (2026-07-24: both monitors dead ~30s after apt "finished", NVRM watchdog
+  # assert, recovered only by reboot). Nothing here can undo that, so say it
+  # loudly and do NOT touch the GPU again this run.
+  # SIM_OUT (the dry-run above) is authoritative: `Inst nvidia-…` says the
+  # transaction really brings in driver/module packages.
+  if grep -qE '^Inst (nvidia-|linux-modules-nvidia-|libnvidia-)' <<<"$SIM_OUT"; then
+    warn "nvidia kernel packages installed — REBOOT before trusting the GPU"
+    hint "a graphical session running now may lose its displays when udev loads the new module; reboot ends it"
+    miss "nvidia: driver/module packages installed — reboot required"
+  fi
   mapfile -t BAD < <({ grep -oP 'Unable to locate package \K\S+' "$LOG_DIR/apt-install-out.tmp"
                        grep -oP "Package '\K[^']+(?=' has no installation candidate)" "$LOG_DIR/apt-install-out.tmp"
                      } | sort -u)

@@ -149,14 +149,22 @@ case "$cmd" in
       echo "  ok: $n_ok   warn: $n_warn   fail: $n_fail   actions: $n_act"
       # surface WHAT failed/warned, not just the counts — last occurrence of
       # each unique message (later passes supersede earlier ones)
-      if (( n_fail > 0 )); then
-        echo "  FAIL:"
-        grep '\[FAIL\]' "$RUN_LOG" | sed 's/.*\[FAIL\]  *//' | awk '!seen[$0]++' | sed 's/^/    ✗ /'
-      fi
-      if (( n_warn > 0 )); then
-        echo "  WARN:"
-        grep '\[WARN\]' "$RUN_LOG" | sed 's/.*\[WARN\]  *//' | awk '!seen[$0]++' | sed 's/^/    ! /'
-      fi
+      # Replay each unique message WITH the ↳ hint lines that follow it — the
+      # hint carries the fix, and in quiet mode the summary is the only place
+      # it can still reach the terminal.
+      # index/substr, never a regex: the tags are '[WARN]'/'[FAIL]' and brackets
+      # in an awk regex are a character class, which silently matches anything.
+      _replay() {   # tag glyph
+        awk -v tag="$1" -v gl="$2" '
+          { i = index($0, tag) }
+          i { msg = substr($0, i + length(tag)); sub(/^ +/, "", msg)
+              if (!seen[msg]++) { print "    " gl " " msg; cur = 1 } else cur = 0; next }
+          cur && index($0, "↳") { h = $0; sub(/^ +/, "      ", h)
+                                  if (!seen[h]++) print h; next }
+          { cur = 0 }' "$RUN_LOG"
+      }
+      (( n_fail > 0 )) && { echo "  FAIL:"; _replay '[FAIL]' '✗'; }
+      (( n_warn > 0 )) && { echo "  WARN:"; _replay '[WARN]' '!'; }
       [[ "$mode" == check ]] && { echo "  doctor only — 'install' applies. Full log: $RUN_LOG"; break; }
       if (( n_act == 0 )); then
         if (( n_warn == 0 && n_fail == 0 )); then

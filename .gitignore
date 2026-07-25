@@ -21,3 +21,6 @@ vault/.obsidian/themes/
 vault/.obsidian/hotkeys.json
 vault/.obsidian/appearance.json
 vault/.obsidian/graph.json
+
+# wargame scratch
+.war/

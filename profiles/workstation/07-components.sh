@@ -570,7 +570,7 @@ PY
     if gpu_runs_kokoro; then
       rm -f "$TORCH_CPU_MARK"
       ok "tts torch: runs kokoro on the GPU (cuDNN op verified)"
-    elif ! nvidia-smi -L >/dev/null 2>&1; then
+    elif ! { nvidia_live && nvidia-smi -L >/dev/null 2>&1; }; then
       # NO VERDICT from a broken driver: a failed probe here says nothing about
       # the GPU. Deciding anyway is how a transient outage got CPU torch pinned
       # on a healthy RTX 3090 (2026-07-24). Leave torch alone, flag it.

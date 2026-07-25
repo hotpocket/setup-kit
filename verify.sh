@@ -89,9 +89,20 @@ fi
 # module can't bind, and persistenced/cdi-refresh restart-loop — which otherwise
 # only surfaces as opaque calm-check noise (caught in the wild: GTX 1080,
 # driver 580 built and installed, nvidia-smi dead).
+# nvidia_live: is the kernel module ALREADY loaded? /proc/driver/nvidia only
+# exists once it is — reading it can't load anything. `nvidia-smi` can: where
+# nvidia-modprobe is installed (setuid root) it inserts the module on demand.
+# That is a state change, and inserting a GPU module into a live desktop
+# session seizes the framebuffer (2026-07-24: killed both monitors until
+# reboot). A verifier must never be able to do that — probe, then ask.
+nvidia_live() { [[ -r /proc/driver/nvidia/version ]]; }
 if [[ " ${FILES[*]} " == *conditional/nvidia.list* ]]; then
-  if nvidia-smi >/dev/null 2>&1; then
+  if ! nvidia_live && ! grep -q '^nouveau ' /proc/modules; then
+    failv "nvidia: no GPU kernel module loaded (DKMS build failed? secure boot? reboot pending?)"
+  elif nvidia_live && nvidia-smi >/dev/null 2>&1; then
     pass "nvidia: driver answering (nvidia-smi)"
+  elif nvidia_live; then
+    failv "nvidia: module loaded but nvidia-smi can't enumerate the GPU (version mismatch? wedged after a mid-session load — reboot)"
   elif grep -q '^nouveau ' /proc/modules; then
     # no grep -q on the pipe: early exit SIGPIPEs lsinitramfs and pipefail
     # turns a real match into rc 141
@@ -182,9 +193,13 @@ case $? in
      # deliberately pinned CPU (marker written after cu118 failed on this GPU).
      # A CPU build on a live GPU means something pinned it by mistake — e.g.
      # a GPU probe that ran during a driver outage (caught 2026-07-24).
-     if ! nvidia-smi -L >/dev/null 2>&1; then
+     if ! { nvidia_live && nvidia-smi -L >/dev/null 2>&1; }; then
        pass "tts venv: torch CPU build (no operational nvidia driver)"
-     elif [[ -f "$HOME/.pyenv/versions/kokoro-tts/.torch-cpu-pinned" ]]; then
+     elif [[ -s "$HOME/.pyenv/versions/kokoro-tts/.torch-cpu-pinned" ]] \
+          && [[ "$(cat "$HOME/.pyenv/versions/kokoro-tts/.torch-cpu-pinned")" \
+                == "$(lspci -nn 2>/dev/null | grep -iE 'vga|3d controller' | sort)" ]]; then
+       # marker must match THIS GPU set — a pin earned by an old card says
+       # nothing about the one installed now (mirrors 07-components)
        pass "tts venv: torch CPU build (deliberately pinned — cu118 can't drive this GPU)"
      else
        failv "tts venv: torch is CPU-only but the GPU driver works — kokoro should run on the GPU (re-run 07-components)"

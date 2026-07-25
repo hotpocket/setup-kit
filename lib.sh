@@ -130,6 +130,12 @@ group_on() { [[ "$(conf_get "group_${1//-/_}" no)" == yes ]]; }
 # (line 6) fails the whole pipeline whenever output exceeds the pipe buffer.
 # Redirecting instead of -q makes grep read to EOF: no SIGPIPE, no flake.
 has_nvidia()   { lspci 2>/dev/null | grep -i nvidia >/dev/null; }
+# Is the nvidia kernel module ALREADY loaded? /proc/driver/nvidia exists only
+# once it is, so reading it cannot load anything. Never probe with `nvidia-smi`
+# alone: where nvidia-modprobe is installed (setuid root) it INSERTS the module,
+# and inserting a GPU module into a live desktop seizes the framebuffer
+# (2026-07-24: both monitors dead until reboot). Gate every nvidia-smi call.
+nvidia_live()  { [[ -r /proc/driver/nvidia/version ]]; }
 # nvidia stack wanted? GPU present AND (cond_nvidia=yes forces, =no blocks,
 # auto requires ubuntu-drivers to back the card). Legacy GPUs the current
 # driver dropped (e.g. Kepler) get nouveau, not a restart-looping 580 stack.

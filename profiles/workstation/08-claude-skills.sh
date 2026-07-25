@@ -48,12 +48,17 @@ for s in $SKILLS; do
   p="$(skill_path "$s")"; [[ -n "$p" ]] && WANT_PATHS+=("$p")
 done
 
-repo_stale() {             # dir -> 0 if a wanted path inside dir is absent
-  local dir="$1" p
+repo_stale() {             # dir -> 0 if a wanted path INSIDE dir is absent
+  local dir="$1" p found=0
   for p in "${WANT_PATHS[@]}"; do
-    [[ "$p" == "$dir" || "$p" == "$dir"/* ]] || continue
+    [[ "$p" == "$dir"/* ]] || continue      # strictly inside; the repo root
+    found=1                                 # itself is not evidence of anything
     [[ -e "$p" ]] || return 0
   done
+  # No path inside this repo to test (gstack: the skill IS the repo root).
+  # Nothing the kit consumes can go missing, so there is no staleness signal
+  # and no reason to spend a YubiKey touch — third-party repos update by hand.
+  (( found )) || return 1
   return 1
 }
 
