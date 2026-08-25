@@ -15,7 +15,7 @@ init_mode "${1:-}"
 
 [[ "$(conf_get component_claude_skills yes)" == yes ]] || exit 0
 
-SKILLS="$(conf_get claude_skills 'gstack vault conduct')"
+SKILLS="$(conf_get claude_skills 'gstack vault conduct repo-story')"
 SKILLS_DIR="$HOME/.claude/skills"
 
 section "claude skills ($MODE) — components/{gstack,vault,conduct}.md"
@@ -23,17 +23,15 @@ section "claude skills ($MODE) — components/{gstack,vault,conduct}.md"
 # registry: source repo, clone url (empty = local-only), skill dir within repo
 skill_repo() { case "$1" in
   gstack)        echo "$HOME/git/gstack" ;;
-  vault|conduct) echo "$HOME/git/.configs" ;;
+  *)             echo "$HOME/git/.configs" ;;   # every other skill lives in claude-conduct
 esac; }
 skill_url() { case "$1" in
   gstack)        echo "git@github.com:garrytan/gstack.git" ;;
-  vault|conduct) echo "git@github.com:hotpocket/.configs.git" ;;
-  *)             echo "" ;;
+  *)             echo "git@github.com:hotpocket/.configs.git" ;;
 esac; }
 skill_path() { case "$1" in
   gstack)  echo "$HOME/git/gstack" ;;            # SKILL.md lives at the repo root
-  vault)   echo "$HOME/git/.configs/claude-conduct/skills/vault" ;;
-  conduct) echo "$HOME/git/.configs/claude-conduct/skills/conduct" ;;
+  *)       echo "$HOME/git/.configs/claude-conduct/skills/$1" ;;
 esac; }
 
 # Everything this phase links out of the repos. A checkout that already has all
@@ -41,9 +39,10 @@ esac; }
 # (ssh with the resident -sk key), so freshness is bought only when a wanted
 # path is actually missing (the stale-clone failure the pull exists to fix:
 # a pre-vault-digest claude-conduct left ~/bin/vault-digest unlinkable forever).
+AGENTS_SRC="$HOME/git/.configs/claude-conduct/agents"
 VD_SRC="$HOME/git/.configs/claude-conduct/skills/conduct/templates/vault-digest"
 DGP_SRC="$HOME/git/.configs/claude-conduct/skills/conduct/templates/deny-git-push.sh"
-WANT_PATHS=("$VD_SRC" "$DGP_SRC")
+WANT_PATHS=("$VD_SRC" "$DGP_SRC" "$AGENTS_SRC")
 for s in $SKILLS; do
   p="$(skill_path "$s")"; [[ -n "$p" ]] && WANT_PATHS+=("$p")
 done
@@ -110,6 +109,33 @@ for s in $SKILLS; do
     do_or_say ln -sfnT "$src" "$link"   # -n keep, -f replace, -T treat link as the target name
   fi
 done
+
+# Subagent definitions. Model pins live in these files and nowhere else (the
+# narrator's Fable pin is the load-bearing one), so an unlinked agent is a
+# silent downgrade to whatever model the caller happened to be on — not an
+# error anyone would see. Per-file because ~/.claude/agents holds a flat set
+# of .md files; there is no per-agent directory to point at.
+AGENTS_DIR="$HOME/.claude/agents"
+if [[ -d "$AGENTS_SRC" ]]; then
+  [[ -d "$AGENTS_DIR" ]] || do_or_say mkdir -p "$AGENTS_DIR"
+  for a in "$AGENTS_SRC"/*.md; do
+    [[ -e "$a" ]] || continue
+    name="$(basename "$a")"; link="$AGENTS_DIR/$name"
+    if [[ -L "$link" && "$(readlink -f "$link")" == "$(readlink -f "$a")" ]]; then
+      ok "agent '$name' linked"
+    elif [[ -e "$link" && ! -L "$link" ]]; then
+      # A real file here predates this loop and is the only copy of itself.
+      # Overwriting it would delete the original, so say so and move on.
+      warn "agent '$name' is a real file, not a link — move it into $AGENTS_SRC"
+      miss "claude-skills: $name unmanaged at $link"
+    else
+      warn "agent '$name' not linked"
+      do_or_say ln -sfnT "$a" "$link"
+    fi
+  done
+else
+  warn "claude-conduct/agents missing (subtree not present?)"
+fi
 
 # gstack's browse daemon is built with bun; the skill is useless without it.
 if [[ " $SKILLS " == *" gstack "* ]] && ! command -v bun >/dev/null 2>&1; then
