@@ -19,17 +19,30 @@ packages, toolchains, configs — idempotently.
 
 - `lib.sh` — shared helpers: output, modes, host-conf, detection, manifest/apt.
 - `manifests/` — WHAT to install: grouped apt lists, lang stacks, snap/flatpak, direct debs.
-- `profiles/workstation/` — ordered idempotent phases (`00-identity` … `08-claude-skills`).
+- `profiles/workstation/` — ordered idempotent phases (`00-disk-space` … `08-claude-skills`).
+  `00-disk-space` runs first and is a gate: it projects the install's footprint
+  (apt measured, `manifests/sizes.conf` declared) against free space per
+  filesystem and exits 3 — the kit's "stop the run" code — when it won't fit.
 - `profiles/proxmox-host/` — host-side passthrough / ZFS / VM-creation scripts.
 - `components/` — opt-in/conditional extras; one spec per `components/*.md`.
 - `hosts/<hostname>.conf` — per-machine answer file (`example.conf` is the template).
 - `capture/` — refresh tooling: re-snapshot a machine, regenerate the manifests.
+- `tests/` — calibration for the guards. Not a unit-test suite: each one makes
+  the guard report its defect on purpose, so a green run is evidence the check
+  can still see something. Run directly: `./tests/test-disk-space.sh`.
 
 ## Conventions
 
 - **Idempotent** — re-runnable; already-installed is success. Every phase takes a mode arg: `check` (read-only) or `install` (apply).
 - **Doctor/install split** — `check` reports drift and changes nothing.
 - **No silent sudo** — detect root needs upfront, one consolidated sudo pass; log gaps to `logs/missing.log` instead of failing silently.
+- **A phase may stop the run** — exit 3 means "unsafe to continue" and
+  bootstrap aborts the phase loop there (exit 1 is an ordinary failure the loop
+  absorbs). Only `00-disk-space` uses it, and only in install mode: the doctor
+  always reports everything.
+- **Estimates carry their provenance** — `manifests/sizes.conf` rows say where
+  each number came from. After a real install, `du -sh` the target and correct
+  the row; an estimate nobody revisits is how the preflight starts lying.
 - **Manifests are generated** — `capture/90-generate-manifests.py` writes `manifests/apt/*`. Edit the generator (its strings become the file comments), not the `.list` files by hand — a regen overwrites them.
 - **Two repos** — setup-kit owns machine-level provisioning; `~/git/.configs` (private) owns user dotfiles/bin/dconf and is cloned + run by phase 06. setup-kit never duplicates dotfiles.
 

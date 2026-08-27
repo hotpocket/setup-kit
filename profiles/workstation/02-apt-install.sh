@@ -7,57 +7,14 @@ source "$(dirname "$0")/../../lib.sh"
 require_user
 init_mode "${1:-}"
 
-APT_M="$MANIFEST_DIR/apt"
-DEFAULT_GROUPS="cli-system desktop apps editors media network games wine
-                dev-core dev-java dev-python dev-cloud dev-flutter-deps"
-
 section "apt packages ($MODE)"
 
 # ---- assemble the wanted-package list -------------------------------------
-WANT=()
-for grp in $DEFAULT_GROUPS; do
-  group_on "$grp" || { ok "group $grp: off"; continue; }
-  [[ -f "$APT_M/$grp.list" ]] || { warn "no manifest for $grp"; continue; }
-  mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/$grp.list")
-done
-# optional groups (off unless flipped in host conf)
-for f in "$APT_M"/optional/*.list; do
-  grp="$(basename "$f" .list)"
-  group_on "$grp" || continue
-  log "optional group enabled: $grp"
-  mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$f")
-done
-# conditional groups
-if nvidia_wanted; then
-  mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/conditional/nvidia.list")
-  ok "conditional nvidia: supported GPU detected — included"
-  # A working driver of ANY version satisfies the driver requirement. The
-  # manifest's exact pin is only for boxes with NO driver: installing a
-  # different series over a live one makes apt REMOVE the running stack —
-  # userspace swaps immediately but the old kernel module stays loaded, so
-  # GL/NVML die until reboot (caught 2026-07-24: pin 580 vs running 595
-  # removed 17 packages mid-session and broke OpenGL for every app).
-  # dpkg-query, not `dpkg -l`: the latter formats to terminal width and can
-  # truncate long package names (nvidia-driver-595-open-kernel-source-…).
-  PIN_DRV="$(printf '%s\n' "${WANT[@]}" | grep -m1 -E '^nvidia-driver-[0-9]+' || true)"
-  CUR_DRV="$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'nvidia-driver-*' 2>/dev/null \
-             | awk '/^ii /{print $2; exit}')"
-  if [[ -n "$PIN_DRV" && -n "$CUR_DRV" && "$PIN_DRV" != "$CUR_DRV" ]]; then
-    mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv "$PIN_DRV")
-    ok "nvidia: $CUR_DRV already active — working driver satisfies manifest ($PIN_DRV not forced)"
-  fi
-elif has_nvidia && [[ "$(conf_get cond_nvidia auto)" != no ]]; then
-  warn "conditional nvidia: GPU present but unsupported by current driver (legacy card) — skipped, nouveau it is"
-else
-  ok "conditional nvidia: skipped"
-fi
-if ! is_vm && ! dpkg -s proxmox-ve >/dev/null 2>&1 \
-   && [[ "$(conf_get cond_virtualbox auto)" != no ]]; then
-  mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/conditional/virtualbox.list")
-  ok "conditional virtualbox: bare metal — included"
-else
-  ok "conditional virtualbox: skipped ($(virt_context))"
-fi
+# Shared with the space preflight (00-disk-space.sh) via lib.sh — one
+# definition of "what this host wants", so the preflight's total and this
+# transaction can never answer for different package sets. Notes the assembler
+# emitted (groups off, conditionals, skips) are replayed here.
+apt_want_into WANT notes
 
 # ---- nvidia: nouveau must not grab the GPU at boot --------------------------
 # A missed dpkg trigger can leave nouveau loading early and the nvidia module
@@ -85,24 +42,10 @@ if nvidia_wanted && dpkg -l 'nvidia-driver-*' 2>/dev/null | grep -q '^ii'; then
   fi
 fi
 
-# ---- subtract permanent skips ----------------------------------------------
-SKIPS="$(conf_get skip_pkgs "")"
-if [[ -n "$SKIPS" ]]; then
-  mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv -f <(tr ' ' '\n' <<<"$SKIPS"))
-  ok "honoring skip_pkgs: $SKIPS"
-fi
-
 # ---- release reconciliation: manifests target 26.04; a box provisioned
 # ---- before a package swap needs the old package handled, not fought --------
-# steam: a box already running Valve's steam-launcher (self-managed repo) has
-# steam-libs newer than the exact version multiverse's steam-installer pins —
-# installing it is an unmet-dep abort that sinks the WHOLE apt transaction
-# (caught on 24.04: steam-libs-i386 1.0.0.85 installed, = 1.0.0.79~ds-2
-# required). Valve keeps itself updated; never migrate an existing install.
-if pkg_installed steam-launcher; then
-  mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv steam-installer)
-  ok "steam: Valve steam-launcher installed — steam-installer not applicable"
-fi
+# (steam's steam-installer/steam-launcher reconciliation is list assembly and
+# lives in lib.sh apt_wanted_pkgs; what follows is an ACTION, so it stays here.)
 # tldr: tealdeer replaces the Haskell client (tldr/tldr-hs — gone from 26.04,
 # and its page downloader is broken upstream). The legacy pair owns
 # /usr/bin/tldr via update-alternatives; remove it BEFORE tealdeer lands so
@@ -133,6 +76,7 @@ fi
 
 # ---- size review (interactive, first install only) --------------------------
 REVIEW_MB="$(conf_get review_over_mb 100)"
+SKIPS="$(conf_get skip_pkgs "")"      # appended to, not replaced, on deselect
 if [[ -t 0 && "$(conf_get size_review_done no)" != yes ]]; then
   BIG=()
   for p in "${MISSING[@]}"; do

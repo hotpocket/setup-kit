@@ -77,12 +77,18 @@ case "$cmd" in
     fi
     echo "--- disks ---"
     lsblk -d -o NAME,MODEL,SERIAL,SIZE -e7
+    echo "--- free space (00-disk-space checks this against the install size) ---"
+    df -h -x tmpfs -x devtmpfs -x squashfs --output=target,size,avail,pcent 2>/dev/null \
+      || df -h -x tmpfs -x devtmpfs -x squashfs
     echo "--- NICs ---"
     ip -br link | grep -v '^lo'
     ;;
 
   workstation)
     [[ "$mode" == doctor ]] && mode=check   # alias — same thing
+    # overridable so the phase-loop semantics (notably the exit-3 abort) can be
+    # exercised against stub phases; unset everywhere except tests/
+    PHASE_DIR="${KIT_PHASE_DIR:-$KIT_DIR/profiles/workstation}"
     case "$mode" in check|install) ;; *) usage ;; esac
     # -v (or verbose=yes in host conf): per-line [ OK ] output instead of the
     # quiet per-section rollup. Detail always lands in the run log either way.
@@ -126,18 +132,30 @@ case "$cmd" in
     # Front-load the REST of the interaction here (GitHub host keys, YubiKey
     # PIN + touches, .configs clone) — after this, the phase loop is unaided.
     # Deliberately not piped: it needs the tty for PIN/touch prompts.
-    chmod +x "$KIT_DIR/profiles/workstation/preamble-github-auth.sh" 2>/dev/null || true
-    bash "$KIT_DIR/profiles/workstation/preamble-github-auth.sh" "$mode" || true
+    chmod +x "$PHASE_DIR/preamble-github-auth.sh" 2>/dev/null || true
+    [[ -f "$PHASE_DIR/preamble-github-auth.sh" ]] && bash "$PHASE_DIR/preamble-github-auth.sh" "$mode" || true
     # install mode loops passes until a pass changes nothing, then runs the
     # independent verifier — one command does the whole job.
     rc=0; settled=0
     for pass in 1 2 3; do
       RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S)-p$pass.log"
       export KIT_RUN_LOG="$RUN_LOG"   # quiet mode routes [ OK ] detail here
-      for phase in "$KIT_DIR/profiles/workstation/"[0-9][0-9]*-*.sh; do
+      # A phase exiting 3 means "do not continue" — the run is unsafe to
+      # carry on with, not merely failed (00-disk-space when the install
+      # can't fit). Everything after it would be writing into a condition
+      # it has already been told about, so stop the whole run here.
+      aborted=0
+      for phase in "$PHASE_DIR/"[0-9][0-9]*-*.sh; do
         bash "$phase" "$mode" 2>&1 | tee -a "$RUN_LOG"
-        [[ "${PIPESTATUS[0]}" -eq 0 ]] || rc=1
+        prc="${PIPESTATUS[0]}"
+        [[ "$prc" -eq 0 ]] || rc=1
+        if [[ "$prc" -eq 3 ]]; then
+          aborted=1
+          echo "  ⛔ ABORTED by $(basename "$phase") — nothing further was run"
+          break
+        fi
       done
+      (( aborted )) && { echo "  Full log: $RUN_LOG"; exit 1; }
       # summary that answers "did anything change?" from stdout alone
       n_ok=$(grep -c '\[ OK \]'   "$RUN_LOG" || true)
       n_warn=$(grep -c '\[WARN\]' "$RUN_LOG" || true)

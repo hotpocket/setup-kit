@@ -9,7 +9,9 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SNAPSHOT_DIR="$KIT_DIR/snapshot"
 MANIFEST_DIR="$KIT_DIR/manifests"
 LOG_DIR="$KIT_DIR/logs"
-HOST_CONF="$KIT_DIR/hosts/$(hostname).conf"
+# Per-host answer file. Overridable by the environment so the phases can be
+# exercised against a throwaway conf (tests/) without touching a real one.
+HOST_CONF="${HOST_CONF:-$KIT_DIR/hosts/$(hostname).conf}"
 
 mkdir -p "$LOG_DIR"
 
@@ -194,4 +196,159 @@ apt_install_one() {
   else
     miss "apt: $pkg"
   fi
+}
+
+# ---------------------------------------------------------------- sizes
+# Human size -> KiB. Accepts "9G", "205MB", "18.4 GB", "991kB"; a bare number
+# is KiB (apt's Installed-Size unit). Unknown/garbage -> 0, never an error:
+# a bad row in sizes.conf must not sink the whole preflight.
+to_kb() {
+  local s n u
+  s="${1//[[:space:]]/}"
+  [[ -n "$s" ]] || { echo 0; return; }
+  n="${s%%[A-Za-z]*}"; u="${s#"$n"}"; u="${u^^}"; u="${u%B}"
+  [[ "$n" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo 0; return; }
+  case "$u" in
+    ''|K) awk -v n="$n" 'BEGIN{printf "%.0f", n}' ;;
+    M)    awk -v n="$n" 'BEGIN{printf "%.0f", n*1024}' ;;
+    G)    awk -v n="$n" 'BEGIN{printf "%.0f", n*1024*1024}' ;;
+    T)    awk -v n="$n" 'BEGIN{printf "%.0f", n*1024*1024*1024}' ;;
+    *)    echo 0 ;;
+  esac
+}
+
+# KiB -> short human string ("18.4G", "412G", "0")
+kb_human() {
+  awk -v k="${1:-0}" 'BEGIN{
+    split("K M G T P", u, " "); i = 1
+    while (k >= 1024 && i < 5) { k /= 1024; i++ }
+    if (i == 1) printf "%dK", k
+    else if (k < 100) printf "%.1f%s", k, u[i]
+    else printf "%.0f%s", k, u[i]
+  }'
+}
+
+# "<mountpoint>\t<free KiB>" for the filesystem that will hold PATH. Walks up
+# to the nearest EXISTING ancestor: the target dir usually doesn't exist yet
+# (that's the point — we're asked whether to create it), and df on a missing
+# path answers nothing at all.
+fs_stats() {
+  local p="${1:-/}"
+  while [[ ! -e "$p" && "$p" != / && "$p" != . ]]; do p="$(dirname "$p")"; done
+  df -Pk "$p" 2>/dev/null | awk 'NR==2{print $6"\t"$4}'
+}
+
+# ------------------------------------------------- wanted package selection
+# The apt package set this host wants: default groups + optional groups turned
+# on in the host conf + hardware conditionals, minus permanent skip_pkgs and
+# release-reconciliation exclusions.
+#
+# ONE definition, two callers — the installer (02-apt-install.sh) and the space
+# preflight (00-disk-space.sh). A preflight that estimated from its own copy of
+# this logic would answer for a different package set than the one that
+# actually installs, and would drift further at every manifest change.
+#
+# Prints one package name per line. Commentary can't go through ok()/warn():
+# stdout IS the list, and callers read it in a subshell where globals don't
+# survive. So notes ride inline as '@ok '/'@warn '/'@log ' lines for the
+# caller to replay (the installer) or drop (the preflight).
+APT_DEFAULT_GROUPS="cli-system desktop apps editors media network games wine
+                    dev-core dev-java dev-python dev-cloud dev-flutter-deps"
+apt_wanted_pkgs() {
+  local APT_M="$MANIFEST_DIR/apt" grp f p WANT=() PIN_DRV CUR_DRV SKIPS
+  for grp in $APT_DEFAULT_GROUPS; do
+    group_on "$grp" || { echo "@ok group $grp: off"; continue; }
+    [[ -f "$APT_M/$grp.list" ]] || { echo "@warn no manifest for $grp"; continue; }
+    mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/$grp.list")
+  done
+  # optional groups (off unless flipped in host conf)
+  for f in "$APT_M"/optional/*.list; do
+    [[ -f "$f" ]] || continue
+    grp="$(basename "$f" .list)"
+    group_on "$grp" || continue
+    echo "@log optional group enabled: $grp"
+    mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$f")
+  done
+  # conditional: nvidia
+  if nvidia_wanted; then
+    mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/conditional/nvidia.list")
+    echo "@ok conditional nvidia: supported GPU detected — included"
+    # A working driver of ANY version satisfies the driver requirement. The
+    # manifest's exact pin is only for boxes with NO driver: installing a
+    # different series over a live one makes apt REMOVE the running stack —
+    # userspace swaps immediately but the old kernel module stays loaded, so
+    # GL/NVML die until reboot (caught 2026-07-24: pin 580 vs running 595
+    # removed 17 packages mid-session and broke OpenGL for every app).
+    # dpkg-query, not `dpkg -l`: the latter formats to terminal width and can
+    # truncate long package names (nvidia-driver-595-open-kernel-source-…).
+    PIN_DRV="$(printf '%s\n' "${WANT[@]}" | grep -m1 -E '^nvidia-driver-[0-9]+' || true)"
+    CUR_DRV="$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'nvidia-driver-*' 2>/dev/null \
+               | awk '/^ii /{print $2; exit}')"
+    if [[ -n "$PIN_DRV" && -n "$CUR_DRV" && "$PIN_DRV" != "$CUR_DRV" ]]; then
+      mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv "$PIN_DRV")
+      echo "@ok nvidia: $CUR_DRV already active — working driver satisfies manifest ($PIN_DRV not forced)"
+    fi
+  elif has_nvidia && [[ "$(conf_get cond_nvidia auto)" != no ]]; then
+    echo "@warn conditional nvidia: GPU present but unsupported by current driver (legacy card) — skipped, nouveau it is"
+  else
+    echo "@ok conditional nvidia: skipped"
+  fi
+  # conditional: virtualbox
+  if ! is_vm && ! dpkg -s proxmox-ve >/dev/null 2>&1 \
+     && [[ "$(conf_get cond_virtualbox auto)" != no ]]; then
+    mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/conditional/virtualbox.list")
+    echo "@ok conditional virtualbox: bare metal — included"
+  else
+    echo "@ok conditional virtualbox: skipped ($(virt_context))"
+  fi
+  # permanent skips recorded by the size review
+  SKIPS="$(conf_get skip_pkgs "")"
+  if [[ -n "$SKIPS" && ${#WANT[@]} -gt 0 ]]; then
+    mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv -f <(tr ' ' '\n' <<<"$SKIPS"))
+    echo "@ok honoring skip_pkgs: $SKIPS"
+  fi
+  # release reconciliation — steam: a box already running Valve's
+  # steam-launcher (self-managed repo) has steam-libs newer than the exact
+  # version multiverse's steam-installer pins; installing it is an unmet-dep
+  # abort that sinks the WHOLE apt transaction (caught on 24.04: steam-libs-i386
+  # 1.0.0.85 installed, = 1.0.0.79~ds-2 required). Valve keeps itself updated;
+  # never migrate an existing install.
+  if pkg_installed steam-launcher && (( ${#WANT[@]} )); then
+    mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv steam-installer)
+    echo "@ok steam: Valve steam-launcher installed — steam-installer not applicable"
+  fi
+  (( ${#WANT[@]} )) && printf '%s\n' "${WANT[@]}"
+  return 0
+}
+
+# Split apt_wanted_pkgs output: package names into the array named by $1,
+# '@' note lines replayed through ok()/warn()/log() when $2 is 'notes'.
+apt_want_into() {
+  local -n _out="$1"; local notes="${2:-quiet}" row
+  _out=()
+  while IFS= read -r row; do
+    case "$row" in
+      '@ok '*)   [[ "$notes" == notes ]] && ok   "${row#@ok }"   ;;
+      '@warn '*) [[ "$notes" == notes ]] && warn "${row#@warn }" ;;
+      '@log '*)  [[ "$notes" == notes ]] && log  "${row#@log }"  ;;
+      '') ;;
+      *) _out+=("$row") ;;
+    esac
+  done < <(apt_wanted_pkgs)
+  return 0
+}
+
+# Of the given package names, the ones apt can actually install on THIS release
+# — a real candidate version exists. Names that were dropped between releases
+# (wireless-tools on 26.04) or that survive only as a reference from another
+# package's dependency (tldr) abort an entire apt transaction, INCLUDING a
+# dry-run: one bad name and the simulation answers nothing at all, so the space
+# preflight has to prune before it asks. `apt-cache policy` on an unknown name
+# prints nothing, so both failure shapes fall out of the same filter.
+# (02-apt-install.sh keeps its own retry loop instead: it must report each drop
+# to missing.log with a reason, and a candidate can still vanish mid-run.)
+apt_installable() {
+  (( $# )) || return 0
+  apt-cache policy "$@" 2>/dev/null \
+    | awk '/^[^ ]/ { p = $0; sub(/:$/, "", p) } /^  Candidate:/ { if ($2 != "(none)") print p }'
 }

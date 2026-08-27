@@ -16,14 +16,26 @@ manifests/            WHAT to install (curated, size-annotated)
   apt/                grouped package lists + optional/ + conditional/ + repos.md
   lang/               pyenv / nvm / flutter+android / optional stacks
   snap.list flatpak.list
+  sizes.conf          declared footprints for what apt can't measure (SDKs, models)
 profiles/
   workstation/        full dev desktop (bare metal or VM — same scripts)
   proxmox-host/       IOMMU/VFIO, ZFS, nested-virt, GPU-passthrough main VM
 components/           opt-in/conditional extras (herdr, oom-zram, dictation/ocr/tts)
 hosts/                per-machine answer files (example.conf is the template)
 capture/              refresh tooling: re-snapshot a machine, regen manifests
+tests/                calibration for the guards (run them: ./tests/test-*.sh)
 snapshot/             raw capture data (gitignored; large + contains secrets)
 ```
+
+## Will it fit?
+
+The first phase (`00-disk-space`) projects the whole install's footprint and
+compares it against free space **per filesystem** — apt's own numbers for
+packages (dependencies resolved), `manifests/sizes.conf` estimates for the
+things that publish no size until you're downloading them. A shortfall stops
+the run before anything is fetched (`space_check=warn` in the host conf to
+override, `no` to skip). `./bootstrap.sh survey` shows the same free space
+without touching the box.
 
 ## New box — two commands
 
