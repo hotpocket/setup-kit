@@ -265,7 +265,11 @@ if [[ -d "$HOME/git/.configs/.local/share/icons" ]]; then
     [[ -f "$d" ]] || continue
     icon=$(sed -n 's/^Icon=//p' "$d" | head -1)
     [[ "$icon" == /* ]] && continue   # absolute-path icons resolve trivially
-    if find "$HOME/.local/share/icons" -name "$icon.*" 2>/dev/null | grep -q .; then
+    # a launcher may name a theme icon (folder-pictures from Yaru), not only a
+    # shipped one — search the system icon dirs too
+    # -print -quit, not '| grep -q .': grep exiting at the first match SIGPIPEs
+    # find, and under pipefail that reads as "not found" (it did, 2026-09-05)
+    if [[ -n "$(find "$HOME/.local/share/icons" /usr/share/icons -name "$icon.*" -print -quit 2>/dev/null)" ]]; then
       pass "launcher icon: $icon"
     else
       failv "launcher icon missing: $icon (from $(basename "$d"))"

@@ -21,9 +21,13 @@ source "$(dirname "$0")/../../lib.sh"
 require_user
 init_mode "${1:-}"
 
-# OpenPGP key whose private half lives on the YubiKey. Overridable per-host;
-# default is the kit owner's key.
-FPR="$(conf_get gpg_key_fpr '8733634755706236EF6E1052D9259AC1BF0910D1')"
+# OpenPGP keys whose private halves live on YubiKeys — ALL of them (primary
+# and backup), space-separated. The pass store is encrypted to every listed
+# key so whichever YubiKey is plugged can decrypt; one key only means the
+# other card reads nothing (2026-09-05: backup key plugged, store to primary).
+# Overridable per-host; default is the kit owner's pair.
+FPRS="$(conf_get gpg_key_fpr '8733634755706236EF6E1052D9259AC1BF0910D1 7BF67A998A2E7896B0752B37B65E1E766C230F61')"
+FPR="${FPRS%% *}"      # first = primary, used where one id is needed
 CONFIGS="$HOME/git/.configs"
 GNUPG="$HOME/.gnupg"
 STORE="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
@@ -90,6 +94,7 @@ fi
 # Private key is card-resident; we only need the PUBLIC key on the host so gpg
 # can address it. Deterministic source first (pubkey.asc committed to .configs —
 # a public key is safe to commit), then the URL on the card, then a keyserver.
+for FPR in $FPRS; do
 if gpg --list-keys "$FPR" >/dev/null 2>&1; then
   ok "public key present (${FPR: -8})"
 elif (( INSTALL )); then
@@ -110,24 +115,31 @@ fi
 # ultimate ownertrust (no touch; safe to assert every run once the key is present)
 if gpg --list-keys "$FPR" >/dev/null 2>&1; then
   if gpg --export-ownertrust 2>/dev/null | grep -q "^$FPR:6:"; then
-    ok "ownertrust: ultimate"
+    ok "ownertrust: ultimate (${FPR: -8})"
   elif (( INSTALL )); then
     echo "$FPR:6:" | do_or_say gpg --import-ownertrust
   else
     warn "ownertrust not ultimate (install sets it)"
   fi
 fi
+done
+FPR="${FPRS%% *}"
 
 # ---- 4. card stubs (route sign/decrypt to the YubiKey) ---------------------
 # `gpg --card-status` learns the card and writes the secret-key STUBS; without a
 # plugged card it just errors — harmless, we only warn.
-if gpg -K "$FPR" 2>/dev/null | grep -q 'ssb>'; then
-  ok "card stubs present (sign/decrypt → YubiKey)"
+# whichever listed key is on the plugged card is the one that gets stubs
+stubs_for() { local f; for f in $FPRS; do gpg -K "$f" 2>/dev/null | grep -q 'ssb>' && { echo "$f"; return 0; }; done; return 1; }
+if k="$(stubs_for)"; then
+  ok "card stubs present (sign/decrypt → YubiKey, key ${k: -8})"
 elif (( INSTALL )); then
   if lsusb 2>/dev/null | grep -qiE 'yubico|fido'; then
     do_or_say gpg --card-status >/dev/null
-    gpg -K "$FPR" 2>/dev/null | grep -q 'ssb>' && ok "card stubs created" \
-      || warn "card stubs not created (PIN/touch needed, or key mismatch)"
+    if k="$(stubs_for)"; then ok "card stubs created (key ${k: -8})"
+    else
+      warn "card stubs not created — the plugged card's key is none of: $FPRS"
+      hint "card key: $(gpg --card-status 2>/dev/null | awk -F': ' '/^Signature key/{gsub(/ /,"",$2); print $2}') — add it to gpg_key_fpr in $HOST_CONF"
+    fi
   else
     warn "no YubiKey plugged — skipping card stubs (plug in + re-run)"
   fi
@@ -137,15 +149,24 @@ fi
 
 # ---- 5. pass init ----------------------------------------------------------
 if [[ -f "$STORE/.gpg-id" ]]; then
-  ok "pass store initialized ($(cat "$STORE/.gpg-id" 2>/dev/null | tr -d '\n' | tail -c 8))"
+  missing_ids=""
+  for f in $FPRS; do grep -qi "$f" "$STORE/.gpg-id" || missing_ids+=" ${f: -8}"; done
+  if [[ -z "$missing_ids" ]]; then
+    ok "pass store encrypted to every listed key"
+  else
+    warn "pass store NOT encrypted to:$missing_ids — that YubiKey can't read any entry"
+    hint "re-init to all keys (re-encrypts; needs a card that can decrypt the current entries): pass init $FPRS"
+    hint "if no plugged card can decrypt them: pass rm <entry>, pass init $FPRS, pass insert <entry>"
+  fi
 elif ! command -v pass >/dev/null 2>&1; then
   warn "pass not installed — apt phase (cli-system) installs it; pass init deferred"
 elif gpg --list-keys "$FPR" >/dev/null 2>&1 && (( INSTALL )); then
-  do_or_say pass init "$FPR"
+  # shellcheck disable=SC2086
+  do_or_say pass init $FPRS
 elif (( INSTALL )); then
   fail "cannot pass-init without the public key"
 else
-  warn "pass store not initialized (install runs: pass init $FPR)"
+  warn "pass store not initialized (install runs: pass init $FPRS)"
 fi
 
 # ---- 6. secret entries: report only, never provision -----------------------
