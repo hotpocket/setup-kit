@@ -317,10 +317,21 @@ done
 # -- 4f. dock pins (only meaningful inside a session) ---------------------------
 if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; then
   favs="$(gsettings get org.gnome.shell favorite-apps 2>/dev/null)"
-  for d in "$HOME"/git/.configs/.local/share/applications/*.desktop; do
-    [[ -f "$d" ]] || continue
-    n="$(basename "$d")"
+  # manifests/dock.list is the declaration: every installed, non-gated entry
+  # must be a favorite, and nothing else may be (Ubuntu's defaults included)
+  declare -a DOCK_WANT=()
+  while IFS= read -r line; do
+    line="${line%%#*}"; line=$(echo "$line" | xargs); [[ -z "$line" ]] && continue
+    grp=""; [[ "$line" == *" @"* ]] && { grp="${line##*@}"; line="${line% @*}"; }
+    n="${line%% *}"
+    [[ -n "$grp" ]] && ! gon "$grp" && continue
+    [[ -f "$HOME/.local/share/applications/$n" || -f "/usr/share/applications/$n" \
+       || -f "/var/lib/snapd/desktop/applications/$n" ]] || continue
+    DOCK_WANT+=("$n")
     [[ "$favs" == *"'$n'"* ]] && pass "dock pin: $n" || failv "dock pin: $n not in favorites"
+  done < manifests/dock.list
+  for n in $(grep -oE "[A-Za-z0-9_.+-]+\.desktop" <<<"$favs"); do
+    printf '%s\n' "${DOCK_WANT[@]}" | grep -qxF "$n" || failv "dock: $n pinned but not in manifests/dock.list"
   done
   # middle-click paste of the PRIMARY selection. 26.04's gschema default is
   # false; .configs/setup.sh forces it true. A false here = the override

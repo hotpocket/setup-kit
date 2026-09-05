@@ -28,6 +28,7 @@ DROPS = {  # pkg: reason
     "grub-efi-amd64-signed": "host-decided: on a BIOS box it would REMOVE grub-pc",
     "systemd-timesyncd": "host-decided: 26.04 ships chrony as the time daemon; this would REMOVE it",
     "tldr": "transitional (->tldr-hs); both gone from 26.04 — use tealdeer",
+    "obsidian": "dropped 2026-09-05 — the agent vault is plain markdown (vault-digest); no app wanted",
     "tldr-hs": "Haskell tldr client; dropped from 26.04 archive — use tealdeer",
     "webmin": "root web panel; Proxmox UI / Cockpit cover it",
     "usermin": "webmin's per-user sibling — same family, same verdict",
@@ -103,7 +104,6 @@ DIRECT_DEBS = {
     # apt knows `code` only once the deb has dropped its own vscode.sources
     # (CLAUDE.md: never add a vscode.list) — so a fresh box gets it as a deb
     "code": ("url", "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64"),
-    "obsidian": ("github", "obsidianmd/obsidian-releases:amd64.deb"),
     "minikube": ("url", "https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb", "dev_k8s"),
     "master-pdf-editor-5": ("manual", "https://code-industry.net/free-pdf-editor/ — version-pinned URLs"),
     "ganttproject": ("manual", "https://www.ganttproject.biz/download — version-pinned URLs"),
@@ -211,7 +211,7 @@ for p in ["python3-pip", "pipx", "python3-venv"]:
     OVERRIDES[p] = "dev-python"
 for p in ["android-sdk-platform-tools-common"]:
     OVERRIDES[p] = "dev-flutter-deps"
-for p in ["code", "obsidian"]:
+for p in ["code"]:
     OVERRIDES[p] = "editors"
 for p in ["google-chrome-stable", "brave-browser", "zoom",
           "google-drive-ocamlfuse"]:

@@ -47,3 +47,4 @@ grub-pc-bin                                 #      3.1 MB  with grub-pc
 grub-gfxpayload-lists                       #      0.0 MB  with grub-pc
 grub-efi-amd64-signed                       #      7.0 MB  host-decided: on a BIOS box it would REMOVE grub-pc
 systemd-timesyncd                           #      0.2 MB  host-decided: 26.04 ships chrony as the time daemon; this would REMOVE it
+obsidian                                    #      0.0 MB  dropped 2026-09-05 — the agent vault is plain markdown (vault-digest); no app wanted

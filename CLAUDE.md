@@ -18,7 +18,7 @@ packages, toolchains, configs — idempotently.
 ## Layout
 
 - `lib.sh` — shared helpers: output, modes, host-conf, detection, manifest/apt.
-- `manifests/` — WHAT to install: grouped apt lists, lang stacks, snap/flatpak, direct debs.
+- `manifests/` — WHAT to install: grouped apt lists, lang stacks, snap/flatpak, direct debs, gnome extensions, and `dock.list` (the GNOME dock, declared exactly — phase `06y-dock`).
 - `profiles/workstation/` — ordered idempotent phases (`00-disk-space` … `08-claude-skills`).
   `00-disk-space` runs first and is a gate: it projects the install's footprint
   (apt measured, `manifests/sizes.conf` declared) against free space per

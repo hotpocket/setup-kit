@@ -1,0 +1,23 @@
+# GNOME dock (favorite-apps), DECLARED: profiles/workstation/06y-dock.sh sets
+# favorites to exactly these, in this order, keeping only entries whose
+# .desktop file is installed. Ubuntu's defaults (firefox, thunderbird, the app
+# store, help) are not listed, so they leave the dock. Hand-maintained.
+#
+# Format: <desktop-id> [@group]   — @group gates on that apt group's host-conf
+# toggle (row skipped when off). Comments and blank lines ignored.
+# Find an id: ls /usr/share/applications /var/lib/snapd/desktop/applications
+# ~/.local/share/applications
+
+google-chrome.desktop                          # apps group (deb from the google repo)
+org.gnome.Terminal.desktop                     # gnome-terminal (desktop group; 26.04's default is Ptyxis)
+org.gnome.Nautilus.desktop
+com.mattjakeman.ExtensionManager.desktop       # gnome-shell-extension-manager (desktop group)
+com.obsproject.Studio.desktop     @media       # obs-studio
+gimp.desktop                      @media
+libreoffice-writer.desktop                     # editors group
+org.gnome.Rhythmbox3.desktop
+# .configs launchers (phase 06 links them into ~/.local/share/applications)
+magic.desktop                                  # MTGA under wine (component_mtga)
+ocrscr.desktop
+tts.desktop
+com.example.tts_client.desktop

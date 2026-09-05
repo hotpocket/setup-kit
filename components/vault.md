@@ -11,7 +11,7 @@ write discoveries back across sessions.
 
 ## Dependencies
 
-- **obsidian** — already provisioned (`manifests/debs.list`).
+- **obsidian app** — NOT installed (dropped 2026-09-05); the vault is plain markdown read by `vault-digest`, no app needed.
 - A per-project `vault/` dir (the `conduct` skill scaffolds one). Cross-project
   discovery is via symlinks under `~/Documents/AgentMemory/<project>` — created at
   project-init time, NOT by setup-kit.

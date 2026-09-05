@@ -149,25 +149,7 @@ if [[ -d "$LS_SRC" ]]; then
     rm -f "$HOME/.local/share/icons/hicolor/icon-theme.cache" && log "removed degenerate hicolor icon-theme.cache"
   fi
 
-  # Pin .configs-shipped launchers to the dock (merge, don't clobber others)
-  if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; then
-    cur="$(gsettings get org.gnome.shell favorite-apps 2>/dev/null)"
-    add=()
-    for d in "$LS_SRC"/applications/*.desktop; do
-      n="$(basename "$d")"; [[ "$cur" == *"'$n'"* ]] || add+=("$n")
-    done
-    if (( ${#add[@]} )); then
-      warn "dock: ${add[*]} not pinned"
-      if (( INSTALL )); then
-        new="${cur%]}"; [[ "$new" == "[" ]] || new+=", "
-        for n in "${add[@]}"; do new+="'$n', "; done
-        new="${new%, }]"
-        gsettings set org.gnome.shell favorite-apps "$new" && log "pinned: ${add[*]}"
-      fi
-    else
-      ok "dock: custom launchers pinned"
-    fi
-  fi
+  # dock pins: 06y-dock.sh, from manifests/dock.list (declared, exact)
 fi
 
 # Autostart entries: .configs tracks ~/.config/autostart (tts-server etc.)

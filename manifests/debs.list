@@ -8,7 +8,6 @@
 zoom	url	https://zoom.us/client/latest/zoom_amd64.deb
 discord	url	https://discord.com/api/download?platform=linux&format=deb
 code	url	https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64
-obsidian	github	obsidianmd/obsidian-releases:amd64.deb
 amdgpu-top	github	Umio-Yasuno/amdgpu_top:without_gui_.*amd64.deb
 minikube	url	https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb	dev_k8s
 master-pdf-editor-5	manual	https://code-industry.net/free-pdf-editor/ — version-pinned URLs
