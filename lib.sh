@@ -429,8 +429,19 @@ apt_installable() {
 apt_conflict_triggers() {
   local -n _want="$1"; local -n _remv="$2"
   (( ${#_remv[@]} && ${#_want[@]} )) || return 0
-  apt-get install -s --no-install-recommends "${_want[@]}" "${_remv[@]}" 2>&1 \
-    | awk '/unmet dependencies:/{f=1;next} f&&/^ [^ ]/{print $1} f&&!/^ /{f=0}' \
+  local out
+  out="$(apt-get install -s --no-install-recommends "${_want[@]}" "${_remv[@]}" 2>&1)"
+  # Only a package whose OWN lines say Conflicts:/Breaks: is a trigger. Once
+  # apt gives up on the pinned set it also prints every other package's deps
+  # as "not going to be installed" — innocents, and a parser that took every
+  # name in the block once blamed 28 media packages for pulseaudio's conflict.
+  # Two shapes, both real: the WANTED side states it ('systemd-timesyncd :
+  # Conflicts: time-daemon' — virtual, so only that side names anything) or
+  # the REMOVED side does ('pipewire-audio : Conflicts: pulseaudio'). Take
+  # the block's package when it is wanted, the Conflicts target when it is.
+  awk '/unmet dependencies:/{f=1;next} f&&/^ [^ ]/{pkg=$1}
+       f&&/(Conflicts|Breaks):/{ t=$0; sub(/.*(Conflicts|Breaks): */, "", t); sub(/[ :].*/, "", t); print pkg; print t }
+       f&&!/^ /{f=0}' <<<"$out" \
     | grep -Fxf <(printf '%s\n' "${_want[@]}") | sort -u
   return 0
 }

@@ -12,7 +12,6 @@ espeak-ng-data                              #     11.5 MB  sound
 kdenlive                                    #      8.7 MB  video
 shotcut                                     #      4.9 MB  video
 mplayer                                     #      4.8 MB  video
-pulseaudio                                  #      4.3 MB  sound
 tesseract-ocr-eng                           #      3.9 MB  graphics
 vlc-plugin-qt                               #      3.3 MB  video
 qjackctl                                    #      2.9 MB  sound
@@ -31,14 +30,12 @@ guvcview                                    #      0.5 MB  graphics
 mpg123                                      #      0.5 MB  sound
 branding-ubuntu                             #      0.5 MB  graphics
 alsa-base                                   #      0.5 MB  sound
-pulseaudio-module-bluetooth                 #      0.3 MB  sound
 pulseaudio-utils                            #      0.3 MB  sound
 feh                                         #      0.3 MB  graphics
 totem                                       #      0.2 MB  video
 vlc                                         #      0.2 MB  video
 libheif-examples                            #      0.2 MB  video
 sox                                         #      0.2 MB  sound
-pulseaudio-equalizer                        #      0.1 MB  sound
 scrot                                       #      0.1 MB  graphics
 lame                                        #      0.1 MB  sound
 zbar-tools                                  #      0.1 MB  graphics

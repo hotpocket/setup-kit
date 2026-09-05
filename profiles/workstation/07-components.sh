@@ -480,7 +480,7 @@ if [[ "$(conf_get component_dictation yes)" == yes ]]; then
     # A uaccess ACL on /dev/uinput is per-uid for the active seat — works now,
     # survives relogins, needs no group. 72- so it precedes 73-seat-late.rules,
     # which is what turns the tag into the ACL.
-    UI_RULE=/etc/udev/rules.d/72-uinput-uaccess.rules
+    UI_RULE="${UINPUT_RULE:-/etc/udev/rules.d/72-uinput-uaccess.rules}"   # overridable for tests/
     UI_WANT='KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess"'
     if [[ -f "$UI_RULE" && "$(cat "$UI_RULE")" == "$UI_WANT" ]]; then
       ok "/dev/uinput uaccess rule present"

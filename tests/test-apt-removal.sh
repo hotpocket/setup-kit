@@ -25,12 +25,17 @@ if ! inst chrony || ! inst grub-efi-amd64; then
 fi
 source "$KIT_DIR/lib.sh"
 # the VM's exact transaction shape: two conflicting pins plus innocent packages
-WANT=(systemd-timesyncd grub-pc tree htop)
+# gimp: an innocent with a long dependency chain — when apt gives up on the
+# pinned set it lists every one of gimp's deps as "not going to be
+# installed", and a parser that takes every name in that block blames gimp
+# (2026-09-05: 28 media packages skipped for pulseaudio's conflict)
+WANT=(systemd-timesyncd grub-pc tree htop gimp)
 REMV=(chrony grub-efi-amd64)
 out="$(apt_conflict_triggers WANT REMV | sort | tr '\n' ' ')"
 assert "names systemd-timesyncd (conflicts chrony via time-daemon)" '[[ " $out" == *" systemd-timesyncd "* ]]'
 assert "names grub-pc (conflicts grub-efi-amd64)"                   '[[ " $out" == *" grub-pc "* ]]'
 assert "does NOT name the innocent packages"                         '[[ "$out" != *tree* && "$out" != *htop* ]]'
+assert "does NOT name gimp (deps unsatisfiable only because apt gave up)" '[[ "$out" != *gimp* ]]'
 assert "exactly the two triggers"                                    '[[ "$out" == "grub-pc systemd-timesyncd " ]]'
 # control: no removals → nothing to attribute, and no apt call needed
 NONE=()
