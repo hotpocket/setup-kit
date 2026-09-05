@@ -59,15 +59,22 @@ if grep -Fxq tealdeer < <(printf '%s\n' "${WANT[@]}") && ! pkg_installed tealdee
 fi
 
 # wine: switching WineHQ branch (wine_branch in host conf) is a DELIBERATE swap
-# — winehq-<new> conflicts with winehq-<old>, and the removal guard below would
-# otherwise read it as a manifest pin fighting the box and skip the new branch.
-# Remove the old branch explicitly first, like tldr above. ~/.wine is kept.
+# — winehq-<new> conflicts with winehq-<old> AND with Ubuntu's own `wine`, and
+# the removal guard below would read either as a manifest pin fighting the box
+# and skip the new branch. ONE transaction does the swap: install new, remove
+# old and distro wine together. Not two steps — removing wine-stable first left
+# winetricks (Depends: wine) unsatisfied, apt auto-installed distro wine 10.0
+# to fill it, and that then blocked winehq-devel (2026-09-05). ~/.wine is kept.
 WB_WANT="$(printf '%s\n' "${WANT[@]}" | grep -oE '^winehq-(stable|devel|staging)$' | head -1)"
 WB_HAVE="$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'winehq-*' 2>/dev/null | awk '/^ii /{print $2; exit}')"
-if [[ -n "$WB_WANT" && -n "$WB_HAVE" && "$WB_WANT" != "$WB_HAVE" ]]; then
-  old="${WB_HAVE#winehq-}"
-  warn "wine: switching branch $old → ${WB_WANT#winehq-} — removing $WB_HAVE wine-$old first (prefix ~/.wine untouched)"
-  do_or_say sudo "${APT_NI[@]}" remove -y "$WB_HAVE" "wine-$old"
+if [[ -n "$WB_WANT" ]] && ! pkg_installed "$WB_WANT" \
+   && { [[ -n "$WB_HAVE" ]] || pkg_installed wine; }; then
+  new="${WB_WANT#winehq-}"; swap=("$WB_WANT" "wine-$new")
+  [[ -n "$WB_HAVE" ]] && swap+=("$WB_HAVE-" "wine-${WB_HAVE#winehq-}-")
+  pkg_installed wine && swap+=(wine- wine64- libwine-)   # Ubuntu's wine, pulled in as a dep
+  warn "wine: switching to branch $new — replacing ${WB_HAVE:-distro wine} in one transaction (prefix ~/.wine untouched)"
+  do_or_say sudo "${APT_NI[@]}" install -y --no-install-recommends "${swap[@]}" \
+    || miss "wine: branch swap to $new failed — see logs/$SCRIPT_NAME.log"
 fi
 
 # ---- what's missing ---------------------------------------------------------
