@@ -21,3 +21,4 @@ magic.desktop                                  # MTGA under wine (component_mtga
 ocrscr.desktop
 tts.desktop
 com.example.tts_client.desktop
+screenshots-folder.desktop                     # opens ~/Pictures/Screenshots (Yaru folder-pictures icon)
