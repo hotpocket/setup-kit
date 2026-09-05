@@ -345,6 +345,16 @@ apt_wanted_pkgs() {
     mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv -f <(tr ' ' '\n' <<<"$SKIPS"))
     echo "@ok honoring skip_pkgs: $SKIPS"
   fi
+  # wine branch — the manifest names WineHQ's stable packages; wine_branch
+  # (stable|devel|staging) swaps them for the chosen branch. The prefix
+  # (~/.wine) is untouched by a branch swap. (2026-09-05: MTGA's mouse-capture
+  # bug, fixed upstream, still present in stable 11.0 — devel 11.17 wanted.)
+  local WB; WB="$(conf_get wine_branch stable)"
+  case "$WB" in stable|devel|staging) ;; *) echo "@warn wine_branch '$WB' unknown — using stable"; WB=stable ;; esac
+  if [[ "$WB" != stable ]] && (( ${#WANT[@]} )); then
+    mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | sed -E "s/^(winehq|wine)-stable\$/\1-$WB/")
+    echo "@ok wine: branch $WB (winehq-$WB, wine-$WB)"
+  fi
   # release reconciliation — steam: a box already running Valve's
   # steam-launcher (self-managed repo) has steam-libs newer than the exact
   # version multiverse's steam-installer pins; installing it is an unmet-dep

@@ -58,6 +58,18 @@ if grep -Fxq tealdeer < <(printf '%s\n' "${WANT[@]}") && ! pkg_installed tealdee
   do_or_say sudo "${APT_NI[@]}" remove -y tldr tldr-hs
 fi
 
+# wine: switching WineHQ branch (wine_branch in host conf) is a DELIBERATE swap
+# — winehq-<new> conflicts with winehq-<old>, and the removal guard below would
+# otherwise read it as a manifest pin fighting the box and skip the new branch.
+# Remove the old branch explicitly first, like tldr above. ~/.wine is kept.
+WB_WANT="$(printf '%s\n' "${WANT[@]}" | grep -oE '^winehq-(stable|devel|staging)$' | head -1)"
+WB_HAVE="$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'winehq-*' 2>/dev/null | awk '/^ii /{print $2; exit}')"
+if [[ -n "$WB_WANT" && -n "$WB_HAVE" && "$WB_WANT" != "$WB_HAVE" ]]; then
+  old="${WB_HAVE#winehq-}"
+  warn "wine: switching branch $old → ${WB_WANT#winehq-} — removing $WB_HAVE wine-$old first (prefix ~/.wine untouched)"
+  do_or_say sudo "${APT_NI[@]}" remove -y "$WB_HAVE" "wine-$old"
+fi
+
 # ---- what's missing ---------------------------------------------------------
 MISSING=()
 for p in "${WANT[@]}"; do
