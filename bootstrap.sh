@@ -148,10 +148,22 @@ case "$cmd" in
       # can't fit). Everything after it would be writing into a condition
       # it has already been told about, so stop the whole run here.
       aborted=0
+      (( pass > 1 )) && printf '\n%s━━ pass %s — re-checking what pass %s changed ━━%s\n' "$C_HDR" "$pass" "$((pass-1))" "$C_RST"
       for phase in "$PHASE_DIR/"[0-9][0-9]*-*.sh; do
+        # tally per phase: what this phase found, and how long it took
+        l0=$(wc -l < "$RUN_LOG" 2>/dev/null || echo 0); t0=$SECONDS
         bash "$phase" "$mode" 2>&1 | tee -a "$RUN_LOG"
         prc="${PIPESTATUS[0]}"
         [[ "$prc" -eq 0 ]] || rc=1
+        if [[ -z "${KIT_VERBOSE:-}" ]]; then
+          delta="$(tail -n +"$((l0+1))" "$RUN_LOG")"
+          p_ok=$(grep -c '\[ OK \]' <<<"$delta"); p_w=$(grep -c '\[WARN\]' <<<"$delta"); p_f=$(grep -c '\[FAIL\]' <<<"$delta")
+          p_a=$(grep -cE '^  \+ |apt install attempt' <<<"$delta")
+          if (( p_ok + p_w + p_f + p_a )); then
+            printf '  %s%s: %s ok · %s warn · %s fail · %s actions · %ss%s\n' \
+              "$C_DIM" "$(basename "$phase" .sh)" "$p_ok" "$p_w" "$p_f" "$p_a" "$((SECONDS - t0))" "$C_RST"
+          fi
+        fi
         if [[ "$prc" -eq 3 ]]; then
           aborted=1
           echo "  ⛔ ABORTED by $(basename "$phase") — nothing further was run"
@@ -165,12 +177,13 @@ case "$cmd" in
       n_fail=$(grep -c '\[FAIL\]' "$RUN_LOG" || true)
       # actions = do_or_say invocations, kit "installed:" log lines, apt runs —
       # NOT phrases like "already installed" from chained tools
-      n_act=$(grep -cE '\] \+ |^\[[0-9T:.+-]+\] installed: |apt install attempt' "$RUN_LOG" || true)
+      # quiet lines ('  + cmd ✓ 3s', '  installed: x') and verbose ones ('[ts] + cmd')
+      n_act=$(grep -cE '^  \+ |\] \+ |^  installed: |\] installed: |apt install attempt' "$RUN_LOG" || true)
       # the same actions, normalised (no timestamps, no mktemp names) — a pass
       # that would redo exactly what the last one did is not converging, it is
       # cycling: an install whose "done?" check can't see its own result
-      grep -E '\] \+ |^\[[0-9T:.+-]+\] installed: |apt install attempt' "$RUN_LOG" \
-        | sed -E 's/^\[[^]]*\] //; s#/tmp/tmp\.[A-Za-z0-9]+#/tmp/tmp.X#g' | sort > "$LOG_DIR/.actions-p$pass"
+      grep -E '^  \+ |\] \+ |^  installed: |\] installed: |apt install attempt' "$RUN_LOG" \
+        | sed -E 's/^\[[^]]*\] //; s/ ✓ [0-9]+s$//; s/ ✗ exit.*$//; s#/tmp/tmp\.[A-Za-z0-9]+#/tmp/tmp.X#g' | sort > "$LOG_DIR/.actions-p$pass"
       section "summary — $(hostname) ($mode, pass $pass)"
       echo "  ok: $n_ok   warn: $n_warn   fail: $n_fail   actions: $n_act"
       # surface WHAT failed/warned, not just the counts — last occurrence of

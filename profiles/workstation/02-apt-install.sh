@@ -190,8 +190,15 @@ for attempt in 1 2 3 4; do
     miss "apt: refused transaction (would remove: ${REMV[*]:0:6} ...) — resolve by hand or skip_pkgs the trigger"
     exit 1
   fi
-  "${APT_INSTALL[@]}" "${MISSING[@]}" \
-    2>&1 | tee "$LOG_DIR/apt-install-out.tmp" | tail -3
+  # live counter on one line (fetched / unpacked / configured) — the full
+  # transcript goes to the log; the terminal needs to see it is still moving
+  "${APT_INSTALL[@]}" "${MISSING[@]}" 2>&1 | tee "$LOG_DIR/apt-install-out.tmp" \
+    | awk -v n="$(grep -oE '[0-9]+ newly installed' <<<"$SIM_OUT" | grep -oE '^[0-9]+')" '
+        /^Get:/        { g++ } /^Unpacking /  { u++ } /^Setting up / { s++ }
+        /^(Get:|Unpacking |Setting up )/ { printf "\r  apt: fetched %d · unpacked %d · configured %d of %s", g, u, s, n; fflush() }
+        END { if (g+u+s) print "" }'
+  # a failed exit lands in the transcript below; the pipeline's own rc is awk'"'"'s
+  grep -E '^E: ' "$LOG_DIR/apt-install-out.tmp" | head -3
   # Installing GPU kernel modules on a LIVE desktop is not inert: once dpkg
   # runs depmod, udev autoloads the new module into the running session —
   # it seizes the framebuffer from the compositor and the GPU can wedge

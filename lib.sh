@@ -23,13 +23,15 @@ else
 fi
 DOCTOR_WARN=0; DOCTOR_FAIL=0
 
-# Quiet mode (under bootstrap: KIT_RUN_LOG set, KIT_VERBOSE unset): pytest-style
-# progress marks — '.' ok, '!' warn, 'x' fail — written straight to the tty so
-# the tee'd run log stays clean. Full detail lines go to the run log, and the
-# bootstrap summary replays every unique WARN/FAIL at the end (the report).
-# Actions (log/do_or_say) still print inline on their own lines, breaking the
-# mark stream. KIT_VERBOSE=1 (bootstrap -v, or verbose=yes in host conf) and
-# standalone phase runs: full per-line output, no marks.
+# Quiet mode (under bootstrap: KIT_RUN_LOG set, KIT_VERBOSE unset) — the
+# terminal is a NARRATIVE, not a transcript: section headers, WARN/FAIL lines
+# (with their hints), and one line per action with ✓/✗ and elapsed time. OK
+# detail is a '.' mark (full text in the run log) and timestamps stay in the
+# log files. Bootstrap tees stdout into the run log and counts the [WARN]/
+# [FAIL] tags there, so anything printed to stdout must NOT also be _rlog'd;
+# marks go straight to the tty, which tee never sees, so OK detail is _rlog'd.
+# KIT_VERBOSE=1 (bootstrap -v, or verbose=yes) and standalone phase runs:
+# full per-line output, no marks.
 KIT_QUIET=0
 [[ -n "${KIT_RUN_LOG:-}" && "${KIT_VERBOSE:-0}" != 1 ]] && KIT_QUIET=1
 DOTS=0
@@ -39,7 +41,7 @@ _rlog()       { printf '%s\n' "$*" >> "$KIT_RUN_LOG"; }
 trap _break_dots EXIT
 
 section() {
-  if (( KIT_QUIET )); then _rlog ""; _rlog "$*"
+  if (( KIT_QUIET )); then _break_dots; printf '\n%s▶ %s%s\n' "$C_HDR" "$*" "$C_RST"
   else printf '\n%s%s%s\n' "$C_HDR" "$*" "$C_RST"; fi
 }
 ok() {
@@ -47,25 +49,25 @@ ok() {
   else printf '  %s[ OK ]%s  %s\n' "$C_OK" "$C_RST" "$*"; fi
 }
 warn() {
-  if (( KIT_QUIET )); then _rlog "  [WARN]  $*"; _mark '!'
-  else printf '  %s[WARN]%s  %s\n' "$C_WARN" "$C_RST" "$*"; fi
+  (( KIT_QUIET )) && _break_dots
+  printf '  %s[WARN]%s  %s\n' "$C_WARN" "$C_RST" "$*"
   DOCTOR_WARN=$((DOCTOR_WARN+1))
 }
 fail() {
-  if (( KIT_QUIET )); then _rlog "  [FAIL]  $*"; _mark 'x'
-  else printf '  %s[FAIL]%s  %s\n' "$C_FAIL" "$C_RST" "$*"; fi
+  (( KIT_QUIET )) && _break_dots
+  printf '  %s[FAIL]%s  %s\n' "$C_FAIL" "$C_RST" "$*"
   DOCTOR_FAIL=$((DOCTOR_FAIL+1))
 }
 hint() {
-  if (( KIT_QUIET )); then _rlog "          ↳ $*"
-  else printf '          %s↳ %s%s\n' "$C_DIM" "$*" "$C_RST"; fi
+  (( KIT_QUIET )) && _break_dots
+  printf '          %s↳ %s%s\n' "$C_DIM" "$*" "$C_RST"
 }
 
+# terminal gets the message; the script log gets it timestamped
 log() {
-  local msg="[$(date -Iseconds)] $*"
-  (( KIT_QUIET )) && _break_dots
-  echo "$msg"
-  echo "$msg" >> "$LOG_DIR/${SCRIPT_NAME:-unknown}.log"
+  local msg="$*"
+  if (( KIT_QUIET )); then _break_dots; echo "  $msg"; else echo "[$(date -Iseconds)] $msg"; fi
+  echo "[$(date -Iseconds)] $msg" >> "$LOG_DIR/${SCRIPT_NAME:-unknown}.log"
 }
 
 miss() { echo "$*" >> "$LOG_DIR/missing.log"; log "MISS: $*"; }
@@ -94,22 +96,40 @@ init_mode() {
 # lines that hid the four that mattered.)
 do_or_say() {
   if (( INSTALL )); then
-    log "+ $*"
-    local slog="$LOG_DIR/${SCRIPT_NAME:-unknown}.log" rc
+    local slog="$LOG_DIR/${SCRIPT_NAME:-unknown}.log" rc t0
+    echo "[$(date -Iseconds)] + $*" >> "$slog"
     if (( KIT_QUIET )); then
+      # one line per action: what, then ✓/✗ and how long, on the same line
+      _break_dots
+      printf '  + %s' "$(_cmd_brief "$@")"
+      t0=$SECONDS
       "$@" >> "$slog" 2>&1; rc=$?
       if (( rc )); then
-        printf '  %s[FAILED]%s exit %s — last output lines:\n' "$C_FAIL" "$C_RST" "$rc"
+        printf ' %s✗ exit %s%s (%ss)\n' "$C_FAIL" "$rc" "$C_RST" "$((SECONDS - t0))"
+        printf '  %s[FAILED]%s last output lines:\n' "$C_FAIL" "$C_RST"
         tail -n 8 "$slog" | sed 's/^/    | /'
+      else
+        printf ' %s✓%s %ss\n' "$C_OK" "$C_RST" "$((SECONDS - t0))"
       fi
       return "$rc"
     fi
+    echo "[$(date -Iseconds)] + $*"
     "$@" 2>&1 | tee -a "$slog"
     return "${PIPESTATUS[0]}"
   else
     (( KIT_QUIET )) && _break_dots
     printf '  %s[would]%s %s\n' "$C_DIM" "$C_RST" "$*"
   fi
+}
+# the command as a human reads it: no sudo/env/dpkg-option noise, clipped
+_cmd_brief() {
+  local out="" a
+  for a in "$@"; do
+    case "$a" in sudo|DEBIAN_FRONTEND=*|-o|Dpkg::Options::=*|-y|--quiet|-q) continue ;; esac
+    out+="${out:+ }$a"
+  done
+  (( ${#out} > 110 )) && out="${out:0:107}..."
+  printf '%s' "$out"
 }
 
 # External-tool output (flutter doctor, .configs setup.sh, listings): always

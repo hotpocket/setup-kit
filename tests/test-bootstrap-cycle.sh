@@ -17,7 +17,7 @@ mkdir -p "$TMP/phases"
 cat > "$TMP/phases/01-groundhog.sh" <<EOF2
 #!/bin/bash
 echo "\$(date +%s)" >> "$TMP/runs"
-echo "[2026-01-01T00:00:00+00:00] + reinstall-the-same-thing /tmp/tmp.\$RANDOM.zip"
+echo "  + reinstall-the-same-thing /tmp/tmp.\$RANDOM.zip ✓ 1s"
 echo "  [WARN]  thing missing"
 EOF2
 mkdir -p "$TMP/bin"; printf '#!/bin/bash\nexit 0\n' > "$TMP/bin/sudo"
@@ -34,6 +34,7 @@ PATH="$TMP/bin:$PATH" KIT_PHASE_DIR="$TMP/phases" HOST_CONF="$TMP/host.conf" KIT
 n=$(wc -l < "$TMP/runs")
 assert "a second pass runs (the first pass DID act)"      '(( n >= 2 ))'
 assert "a THIRD identical pass does not"                   '(( n == 2 ))'
+assert "each phase ends with a one-line tally"              'grep -qE "01-groundhog.*[0-9]+ warn" "$TMP/out"'
 assert "the loop says why it stopped"                      'grep -qi "same actions" "$TMP/out"'
 assert "still reported as not converged (needs a human)"   'grep -q "NOT converged" "$TMP/out"'
 echo "  $pass passed, $fail failed"
