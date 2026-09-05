@@ -71,12 +71,7 @@ section "android SDK + emulator ($MODE)"
 if [[ -x "$CMDLINE/sdkmanager" ]]; then
   ok "cmdline-tools present"
   for p in platform-tools emulator; do
-    if [[ -d "$SDK_DIR/$p" ]]; then
-      ok "sdk: $p"
-    else
-      warn "sdk: $p missing"
-      do_or_say "$CMDLINE/sdkmanager" "$p" || miss "android-sdk: $p"
-    fi
+    [[ -d "$SDK_DIR/$p" ]] && ok "sdk: $p" || warn "sdk: $p missing (installed below from flutter.list)"
   done
   if ls "$SDK_DIR/system-images" >/dev/null 2>&1; then
     ok "system image(s) present"
@@ -99,8 +94,56 @@ if [[ -x "$CMDLINE/sdkmanager" ]]; then
     warn "no AVDs — create one in Studio (Device Manager) after first launch"
   fi
 else
-  warn "android cmdline-tools missing"
-  hint "first Studio launch installs the SDK; or unzip cmdline-tools into $SDK_DIR/cmdline-tools/latest"
+  # Google publishes cmdline-tools at a version-numbered URL; the studio page
+  # carries the current one. Unzip lands as cmdline-tools/, sdkmanager wants
+  # cmdline-tools/latest/ — move it. Then licenses + the SDK pieces flutter
+  # doctor asks for, all from manifests/lang/flutter.list (android-sdk: rows).
+  warn "android cmdline-tools missing — installing (sdkmanager, licenses, SDK packages)"
+  if (( INSTALL )); then
+    CT_URL="$(curl -fsSL https://developer.android.com/studio 2>/dev/null \
+              | grep -oE 'https://dl\.google\.com/android/repository/commandlinetools-linux-[0-9]+_latest\.zip' | head -1)"
+    if [[ -z "$CT_URL" ]]; then
+      miss "android-sdk: could not find the cmdline-tools download URL on developer.android.com/studio"
+    else
+      tmp="$(mktemp -d)"
+      if curl -fsSL "$CT_URL" -o "$tmp/ct.zip" && unzip -q "$tmp/ct.zip" -d "$tmp" \
+         && mkdir -p "$SDK_DIR/cmdline-tools" && rm -rf "$SDK_DIR/cmdline-tools/latest" \
+         && mv "$tmp/cmdline-tools" "$SDK_DIR/cmdline-tools/latest"; then
+        log "installed cmdline-tools → $SDK_DIR/cmdline-tools/latest"
+      else
+        miss "android-sdk: cmdline-tools download/unpack failed ($CT_URL)"
+      fi
+      rm -rf "$tmp"
+    fi
+  else
+    printf '  %s[would]%s download cmdline-tools → %s/cmdline-tools/latest, accept licenses, sdkmanager the flutter.list packages\n' "$C_DIM" "$C_RST" "$SDK_DIR"
+  fi
+fi
+if [[ -x "$CMDLINE/sdkmanager" ]] && (( INSTALL )); then
+  # licenses first (every sdkmanager install refuses without them), then the
+  # manifest rows: 'latest' / 'current-stable' resolve against sdkmanager --list
+  yes 2>/dev/null | "$CMDLINE/sdkmanager" --licenses >/dev/null 2>&1 || true
+  SDK_LIST="$("$CMDLINE/sdkmanager" --list 2>/dev/null)"
+  while IFS= read -r entry; do
+    [[ "$entry" == android-sdk:* ]] || continue
+    pkg="${entry#android-sdk:}"
+    case "$pkg" in
+      build-tools\;latest)  pkg="$(grep -oE 'build-tools;[0-9.]+' <<<"$SDK_LIST" | grep -v rc | sort -t';' -k2 -V | tail -1)" ;;
+      platforms\;latest)    pkg="$(grep -oE 'platforms;android-[0-9]+' <<<"$SDK_LIST" | sort -t- -k2 -n | tail -1)" ;;
+      system-images\;current-stable\;*)
+        suffix="${pkg#system-images;current-stable}"
+        pkg="$(grep -oE "system-images;android-[0-9]+$suffix" <<<"$SDK_LIST" | sort -t- -k2 -n | tail -1)" ;;
+    esac
+    [[ -n "$pkg" ]] || { miss "android-sdk: could not resolve '$entry' against sdkmanager --list"; continue; }
+    if grep -qE "^  ${pkg}[[:space:]]" <<<"$(sed -n '/^Installed packages:/,/^Available Packages:/p' <<<"$SDK_LIST")"; then
+      ok "sdk: $pkg"
+    else
+      warn "sdk: $pkg missing"
+      do_or_say "$CMDLINE/sdkmanager" "$pkg" >/dev/null || miss "android-sdk: $pkg"
+    fi
+  done < <(manifest_pkgs "$MANIFEST_DIR/lang/flutter.list")
+  [[ -x "$FLUTTER_DIR/bin/flutter" ]] && { "$FLUTTER_DIR/bin/flutter" config --android-sdk "$SDK_DIR" >/dev/null 2>&1
+                                          yes 2>/dev/null | "$FLUTTER_DIR/bin/flutter" doctor --android-licenses >/dev/null 2>&1 || true; }
 fi
 
 if [[ -x "$FLUTTER_DIR/bin/flutter" ]] && (( ! INSTALL )); then

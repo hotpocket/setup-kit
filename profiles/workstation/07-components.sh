@@ -461,9 +461,26 @@ if [[ "$(conf_get component_dictation yes)" == yes ]]; then
   fi
   # Wayland caveat: nerd-dictation types via xdotool (X11). 26.04 defaults
   # to Wayland — needs ydotool/wtype or an Xorg session.
-  if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && ! command -v ydotool wtype >/dev/null 2>&1; then
-    warn "Wayland session without ydotool/wtype — dictation can listen but can't type"
-    hint "apt install ydotool (plus uinput perms) or switch the session to Xorg"
+  # Wayland: nerd-dictation types through ydotool. Three parts, all needed:
+  # the package (ydotool + ydotoold + a udev rule making /dev/uinput group
+  # 'input'), membership of that group (takes effect at next login), and the
+  # user service running ydotoold (socket in $XDG_RUNTIME_DIR, where the
+  # client looks). The .configs wrapper picks YDOTOOL on Wayland by itself.
+  if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+    if pkg_installed ydotool; then ok "ydotool installed (Wayland typing)"
+    else warn "ydotool missing — dictation on Wayland can listen but can't type"; apt_install ydotool; fi
+    if id -nG "$USER" 2>/dev/null | grep -qw input; then ok "user in input group (/dev/uinput)"
+    else
+      warn "user not in input group — ydotool can't open /dev/uinput (takes effect at next login)"
+      do_or_say sudo usermod -aG input "$USER"
+    fi
+    if systemctl --user is-enabled ydotool.service >/dev/null 2>&1; then ok "ydotool.service enabled (ydotoold)"
+    elif pkg_installed ydotool; then
+      warn "ydotool.service not enabled — ydotoold must run for the client to type"
+      do_or_say systemctl --user enable --now ydotool.service
+    else
+      printf '  %s[would]%s enable ydotool.service (ydotoold) once the package is in\n' "$C_DIM" "$C_RST"
+    fi
   fi
 fi
 

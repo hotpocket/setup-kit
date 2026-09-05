@@ -13,6 +13,21 @@ source "$(dirname "$0")/../../lib.sh"
 require_user
 init_mode "${1:-}"
 
+# Claude Code (the `claude` binary) is its own flag, default ON: the conduct
+# skills in .configs are useless without it, so skills=yes implies it.
+if [[ "$(conf_get component_claude_code yes)" == yes || "$(conf_get component_claude_skills yes)" == yes ]]; then
+  section "claude code ($MODE)"
+  # Claude Code itself: the native installer, and ONLY that (no npm global, no
+  # deb) — it self-updates in ~/.local/share/claude and links ~/.local/bin/claude.
+  # Checked by path too: ~/.local/bin is not on PATH in a fresh box's shell.
+  if command -v claude >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/claude" ]]; then
+    ok "claude code installed ($("$HOME/.local/bin/claude" --version 2>/dev/null | head -1 || echo present))"
+  else
+    warn "claude code missing"
+    do_or_say bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || miss "claude-code: native installer failed"
+  fi
+fi
+
 [[ "$(conf_get component_claude_skills yes)" == yes ]] || exit 0
 
 SKILLS="$(conf_get claude_skills 'gstack vault conduct repo-story')"
@@ -141,9 +156,14 @@ else
 fi
 
 # gstack's browse daemon is built with bun; the skill is useless without it.
-if [[ " $SKILLS " == *" gstack "* ]] && ! command -v bun >/dev/null 2>&1; then
-  warn "gstack browse daemon needs 'bun' to build — not installed"
-  miss "claude-skills: gstack linked but 'bun' missing — build the browse daemon"
+# bun's official installer lands in ~/.bun/bin (the .configs bashrc adds it).
+if [[ " $SKILLS " == *" gstack "* ]]; then
+  if command -v bun >/dev/null 2>&1 || [[ -x "$HOME/.bun/bin/bun" ]]; then
+    ok "bun present (gstack browse daemon builds)"
+  else
+    warn "bun missing — gstack's browse daemon needs it to build"
+    do_or_say bash -c 'curl -fsSL https://bun.sh/install | bash' || miss "claude-skills: bun install failed"
+  fi
 fi
 
 # gstack browse runs Playwright-managed Chromium. Two host-level traps

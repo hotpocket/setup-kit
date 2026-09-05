@@ -7,9 +7,10 @@ dart-global:coverage     # one package provides collect_/format_/test_with_cover
 
 # Android: Studio tarball -> ~/android-studio, SDK -> ~/Android/Sdk
 android-sdk:platform-tools
+android-sdk:platforms;latest
 android-sdk:build-tools;latest
 android-sdk:emulator
-android-sdk:system-images;current-stable;google_apis;x86_64
+android-sdk:system-images;current-stable;google_apis;x86_64   # ~1.2 GB
 android-avd:default-pixel                      # one default AVD; more via Studio GUI
 
 # REQUIREMENT: emulator needs /dev/kvm.

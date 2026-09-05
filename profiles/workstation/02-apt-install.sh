@@ -231,6 +231,15 @@ for attempt in 1 2 3 4; do
     hint "a graphical session running now may lose its displays when udev loads the new module; reboot ends it"
     miss "nvidia: driver/module packages installed — reboot required"
   fi
+  # Packages that ship udev rules (libccid for the YubiKey, ydotool's uinput,
+  # android's adb rules) only govern devices plugged AFTER they land — udev
+  # applies rules at add time. Re-apply so what is already plugged gets its
+  # group/ACL now (2026-09-05: pcscd LIBUSB_ERROR_ACCESS on a YubiKey plugged
+  # 40 minutes before libccid). Cheap, idempotent.
+  if grep -q '^Setting up ' "$LOG_DIR/apt-install-out.tmp"; then
+    sudo udevadm control --reload 2>/dev/null && sudo udevadm trigger --subsystem-match=usb --subsystem-match=misc 2>/dev/null \
+      && log "udev rules reloaded and re-applied to plugged devices"
+  fi
   mapfile -t BAD < <({ grep -oP 'Unable to locate package \K\S+' "$LOG_DIR/apt-install-out.tmp"
                        grep -oP "Package '\K[^']+(?=' has no installation candidate)" "$LOG_DIR/apt-install-out.tmp"
                      } | sort -u)
