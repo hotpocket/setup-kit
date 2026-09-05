@@ -631,10 +631,13 @@ elif [[ ! -x "$FLUTTER_BIN" ]]; then
   warn "tts flutter client: flutter SDK missing — run 05-flutter-android"
 elif [[ -x "$TTS_FL_BIN" ]]; then
   ok "tts flutter client bundle present"
+elif ! command -v cmake ninja clang pkg-config >/dev/null 2>&1; then
+  # toolchain comes from the dev-flutter-deps apt group; without it flutter
+  # prints "CMake is required" and the build is a 2-minute no-op per pass
+  warn "tts flutter client: Linux build toolchain missing (cmake/ninja/clang/pkg-config — apt dev-flutter-deps) — build deferred"
 elif (( INSTALL )); then
   warn "tts flutter client bundle not built — building"
-  (cd "$TTS_FL_SRC" && "$FLUTTER_BIN" build linux --release) 2>&1 \
-    | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
+  (cd "$TTS_FL_SRC" && "$FLUTTER_BIN" build linux --release) 2>&1 | extout
   [[ -x "$TTS_FL_BIN" ]] && ok "tts flutter client built" \
     || miss "tts: flutter build linux --release (bundle still absent)"
 else

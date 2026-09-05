@@ -66,7 +66,10 @@ ensure_repo() {            # dir url  -> 0 if present after, 1 otherwise
   if [[ -d "$dir/.git" ]]; then
     if (( INSTALL )) && [[ -n "$url" ]] && repo_stale "$dir"; then
       # ff-only + soft-fail: offline or locally-diverged just uses what's there.
-      if git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
+      # BatchMode: the phase loop is unaided (the preamble front-loads every
+      # PIN/touch); a key that needs one here must fail now, not hold the run
+      # on a prompt nobody is watching (2026-09-05: ~1 min per pass, x3).
+      if GIT_SSH_COMMAND='ssh -o BatchMode=yes' git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
         ok "repo $name present (pulled — wanted path was missing)"
       else
         warn "repo $name present but not updated (offline / diverged) — using as-is"

@@ -139,7 +139,10 @@ if command -v gnome-extensions >/dev/null 2>&1; then
     grp=""; [[ "$line" == *" @"* ]] && { grp="${line##*@}"; line="${line% @*}"; }
     uuid="${line%% *}"
     [[ -n "$grp" ]] && ! gon "$grp" && continue
-    gnome-extensions list 2>/dev/null | grep -qxF "$uuid" \
+    # on disk counts: the running shell lists a new extension only after the
+    # next login (Wayland), and "installed" is what this check is for
+    { gnome-extensions list 2>/dev/null | grep -qxF "$uuid" \
+      || [[ -d "$HOME/.local/share/gnome-shell/extensions/$uuid" || -d "/usr/share/gnome-shell/extensions/$uuid" ]]; } \
       && pass "gnome-ext: $uuid" || failv "gnome-ext: $uuid (not installed)"
   done < manifests/gnome-extensions.list
 fi
@@ -177,7 +180,10 @@ TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
 # wheel whose cuDNN refuses the card (cuDNN 9.12+/torch 2.8+ dropped Pascal
 # sm_61, GTX 10xx) — still passes the import check above but crashes pipeline
 # init and exits the server silently, so run a real cuDNN op to catch it.
-[[ -x "$TTS_PY" ]] && "$TTS_PY" - <<'PY' 2>/dev/null
+# no venv = already reported above; probing torch in it would only add a
+# second, misleading FAIL ("CUDA torch can't drive this GPU") for the same gap
+if [[ -x "$TTS_PY" ]]; then
+"$TTS_PY" - <<'PY' 2>/dev/null
 import sys, torch
 if torch.version.cuda is None: sys.exit(2)          # CPU-only build: caller judges
 import torch.nn as nn
@@ -206,6 +212,7 @@ case $? in
      fi ;;
   *) failv "tts venv: CUDA torch can't drive this GPU — kokoro crashes (re-run 07-components for the cu118/CPU fallback)" ;;
 esac
+fi
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
@@ -374,12 +381,12 @@ flap=$(systemctl show '*.service' --property=Id,NRestarts 2>/dev/null \
         if(k=="Id")id=v; if(k=="NRestarts")n=v}
       if(n+0>5) print "        "id" ("n" restarts)"}')
 [[ -z "$flap" ]] && pass "calm: no flapping services (NRestarts ≤ 5)" \
-  || { failv "calm: restart-looping service(s):"; printf '%s\n' "$flap"; }
+  || { failv "calm: restart-looping service(s):"; fnote "$flap"; }
 
 # 7c. units stuck activating right now
 act=$(systemctl list-units --state=activating --no-legend --plain 2>/dev/null | awk '{print $1}')
 [[ -z "$act" ]] && pass "calm: nothing stuck activating" \
-  || { failv "calm: stuck activating:"; printf '%s\n' "$act" | sed 's/^/        /'; }
+  || { failv "calm: stuck activating:"; fnote "$(printf '%s\n' "$act" | sed 's/^/        /')"; }
 
 # 7d. journal noise — warnings+errors per 5 min, with top repeat offenders
 JWMAX=$(cv calm_journal_warns); JWMAX=${JWMAX:-50}

@@ -44,10 +44,12 @@ while IFS=$'\t' read -r name method arg grp; do
       warn "$name missing"
       repo="${arg%%:*}" suffix="${arg##*:}"
       if (( INSTALL )); then
-        url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null \
-              | grep -oP '"browser_download_url":\s*"\K[^"]+' | grep "$suffix\$" | head -1)
+        # newest stable release that HAS the asset — /latest can be a
+        # mobile-only or partial release (obsidian v1.13.8: one .apk)
+        url=$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=15" 2>/dev/null \
+              | gh_pick_asset "$suffix")
         if [[ -n "$url" ]]; then install_deb "$name" "$url"
-        else miss "deb: $name (no $suffix asset in latest $repo release)"; fi
+        else miss "deb: $name (no $suffix asset in the last 15 $repo releases)"; fi
       else
         hint "latest $suffix from github.com/$repo releases"
       fi

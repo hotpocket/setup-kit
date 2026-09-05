@@ -30,6 +30,14 @@ EGO="https://extensions.gnome.org"
 
 # is $1 present in the org.gnome.shell enabled-extensions array?
 ext_enabled() { gnome-extensions list --enabled 2>/dev/null | grep -qxF "$1"; }
+# installed = the running shell lists it OR it is on disk. On Wayland the shell
+# only learns of a new extension at the next login, so `list` alone said
+# "missing" every pass and reinstalled it every pass (2026-09-05).
+ext_present() {
+  gnome-extensions list 2>/dev/null | grep -qxF "$1" \
+    || [[ -d "$HOME/.local/share/gnome-shell/extensions/$1" \
+          || -d "/usr/share/gnome-shell/extensions/$1" ]]
+}
 # append uuid to enabled-extensions if absent (idempotent). Used as a Wayland-
 # safe fallback: `gnome-extensions enable` refuses a not-yet-loaded extension,
 # but writing the gsettings array directly makes it load on next login.
@@ -57,8 +65,8 @@ while IFS= read -r entry; do
     ok "$uuid: gated off (@$grp)"; continue
   fi
 
-  if gnome-extensions list 2>/dev/null | grep -qxF "$uuid"; then
-    if ext_enabled "$uuid"; then
+  if ext_present "$uuid"; then
+    if ext_enabled "$uuid" || gsettings get org.gnome.shell enabled-extensions 2>/dev/null | grep -qF "'$uuid'"; then
       ok "$uuid: installed + enabled"
     elif (( INSTALL )); then
       ext_enable "$uuid" && { log "enabled $uuid"; enabled_now=$((enabled_now+1)); } \

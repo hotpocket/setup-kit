@@ -147,7 +147,7 @@ APT_INSTALL=(sudo DEBIAN_FRONTEND=noninteractive apt-get
              install -y --no-install-recommends)
 
 # ---- preflight + install, retrying around no-candidate packages --------------
-for attempt in 1 2 3; do
+for attempt in 1 2 3 4; do
   (( ${#MISSING[@]} )) || break
   log "apt install attempt $attempt (${#MISSING[@]} packages)"
   # HARD GUARD: an install phase must never remove packages. If the resolver
@@ -168,6 +168,23 @@ for attempt in 1 2 3; do
   grep -E '^(After this|[0-9]+ upgraded)' <<<"$SIM_OUT" || true
   mapfile -t REMV < <(awk '/^Remv /{print $2}' <<<"$SIM_OUT")
   if (( ${#REMV[@]} )); then
+    # The host keeps what it runs. A manifest captured on one box pins choices
+    # the HOST makes, not the manifest: its bootloader (grub-pc vs
+    # grub-efi-amd64 follows the firmware) and its time daemon (chrony is the
+    # 26.04 default; systemd-timesyncd conflicts with it). Installing the pin
+    # would remove the live one — so name the wanted package(s) forcing each
+    # removal, drop THEM, and let the other N-2 packages install (2026-09-05:
+    # two such pins refused all 187 packages, three passes running).
+    mapfile -t TRIG < <(apt_conflict_triggers MISSING REMV)
+    if (( ${#TRIG[@]} )); then
+      warn "apt: ${#TRIG[@]} wanted package(s) conflict with what this box already runs — skipped: ${TRIG[*]}"
+      hint "installing them would remove: ${REMV[*]} — add to skip_pkgs in $HOST_CONF to silence"
+      miss "apt: skipped ${TRIG[*]} — would remove installed ${REMV[*]} (host keeps what it runs)"
+      mapfile -t MISSING < <(printf '%s\n' "${MISSING[@]}" | grep -Fxv -f <(printf '%s\n' "${TRIG[@]}"))
+      log "retrying without ${#TRIG[@]} conflicting package(s)"
+      continue
+    fi
+    # Could not attribute (removal via a chain apt won't name) — refuse, loudly.
     fail "apt transaction would REMOVE ${#REMV[@]} installed packages — NOT applying:"
     printf '          %s\n' "${REMV[@]}" | head -20
     miss "apt: refused transaction (would remove: ${REMV[*]:0:6} ...) — resolve by hand or skip_pkgs the trigger"

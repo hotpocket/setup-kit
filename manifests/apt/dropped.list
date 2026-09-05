@@ -42,3 +42,8 @@ steam-libs-amd64                            #      0.0 MB  dependency of the lau
 mssql-tools18                               #      0.0 MB  with mssql-server
 mssql-tools                                 #      0.0 MB  with mssql-server
 tldr                                        #      0.0 MB  transitional (->tldr-hs); both gone from 26.04 — use tealdeer
+grub-pc                                     #      0.6 MB  host-decided: the bootloader follows the firmware; on EFI it would REMOVE grub-efi-amd64
+grub-pc-bin                                 #      3.1 MB  with grub-pc
+grub-gfxpayload-lists                       #      0.0 MB  with grub-pc
+grub-efi-amd64-signed                       #      7.0 MB  host-decided: on a BIOS box it would REMOVE grub-pc
+systemd-timesyncd                           #      0.2 MB  host-decided: 26.04 ships chrony as the time daemon; this would REMOVE it

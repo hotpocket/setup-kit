@@ -163,6 +163,11 @@ case "$cmd" in
       # actions = do_or_say invocations, kit "installed:" log lines, apt runs —
       # NOT phrases like "already installed" from chained tools
       n_act=$(grep -cE '\] \+ |^\[[0-9T:.+-]+\] installed: |apt install attempt' "$RUN_LOG" || true)
+      # the same actions, normalised (no timestamps, no mktemp names) — a pass
+      # that would redo exactly what the last one did is not converging, it is
+      # cycling: an install whose "done?" check can't see its own result
+      grep -E '\] \+ |^\[[0-9T:.+-]+\] installed: |apt install attempt' "$RUN_LOG" \
+        | sed -E 's/^\[[^]]*\] //; s#/tmp/tmp\.[A-Za-z0-9]+#/tmp/tmp.X#g' | sort > "$LOG_DIR/.actions-p$pass"
       section "summary — $(hostname) ($mode, pass $pass)"
       echo "  ok: $n_ok   warn: $n_warn   fail: $n_fail   actions: $n_act"
       # surface WHAT failed/warned, not just the counts — last occurrence of
@@ -194,15 +199,24 @@ case "$cmd" in
         settled=1
         break
       fi
+      if (( pass > 1 )) && cmp -s "$LOG_DIR/.actions-p$pass" "$LOG_DIR/.actions-p$((pass-1))"; then
+        echo "  ⟳ pass $pass repeated the same actions as pass $((pass-1)) — a third would too; stopping"
+        echo "    (an action that never sticks: its check can't see the result, or a dependency is missing)"
+        break
+      fi
       echo "  changes applied — running another pass..."
     done
     if [[ "$mode" == install ]]; then
       (( settled )) || { echo "  ⚠ NOT converged after $pass passes — still applying changes; re-run install"; rc=1; }
       [[ -s "$LOG_DIR/missing.log" ]] && echo "  Misses to triage: $LOG_DIR/missing.log"
-      section "independent verification (verify.sh)"
-      "$KIT_DIR/verify.sh" --settle 30 | grep -E '^(FAIL|===|    )'
-      # verify's own exit code (not grep's) folds into the run result
-      [[ "${PIPESTATUS[0]}" -eq 0 ]] || rc=1
+      # KIT_SKIP_VERIFY: tests exercise the loop against stub phases; a real
+      # verify there would grade this box against the manifests, not the loop
+      if [[ -z "${KIT_SKIP_VERIFY:-}" ]]; then
+        section "independent verification (verify.sh)"
+        "$KIT_DIR/verify.sh" --settle 30 | grep -E '^(FAIL|===|    )'
+        # verify's own exit code (not grep's) folds into the run result
+        [[ "${PIPESTATUS[0]}" -eq 0 ]] || rc=1
+      fi
     fi
     exit "$rc"
     ;;

@@ -15,7 +15,6 @@ grub-common                                 #     12.2 MB  admin
 ubuntu-wallpapers                           #     10.9 MB  metapackages
 brltty                                      #     10.0 MB  admin
 fwupd                                       #      8.1 MB  admin
-grub-efi-amd64-signed                       #      7.0 MB  utils
 openprinting-ppds                           #      7.0 MB  text
 ubuntu-report                               #      7.0 MB  utils
 flatpak                                     #      5.2 MB  admin
@@ -25,7 +24,6 @@ bluez                                       #      4.4 MB  admin
 ncurses-term                                #      4.2 MB  misc
 gnome-user-docs                             #      3.3 MB  doc
 gnome-calculator                            #      3.2 MB  math
-grub-pc-bin                                 #      3.1 MB  admin
 v4l-utils                                   #      2.2 MB  utils
 smartmontools                               #      2.1 MB  utils
 ibus-table                                  #      2.0 MB  utils
@@ -55,7 +53,6 @@ dirmngr                                     #      0.7 MB  utils
 auditd                                      #      0.7 MB  admin
 ncurses-bin                                 #      0.6 MB  utils
 gpg-agent                                   #      0.6 MB  utils
-grub-pc                                     #      0.6 MB  admin
 fastboot                                    #      0.6 MB  utils
 yad                                         #      0.5 MB  utils
 findutils                                   #      0.5 MB  utils
@@ -85,7 +82,6 @@ gzip                                        #      0.2 MB  utils
 yubikey-manager                             #      0.2 MB  utils
 lz4                                         #      0.2 MB  utils
 bc                                          #      0.2 MB  math
-systemd-timesyncd                           #      0.2 MB  admin
 dkms                                        #      0.2 MB  kernel
 gjs                                         #      0.2 MB  interpreters
 dash                                        #      0.2 MB  shells
@@ -141,7 +137,6 @@ idle3-tools                                 #      0.0 MB  admin
 apt-config-icons-hidpi                      #      0.0 MB  misc
 policykit-desktop-privileges                #      0.0 MB  admin
 img2pdf                                     #      0.0 MB  utils
-grub-gfxpayload-lists                       #      0.0 MB  admin
 laptop-detect                               #      0.0 MB  utils
 cpu-checker                                 #      0.0 MB  utils
 linux-generic                               #      0.0 MB  kernel
@@ -151,7 +146,6 @@ ubuntu-desktop-minimal                      #      0.0 MB  metapackages
 ubuntu-desktop                              #      0.0 MB  metapackages
 init                                        #      0.0 MB  metapackages
 lsp-plugins                                 #      0.0 MB  metapackages
-tldr                                        #      0.0 MB  oldlibs
 lsof                                        #              +new
 wl-clipboard                                #              +new
 scdaemon                                    #              +new

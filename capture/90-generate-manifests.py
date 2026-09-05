@@ -18,6 +18,15 @@ OUT = ROOT / "manifests/apt"
 
 # ---------------------------------------------------------------- decisions
 DROPS = {  # pkg: reason
+    # host-decided packages: the box picks these, not the manifest. Pinning the
+    # capture box's choice makes apt REMOVE the live one elsewhere (2026-09-05,
+    # EFI VM: grub-pc vs grub-efi-amd64, systemd-timesyncd vs chrony — the
+    # refused transaction took all 187 packages with it).
+    "grub-pc": "host-decided: the bootloader follows the firmware; on EFI it would REMOVE grub-efi-amd64",
+    "grub-pc-bin": "with grub-pc",
+    "grub-gfxpayload-lists": "with grub-pc",
+    "grub-efi-amd64-signed": "host-decided: on a BIOS box it would REMOVE grub-pc",
+    "systemd-timesyncd": "host-decided: 26.04 ships chrony as the time daemon; this would REMOVE it",
     "tldr": "transitional (->tldr-hs); both gone from 26.04 — use tealdeer",
     "tldr-hs": "Haskell tldr client; dropped from 26.04 archive — use tealdeer",
     "webmin": "root web panel; Proxmox UI / Cockpit cover it",
@@ -91,6 +100,9 @@ DROPS = {  # pkg: reason
 DIRECT_DEBS = {
     "zoom": ("url", "https://zoom.us/client/latest/zoom_amd64.deb"),
     "discord": ("url", "https://discord.com/api/download?platform=linux&format=deb"),
+    # apt knows `code` only once the deb has dropped its own vscode.sources
+    # (CLAUDE.md: never add a vscode.list) — so a fresh box gets it as a deb
+    "code": ("url", "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64"),
     "obsidian": ("github", "obsidianmd/obsidian-releases:amd64.deb"),
     "minikube": ("url", "https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb", "dev_k8s"),
     "master-pdf-editor-5": ("manual", "https://code-industry.net/free-pdf-editor/ — version-pinned URLs"),

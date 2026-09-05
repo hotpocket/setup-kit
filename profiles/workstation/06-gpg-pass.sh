@@ -32,7 +32,7 @@ section "gpg + pass ($MODE)"
 
 # ---- 0. deps present? (apt manifest installs them; just verify here) --------
 for b in gpg pass scdaemon; do
-  command -v "$b" >/dev/null 2>&1 || command -v "$b" >/dev/null 2>&1 \
+  command -v "$b" >/dev/null 2>&1 \
     || [[ -x "/usr/lib/gnupg/$b" || -x "/usr/libexec/$b" ]] \
     || { warn "$b missing — apt phase should install it (manifests/apt/cli-system.list)"; }
 done
@@ -40,6 +40,8 @@ done
 # ---- 1. pcscd service (scdaemon goes through it, never raw USB) -------------
 if systemctl is-active --quiet pcscd 2>/dev/null; then
   ok "pcscd active"
+elif ! pkg_installed pcscd; then
+  warn "pcscd not installed — apt phase (cli-system) installs it; enable deferred"
 elif (( INSTALL )); then
   do_or_say sudo systemctl enable --now pcscd
 else
@@ -118,6 +120,8 @@ fi
 # ---- 5. pass init ----------------------------------------------------------
 if [[ -f "$STORE/.gpg-id" ]]; then
   ok "pass store initialized ($(cat "$STORE/.gpg-id" 2>/dev/null | tr -d '\n' | tail -c 8))"
+elif ! command -v pass >/dev/null 2>&1; then
+  warn "pass not installed — apt phase (cli-system) installs it; pass init deferred"
 elif gpg --list-keys "$FPR" >/dev/null 2>&1 && (( INSTALL )); then
   do_or_say pass init "$FPR"
 elif (( INSTALL )); then

@@ -57,23 +57,30 @@ if [[ "$(conf_get lang_python yes)" == yes ]]; then
     fi
   fi
 
-  # pipx tools (pipx itself comes from apt dev-python group)
-  while IFS= read -r entry; do
-    [[ "$entry" == pipx:* ]] || continue
-    tool="${entry#pipx:}"
-    if command -v pipx >/dev/null 2>&1 && pipx list --short 2>/dev/null | grep "^$tool " >/dev/null; then
-      ok "pipx $tool"
-    else
-      warn "pipx $tool missing"
-      do_or_say pipx install "$tool" || miss "pipx: $tool"
-    fi
-  done < <(manifest_pkgs "$LANG_M/python.list")
+  # pipx tools (pipx itself comes from apt dev-python group). Without pipx
+  # there is nothing to try: say so once, not "command not found" per tool.
+  if ! command -v pipx >/dev/null 2>&1; then
+    warn "pipx missing — apt dev-python group installs it; pipx tools deferred"
+  else
+    while IFS= read -r entry; do
+      [[ "$entry" == pipx:* ]] || continue
+      tool="${entry#pipx:}"
+      if pipx list --short 2>/dev/null | grep "^$tool " >/dev/null; then
+        ok "pipx $tool"
+      else
+        warn "pipx $tool missing"
+        do_or_say pipx install "$tool" || miss "pipx: $tool"
+      fi
+    done < <(manifest_pkgs "$LANG_M/python.list")
+  fi
 
   # deno — yt-dlp's JS runtime (YouTube extraction is deprecated without one;
   # nsig challenges need it). Single binary; official script into ~/.local/bin
-  # (already on PATH — same dir pipx uses). No snap/apt package exists. The
+  # (on PATH for login shells — but NOT necessarily in this one: a fresh box's
+  # .profile adds ~/.local/bin only if it existed at login, so check the path
+  # too or every pass reinstalls it). No snap/apt package exists. The
   # installer only prompts on a tty, so the pipe keeps it non-interactive.
-  if command -v deno >/dev/null 2>&1; then
+  if command -v deno >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/deno" ]]; then
     ok "deno (yt-dlp JS runtime)"
   else
     warn "deno missing — yt-dlp YouTube extraction degraded"

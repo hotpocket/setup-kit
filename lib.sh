@@ -87,10 +87,24 @@ init_mode() {
   esac
 }
 # Run cmd only in install mode; in check mode print what would happen.
+# Under bootstrap (quiet mode) the command's own output goes to the script log
+# only; the terminal sees the "+ cmd" line and, when the command FAILS, its
+# last lines and exit code. Standalone/verbose runs stream everything. (A fresh
+# VM install printed every apt transcript and installer banner — thousands of
+# lines that hid the four that mattered.)
 do_or_say() {
   if (( INSTALL )); then
     log "+ $*"
-    "$@" 2>&1 | tee -a "$LOG_DIR/${SCRIPT_NAME:-unknown}.log"
+    local slog="$LOG_DIR/${SCRIPT_NAME:-unknown}.log" rc
+    if (( KIT_QUIET )); then
+      "$@" >> "$slog" 2>&1; rc=$?
+      if (( rc )); then
+        printf '  %s[FAILED]%s exit %s — last output lines:\n' "$C_FAIL" "$C_RST" "$rc"
+        tail -n 8 "$slog" | sed 's/^/    | /'
+      fi
+      return "$rc"
+    fi
+    "$@" 2>&1 | tee -a "$slog"
     return "${PIPESTATUS[0]}"
   else
     (( KIT_QUIET )) && _break_dots
@@ -108,10 +122,14 @@ extout() {
 
 # ---------------------------------------------------------------- host conf
 # Answer file: KEY=value lines. conf_get KEY DEFAULT
+# A value written with quotes (claude_skills="gstack vault conduct") comes back
+# without them: the conf is not sourced by a shell, so nothing else would strip
+# them, and a quote glued to the first and last word is how phase 08 went
+# looking for skills named '"gstack' and 'conduct"' (2026-09-05).
 conf_get() {
   local v
   v=$(grep -E "^${1}=" "$HOST_CONF" 2>/dev/null | tail -1 | cut -d= -f2- \
-      | sed 's/[[:space:]]*#.*//; s/[[:space:]]*$//')
+      | sed 's/[[:space:]]*#.*//; s/[[:space:]]*$//; s/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')
   echo "${v:-${2:-}}"
 }
 conf_set() {
@@ -351,4 +369,48 @@ apt_installable() {
   (( $# )) || return 0
   apt-cache policy "$@" 2>/dev/null \
     | awk '/^[^ ]/ { p = $0; sub(/:$/, "", p) } /^  Candidate:/ { if ($2 != "(none)") print p }'
+}
+
+# ------------------------------------------------ removal attribution
+# apt_conflict_triggers WANT_ARRAY REMV_ARRAY -> wanted package names that make
+# apt's resolver remove the packages in REMV. Method: re-simulate the same
+# transaction with the to-be-removed packages ALSO pinned as wanted; apt can no
+# longer resolve by removal, so it prints the conflict as "unmet dependencies"
+# naming BOTH sides (chrony : Conflicts: time-daemon / systemd-timesyncd :
+# Conflicts: time-daemon). The offenders intersected with WANT are the
+# triggers. Virtual packages (time-daemon) and dependency chains (grub-pc ->
+# grub-pc-bin) are apt's problem, not ours — that is why the resolver, not a
+# Conflicts-field parse, does the attribution. Empty output = could not
+# attribute; the caller must then refuse, not guess. Simulation needs no root.
+apt_conflict_triggers() {
+  local -n _want="$1"; local -n _remv="$2"
+  (( ${#_remv[@]} && ${#_want[@]} )) || return 0
+  apt-get install -s --no-install-recommends "${_want[@]}" "${_remv[@]}" 2>&1 \
+    | awk '/unmet dependencies:/{f=1;next} f&&/^ [^ ]/{print $1} f&&!/^ /{f=0}' \
+    | grep -Fxf <(printf '%s\n' "${_want[@]}") | sort -u
+  return 0
+}
+
+# ------------------------------------------------ github release assets
+# gh_pick_asset <suffix-regex>  (releases JSON on stdin: /repos/X/releases)
+# URL of the matching asset in the NEWEST non-prerelease, non-draft release
+# that has one. /releases/latest is the wrong question: a project that ships
+# mobile and desktop from one release stream (obsidian) can have a latest with
+# only an .apk, one release above the .deb (2026-09-05). Exit 1 when none.
+gh_pick_asset() {
+  python3 -c '
+import sys, json, re
+suf = re.compile(sys.argv[1] + "$")
+try:
+    rels = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+for r in rels if isinstance(rels, list) else []:
+    if r.get("prerelease") or r.get("draft"):
+        continue
+    for a in r.get("assets", []):
+        u = a.get("browser_download_url", "")
+        if suf.search(u):
+            print(u); sys.exit(0)
+sys.exit(1)' "$1"
 }
