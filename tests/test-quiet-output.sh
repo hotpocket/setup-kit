@@ -53,5 +53,17 @@ assert "OK detail IS in the run log (only path for it)" 'grep -q "all good" "$TM
 assert "no timestamps on the terminal"              '! grep -qE "^\[20[0-9]{2}-" "$TMP/out"'
 assert "timestamps kept in the script log"          'grep -qE "^\[20[0-9]{2}-.*downloading zoom" "$TMP/quiet-test.log"'
 assert "action line ends with a ✓ and a duration"   'grep -qE "true.*✓ [0-9]+s" "$TMP/out"'
+# a section with nothing to say stays silent; one is shown only above its first
+# WARN/FAIL/action; a hint after an OK is detail, not narrative; MISS lines
+# duplicate the WARN before them
+KIT_RUN_LOG="$TMP/run.log" LOG_DIR_OVERRIDE="$TMP" SCRIPT_NAME=quiet-test \
+  bash -c 'source "$1"; LOG_DIR="$LOG_DIR_OVERRIDE"; INSTALL=1
+           section "quiet section"; ok "fine"; hint "manual vendor url"
+           section "noisy section"; ok "fine too"; warn "drift"; miss "something: drift"' _ "$KIT_DIR/lib.sh" \
+  >"$TMP/out" 2>/dev/null
+assert "section with only OKs prints nothing"       '! grep -q "quiet section" "$TMP/out"'
+assert "section is shown above its first WARN"      'grep -B1 "drift" "$TMP/out" | grep -q "noisy section"'
+assert "hint after an OK stays out of the terminal" '! grep -q "manual vendor url" "$TMP/out"'
+assert "MISS line not on the terminal (missing.log has it)" '! grep -q "MISS:" "$TMP/out" && grep -q "something: drift" "$TMP/missing.log"'
 echo "  $pass passed, $fail failed"
 (( fail == 0 ))

@@ -74,7 +74,11 @@ apt_missing=0; apt_total=0
 # guard: with no groups enabled FILES is empty, and `grep` with no file args
 # would block reading stdin — feed it nothing instead.
 if (( ${#FILES[@]} > 0 )); then
+  # wine_branch swaps the manifest's stable names for the chosen branch
+  # (re-derived here, not shared with lib.sh)
+  WB="$(cv wine_branch)"; case "$WB" in devel|staging) ;; *) WB=stable ;; esac
   while IFS= read -r p; do
+    [[ "$p" =~ ^(winehq|wine)-stable$ ]] && p="${p%-stable}-$WB"
     [[ "$SKIPS" == *" $p "* ]] && continue
     apt-cache show "$p" >/dev/null 2>&1 || continue   # not in this release's archive
     apt_total=$((apt_total+1))
@@ -344,9 +348,10 @@ fi
 
 # -- 6. apt health (update needs root; fall back to read-only consistency) ----
 if sudo -n true 2>/dev/null; then
-  errs=$(sudo -n apt-get update 2>&1 | grep -cE '^(E:|Err)' || true)
+  upd="$(sudo -n apt-get update 2>&1 | grep -E '^(E:|Err)')"
+  errs=$(grep -c . <<<"$upd" || true); [[ -z "$upd" ]] && errs=0
   [[ "$errs" == 0 ]] && pass "apt sources healthy (apt-get update: 0 errors)" \
-    || failv "apt-get update has $errs errors"
+    || { failv "apt-get update has $errs errors"; fnote "$(sed 's/^/        /' <<<"$upd")"; }
 else
   # no sudo: apt-get check needs the lock — dpkg --audit doesn't and
   # reports broken/half-configured packages (empty output = healthy)

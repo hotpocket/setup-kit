@@ -24,53 +24,64 @@ fi
 DOCTOR_WARN=0; DOCTOR_FAIL=0
 
 # Quiet mode (under bootstrap: KIT_RUN_LOG set, KIT_VERBOSE unset) — the
-# terminal is a NARRATIVE, not a transcript: section headers, WARN/FAIL lines
-# (with their hints), and one line per action with ✓/✗ and elapsed time. OK
-# detail is a '.' mark (full text in the run log) and timestamps stay in the
-# log files. Bootstrap tees stdout into the run log and counts the [WARN]/
-# [FAIL] tags there, so anything printed to stdout must NOT also be _rlog'd;
-# marks go straight to the tty, which tee never sees, so OK detail is _rlog'd.
-# KIT_VERBOSE=1 (bootstrap -v, or verbose=yes) and standalone phase runs:
-# full per-line output, no marks.
+# terminal is a NARRATIVE, not a transcript. It shows: WARN/FAIL lines with
+# their hints, one line per action ('+ cmd ✓ 3s'), and a section header only
+# above the first such line in that section. OK detail, hints after OKs, MISS
+# echoes and timestamps go to the logs; bootstrap adds one tally line per
+# phase, so a phase with nothing to say costs one line. Bootstrap tees stdout
+# into the run log and counts the [WARN]/[FAIL] tags there, so nothing printed
+# to stdout may also be written there directly; OK lines (not on stdout) are.
+# KIT_VERBOSE=1 (bootstrap -v, or verbose=yes) and standalone runs: everything.
 KIT_QUIET=0
 [[ -n "${KIT_RUN_LOG:-}" && "${KIT_VERBOSE:-0}" != 1 ]] && KIT_QUIET=1
-DOTS=0
-_mark()       { { printf '%s' "$1" > /dev/tty; } 2>/dev/null || true; DOTS=1; }
-_break_dots() { (( DOTS )) && { { printf '\n' > /dev/tty; } 2>/dev/null || true; }; DOTS=0; }
-_rlog()       { printf '%s\n' "$*" >> "$KIT_RUN_LOG"; }
-trap _break_dots EXIT
+_rlog()   { printf '%s\n' "$*" >> "$KIT_RUN_LOG"; }
+_SECTION=""; _SECTION_SHOWN=1; _LAST=ok
+_ctx() {  # quiet: show the pending section header once, before the first noisy line
+  (( KIT_QUIET )) || return 0
+  (( _SECTION_SHOWN )) && return 0
+  printf '\n%s▶ %s%s\n' "$C_HDR" "$_SECTION" "$C_RST"; _SECTION_SHOWN=1
+}
 
 section() {
-  if (( KIT_QUIET )); then _break_dots; printf '\n%s▶ %s%s\n' "$C_HDR" "$*" "$C_RST"
+  if (( KIT_QUIET )); then _SECTION="$*"; _SECTION_SHOWN=0; _rlog ""; _rlog "$*"
   else printf '\n%s%s%s\n' "$C_HDR" "$*" "$C_RST"; fi
 }
 ok() {
-  if (( KIT_QUIET )); then _rlog "  [ OK ]  $*"; _mark '.'
+  _LAST=ok
+  if (( KIT_QUIET )); then _rlog "  [ OK ]  $*"
   else printf '  %s[ OK ]%s  %s\n' "$C_OK" "$C_RST" "$*"; fi
 }
 warn() {
-  (( KIT_QUIET )) && _break_dots
+  _LAST=warn; _ctx
   printf '  %s[WARN]%s  %s\n' "$C_WARN" "$C_RST" "$*"
   DOCTOR_WARN=$((DOCTOR_WARN+1))
 }
 fail() {
-  (( KIT_QUIET )) && _break_dots
+  _LAST=fail; _ctx
   printf '  %s[FAIL]%s  %s\n' "$C_FAIL" "$C_RST" "$*"
   DOCTOR_FAIL=$((DOCTOR_FAIL+1))
 }
+# a hint qualifies the line before it: after a WARN/FAIL it is the fix and
+# belongs on the terminal; after an OK it is reference detail (log only)
 hint() {
-  (( KIT_QUIET )) && _break_dots
+  if (( KIT_QUIET )) && [[ "$_LAST" == ok ]]; then _rlog "          ↳ $*"; return 0; fi
   printf '          %s↳ %s%s\n' "$C_DIM" "$*" "$C_RST"
 }
 
 # terminal gets the message; the script log gets it timestamped
 log() {
   local msg="$*"
-  if (( KIT_QUIET )); then _break_dots; echo "  $msg"; else echo "[$(date -Iseconds)] $msg"; fi
+  if (( KIT_QUIET )); then _ctx; echo "  $msg"; else echo "[$(date -Iseconds)] $msg"; fi
   echo "[$(date -Iseconds)] $msg" >> "$LOG_DIR/${SCRIPT_NAME:-unknown}.log"
 }
 
-miss() { echo "$*" >> "$LOG_DIR/missing.log"; log "MISS: $*"; }
+# missing.log is the triage list; on the terminal the WARN/FAIL before it
+# already said this, so quiet mode does not echo it
+miss() {
+  echo "$*" >> "$LOG_DIR/missing.log"
+  if (( KIT_QUIET )); then echo "[$(date -Iseconds)] MISS: $*" >> "$LOG_DIR/${SCRIPT_NAME:-unknown}.log"
+  else log "MISS: $*"; fi
+}
 
 # ---------------------------------------------------------------- modes
 require_root() {
@@ -100,7 +111,7 @@ do_or_say() {
     echo "[$(date -Iseconds)] + $*" >> "$slog"
     if (( KIT_QUIET )); then
       # one line per action: what, then ✓/✗ and how long, on the same line
-      _break_dots
+      _LAST=action; _ctx
       printf '  + %s' "$(_cmd_brief "$@")"
       t0=$SECONDS
       "$@" >> "$slog" 2>&1; rc=$?
@@ -117,8 +128,9 @@ do_or_say() {
     "$@" 2>&1 | tee -a "$slog"
     return "${PIPESTATUS[0]}"
   else
-    (( KIT_QUIET )) && _break_dots
-    printf '  %s[would]%s %s\n' "$C_DIM" "$C_RST" "$*"
+    _ctx
+    if (( KIT_QUIET )); then printf '  %s[would]%s %s\n' "$C_DIM" "$C_RST" "$(_cmd_brief "$@")"
+    else printf '  %s[would]%s %s\n' "$C_DIM" "$C_RST" "$*"; fi
   fi
 }
 # the command as a human reads it: no sudo/env/dpkg-option noise, clipped
@@ -304,7 +316,7 @@ apt_wanted_pkgs() {
     [[ -f "$f" ]] || continue
     grp="$(basename "$f" .list)"
     group_on "$grp" || continue
-    echo "@log optional group enabled: $grp"
+    echo "@ok optional group enabled: $grp"
     mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$f")
   done
   # conditional: nvidia

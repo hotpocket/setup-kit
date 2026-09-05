@@ -184,7 +184,7 @@ for attempt in 1 2 3 4; do
     miss "apt: dry-run failed, install skipped — fix apt, then re-run"
     exit 1
   fi
-  grep -E '^(After this|[0-9]+ upgraded)' <<<"$SIM_OUT" || true
+  grep -E '^(After this|[0-9]+ upgraded)' <<<"$SIM_OUT" | sed 's/^/  apt: /' || true
   mapfile -t REMV < <(awk '/^Remv /{print $2}' <<<"$SIM_OUT")
   if (( ${#REMV[@]} )); then
     # The host keeps what it runs. A manifest captured on one box pins choices

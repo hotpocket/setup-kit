@@ -149,10 +149,21 @@ case "$cmd" in
       # it has already been told about, so stop the whole run here.
       aborted=0
       (( pass > 1 )) && printf '\n%s━━ pass %s — re-checking what pass %s changed ━━%s\n' "$C_HDR" "$pass" "$((pass-1))" "$C_RST"
+      # pass ≥2: a WARN/FAIL/hint line identical to one in the previous pass
+      # is not news — hold it back from the terminal (the run log keeps it)
+      # and say how many were held. Actions and everything else stream.
+      PREV_LOG="${RUN_LOG_PREV:-/dev/null}"; HELD="$LOG_DIR/.held-p$pass"; : > "$HELD"
+      _unchanged() {
+        # FILENAME, not NR==FNR: with an empty previous log (pass 1) NR==FNR
+        # holds for every line of stdin too, and the whole pass goes silent
+        awk -v held="$HELD" 'FILENAME != "-" { seen[$0]=1; next }
+          (index($0,"[WARN]") || index($0,"[FAIL]") || index($0,"↳")) && ($0 in seen) { print > held; next }
+          { print; fflush() }' "$PREV_LOG" -
+      }
       for phase in "$PHASE_DIR/"[0-9][0-9]*-*.sh; do
         # tally per phase: what this phase found, and how long it took
-        l0=$(wc -l < "$RUN_LOG" 2>/dev/null || echo 0); t0=$SECONDS
-        bash "$phase" "$mode" 2>&1 | tee -a "$RUN_LOG"
+        l0=0; [[ -f "$RUN_LOG" ]] && l0=$(wc -l < "$RUN_LOG"); t0=$SECONDS
+        bash "$phase" "$mode" 2>&1 | tee -a "$RUN_LOG" | _unchanged
         prc="${PIPESTATUS[0]}"
         [[ "$prc" -eq 0 ]] || rc=1
         if [[ -z "${KIT_VERBOSE:-}" ]]; then
@@ -160,8 +171,10 @@ case "$cmd" in
           p_ok=$(grep -c '\[ OK \]' <<<"$delta"); p_w=$(grep -c '\[WARN\]' <<<"$delta"); p_f=$(grep -c '\[FAIL\]' <<<"$delta")
           p_a=$(grep -cE '^  \+ |apt install attempt' <<<"$delta")
           if (( p_ok + p_w + p_f + p_a )); then
-            printf '  %s%s: %s ok · %s warn · %s fail · %s actions · %ss%s\n' \
-              "$C_DIM" "$(basename "$phase" .sh)" "$p_ok" "$p_w" "$p_f" "$p_a" "$((SECONDS - t0))" "$C_RST"
+            gl="${C_OK}✔"; (( p_w )) && gl="${C_WARN}!"; (( p_f )) && gl="${C_FAIL}✗"
+            line="$gl$C_RST $(basename "$phase" .sh) · $p_ok ok"
+            (( p_w )) && line+=" · $p_w warn"; (( p_f )) && line+=" · $p_f fail"; (( p_a )) && line+=" · $p_a actions"
+            printf '  %s · %ss\n' "$line" "$((SECONDS - t0))"
           fi
         fi
         if [[ "$prc" -eq 3 ]]; then
@@ -170,6 +183,9 @@ case "$cmd" in
           break
         fi
       done
+      n_held=$(grep -c '\[WARN\]\|\[FAIL\]' "$HELD" 2>/dev/null || true)
+      (( n_held )) && echo "  ($n_held warning(s) unchanged from pass $((pass-1)) not repeated — all replay in the final summary)"
+      RUN_LOG_PREV="$RUN_LOG"
       (( aborted )) && { echo "  Full log: $RUN_LOG"; exit 1; }
       # summary that answers "did anything change?" from stdout alone
       n_ok=$(grep -c '\[ OK \]'   "$RUN_LOG" || true)
@@ -184,8 +200,7 @@ case "$cmd" in
       # cycling: an install whose "done?" check can't see its own result
       grep -E '^  \+ |\] \+ |^  installed: |\] installed: |apt install attempt' "$RUN_LOG" \
         | sed -E 's/^\[[^]]*\] //; s/ ✓ [0-9]+s$//; s/ ✗ exit.*$//; s#/tmp/tmp\.[A-Za-z0-9]+#/tmp/tmp.X#g' | sort > "$LOG_DIR/.actions-p$pass"
-      section "summary — $(hostname) ($mode, pass $pass)"
-      echo "  ok: $n_ok   warn: $n_warn   fail: $n_fail   actions: $n_act"
+      printf '\n%spass %s: %s ok · %s warn · %s fail · %s actions%s\n' "$C_HDR" "$pass" "$n_ok" "$n_warn" "$n_fail" "$n_act" "$C_RST"
       # surface WHAT failed/warned, not just the counts — last occurrence of
       # each unique message (later passes supersede earlier ones)
       # Replay each unique message WITH the ↳ hint lines that follow it — the
@@ -202,10 +217,16 @@ case "$cmd" in
                                   if (!seen[h]++) print h; next }
           { cur = 0 }' "$RUN_LOG"
       }
-      (( n_fail > 0 )) && { echo "  FAIL:"; _replay '[FAIL]' '✗'; }
-      (( n_warn > 0 )) && { echo "  WARN:"; _replay '[WARN]' '!'; }
-      [[ "$mode" == check ]] && { echo "  doctor only — 'install' applies. Full log: $RUN_LOG"; break; }
+      _final_summary() {   # once, after the last pass — every open WARN/FAIL with its hint
+        section "summary — $(hostname) ($mode, $pass pass(es))"
+        echo "  ok: $n_ok   warn: $n_warn   fail: $n_fail   actions: $n_act"
+        (( n_fail > 0 )) && { echo "  FAIL:"; _replay '[FAIL]' '✗'; }
+        (( n_warn > 0 )) && { echo "  WARN:"; _replay '[WARN]' '!'; }
+        return 0
+      }
+      [[ "$mode" == check ]] && { _final_summary; echo "  doctor only — 'install' applies. Full log: $RUN_LOG"; break; }
       if (( n_act == 0 )); then
+        _final_summary
         if (( n_warn == 0 && n_fail == 0 )); then
           echo "  ✔ CONVERGED — nothing to change; system matches the manifests"
         else
@@ -214,6 +235,9 @@ case "$cmd" in
         fi
         settled=1
         break
+      fi
+      if (( pass == 3 )) || { (( pass > 1 )) && cmp -s "$LOG_DIR/.actions-p$pass" "$LOG_DIR/.actions-p$((pass-1))"; }; then
+        _final_summary
       fi
       if (( pass > 1 )) && cmp -s "$LOG_DIR/.actions-p$pass" "$LOG_DIR/.actions-p$((pass-1))"; then
         echo "  ⟳ pass $pass repeated the same actions as pass $((pass-1)) — a third would too; stopping"

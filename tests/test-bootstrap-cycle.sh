@@ -35,6 +35,11 @@ n=$(wc -l < "$TMP/runs")
 assert "a second pass runs (the first pass DID act)"      '(( n >= 2 ))'
 assert "a THIRD identical pass does not"                   '(( n == 2 ))'
 assert "each phase ends with a one-line tally"              'grep -qE "01-groundhog.*[0-9]+ warn" "$TMP/out"'
+assert "pass 1 shows the warning inline, pass 2 does not repeat it, summary once" \
+                                                             '[[ "$(grep -c "thing missing" "$TMP/out")" == 2 ]]'
+assert "pass 2 says how many it held back"                  'grep -qE "1 warning.*unchanged" "$TMP/out"'
+assert "the warning replay happens once, at the end"        '[[ "$(grep -c "^  WARN:" "$TMP/out")" == 1 ]]'
+assert "no shell errors from the tally"                     '! grep -q "No such file" "$TMP/out"'
 assert "the loop says why it stopped"                      'grep -qi "same actions" "$TMP/out"'
 assert "still reported as not converged (needs a human)"   'grep -q "NOT converged" "$TMP/out"'
 echo "  $pass passed, $fail failed"
