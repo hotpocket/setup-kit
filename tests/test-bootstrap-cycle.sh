@@ -29,7 +29,7 @@ EOF2
 pass=0; fail=0
 assert() { if eval "$2"; then ((pass++)); echo "  ok   $1"; else ((fail++)); echo "  FAIL $1"; fi; }
 echo "bootstrap pass-loop cycling"
-PATH="$TMP/bin:$PATH" KIT_PHASE_DIR="$TMP/phases" HOST_CONF="$TMP/host.conf" KIT_SKIP_VERIFY=1 \
+PATH="$TMP/bin:$PATH" KIT_LOG_DIR="$TMP/logs" KIT_PHASE_DIR="$TMP/phases" HOST_CONF="$TMP/host.conf" KIT_SKIP_VERIFY=1 \
   bash "$KIT_DIR/bootstrap.sh" workstation install </dev/null >"$TMP/out" 2>&1
 n=$(wc -l < "$TMP/runs")
 assert "a second pass runs (the first pass DID act)"      '(( n >= 2 ))'

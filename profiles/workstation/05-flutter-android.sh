@@ -88,10 +88,25 @@ if [[ -x "$CMDLINE/sdkmanager" ]]; then
     do_or_say bash -c "yes | '$CMDLINE/sdkmanager' --licenses >/dev/null" \
       || miss "android: sdkmanager --licenses failed"
   fi
+  # one default AVD (flutter.list android-avd: row) on the newest installed
+  # x86_64 google_apis image and the newest plain pixel_N profile. 'echo no'
+  # answers avdmanager's custom-hardware-profile prompt.
+  AVD_NAME="$(manifest_pkgs "$MANIFEST_DIR/lang/flutter.list" | grep -m1 '^android-avd:' | cut -d: -f2)"
   if [[ -d "$HOME/.android/avd" ]] && ls "$HOME/.android/avd"/*.avd >/dev/null 2>&1; then
     ok "AVD(s) defined: $(ls -d "$HOME/.android/avd"/*.avd 2>/dev/null | wc -l)"
+  elif [[ -z "$AVD_NAME" ]]; then
+    ok "no default AVD requested (flutter.list)"
   else
-    warn "no AVDs — create one in Studio (Device Manager) after first launch"
+    IMG="$(ls -d "$SDK_DIR"/system-images/android-*/google_apis/x86_64 2>/dev/null | sort -V | tail -1)"
+    if [[ -z "$IMG" ]]; then
+      warn "no AVD yet — needs a system image first (installed above on the next pass)"
+    else
+      IMG="system-images;$(basename "$(dirname "$(dirname "$IMG")")");google_apis;x86_64"
+      DEV="$("$CMDLINE/avdmanager" list device -c 2>/dev/null | grep -E '^pixel_[0-9]+$' | sort -V | tail -1)"
+      warn "no AVDs — creating '$AVD_NAME' ($IMG, ${DEV:-pixel})"
+      do_or_say bash -c "echo no | '$CMDLINE/avdmanager' create avd -n '$AVD_NAME' -k '$IMG' -d '${DEV:-pixel}' >/dev/null" \
+        || miss "android-avd: $AVD_NAME ($IMG)"
+    fi
   fi
 else
   # Google publishes cmdline-tools at a version-numbered URL; the studio page
@@ -127,14 +142,9 @@ if [[ -x "$CMDLINE/sdkmanager" ]] && (( INSTALL )); then
   while IFS= read -r entry; do
     [[ "$entry" == android-sdk:* ]] || continue
     pkg="${entry#android-sdk:}"
-    case "$pkg" in
-      build-tools\;latest)  pkg="$(grep -oE 'build-tools;[0-9.]+' <<<"$SDK_LIST" | grep -v rc | sort -t';' -k2 -V | tail -1)" ;;
-      platforms\;latest)    pkg="$(grep -oE 'platforms;android-[0-9]+' <<<"$SDK_LIST" | sort -t- -k2 -n | tail -1)" ;;
-      system-images\;current-stable\;*)
-        suffix="${pkg#system-images;current-stable}"
-        pkg="$(grep -oE "system-images;android-[0-9]+$suffix" <<<"$SDK_LIST" | sort -t- -k2 -n | tail -1)" ;;
-    esac
+    pkg="$(android_sdk_resolve "$pkg" <<<"$SDK_LIST")"
     [[ -n "$pkg" ]] || { miss "android-sdk: could not resolve '$entry' against sdkmanager --list"; continue; }
+    [[ "$pkg" == system-images\;* ]] && SYS_IMG="$pkg"
     if grep -qE "^  ${pkg}[[:space:]]" <<<"$(sed -n '/^Installed packages:/,/^Available Packages:/p' <<<"$SDK_LIST")"; then
       ok "sdk: $pkg"
     else

@@ -8,7 +8,9 @@ set -uo pipefail   # no -e: we log misses, we don't abort
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SNAPSHOT_DIR="$KIT_DIR/snapshot"
 MANIFEST_DIR="$KIT_DIR/manifests"
-LOG_DIR="$KIT_DIR/logs"
+# Overridable so tests/ can run bootstrap against stub phases without
+# writing run logs, rotating missing.log, or polluting the real logs/.
+LOG_DIR="${KIT_LOG_DIR:-$KIT_DIR/logs}"
 # Per-host answer file. Overridable by the environment so the phases can be
 # exercised against a throwaway conf (tests/) without touching a real one.
 HOST_CONF="${HOST_CONF:-$KIT_DIR/hosts/$(hostname).conf}"
@@ -456,3 +458,24 @@ for r in rels if isinstance(rels, list) else []:
             print(u); sys.exit(0)
 sys.exit(1)' "$1"
 }
+
+# ------------------------------------------------ android sdk tokens
+# android_sdk_resolve <flutter.list row>   (sdkmanager --list on stdin)
+# 'platforms;latest', 'build-tools;latest' and 'system-images;current-stable;X'
+# become the highest WHOLE token with a plain numeric version — no -beta,
+# -ext, rc — sorted by version (9 < 36). Anything else passes through.
+# A prefix match is not a package: 'platforms;android-37' matched
+# android-37.0/37.1/37.2 and sdkmanager failed it every pass (2026-09-05).
+android_sdk_resolve() {
+  local row="$1" pat
+  case "$row" in
+    platforms\;latest)   pat='^platforms;android-[0-9]+(\.[0-9]+)?$' ;;
+    build-tools\;latest) pat='^build-tools;[0-9]+(\.[0-9]+)*$' ;;
+    system-images\;current-stable\;*)
+      pat="^system-images;android-[0-9]+(\.[0-9]+)?;${row#system-images;current-stable;}\$"
+      pat="${pat//\//\\/}" ;;
+    *) printf '%s\n' "$row"; return 0 ;;
+  esac
+  awk '{print $1}' | grep -E "$pat" | sort -t';' -k2 -V | tail -1
+}
+

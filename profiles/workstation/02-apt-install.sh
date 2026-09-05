@@ -237,7 +237,9 @@ for attempt in 1 2 3 4; do
   # group/ACL now (2026-09-05: pcscd LIBUSB_ERROR_ACCESS on a YubiKey plugged
   # 40 minutes before libccid). Cheap, idempotent.
   if grep -q '^Setting up ' "$LOG_DIR/apt-install-out.tmp"; then
-    sudo udevadm control --reload 2>/dev/null && sudo udevadm trigger --subsystem-match=usb --subsystem-match=misc 2>/dev/null \
+    # --action=add: rules like libccid's are gated ACTION=="add"; the default
+    # 'change' event would walk past them
+    sudo udevadm control --reload 2>/dev/null && sudo udevadm trigger --action=add --subsystem-match=usb --subsystem-match=misc 2>/dev/null \
       && log "udev rules reloaded and re-applied to plugged devices"
   fi
   mapfile -t BAD < <({ grep -oP 'Unable to locate package \K\S+' "$LOG_DIR/apt-install-out.tmp"

@@ -474,10 +474,18 @@ if [[ "$(conf_get component_dictation yes)" == yes ]]; then
       warn "user not in input group — ydotool can't open /dev/uinput (takes effect at next login)"
       do_or_say sudo usermod -aG input "$USER"
     fi
-    if systemctl --user is-enabled ydotool.service >/dev/null 2>&1; then ok "ydotool.service enabled (ydotoold)"
+    # enabled is not running: the package presets it enabled, but ydotoold
+    # exits 2 until /dev/uinput (group input) is openable — i.e. after the
+    # next login. Start it only when the group is effective; else say so.
+    if systemctl --user is-active ydotool.service >/dev/null 2>&1; then ok "ydotoold running (ydotool.service)"
     elif pkg_installed ydotool; then
-      warn "ydotool.service not enabled — ydotoold must run for the client to type"
-      do_or_say systemctl --user enable --now ydotool.service
+      if id -nG 2>/dev/null | grep -qw input; then
+        warn "ydotool.service not running — starting ydotoold"
+        do_or_say systemctl --user enable --now ydotool.service
+      else
+        warn "ydotoold can't start until the input group is effective — log out and back in"
+        (( INSTALL )) && systemctl --user enable ydotool.service >/dev/null 2>&1
+      fi
     else
       printf '  %s[would]%s enable ydotool.service (ydotoold) once the package is in\n' "$C_DIM" "$C_RST"
     fi

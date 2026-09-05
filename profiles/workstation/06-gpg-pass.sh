@@ -48,6 +48,24 @@ else
   warn "pcscd not running (install enables it)"
 fi
 
+# ---- 1b. can pcscd (runs as user pcscd) open the key? libccid's udev rule
+# ---- sets GROUP=pcscd on CCID devices at ADD time; a key plugged before
+# ---- libccid was installed stays root:root and pcscd logs LIBUSB_ERROR_ACCESS
+# ---- forever (2026-09-05). Re-add the usb subsystem so the rule applies now.
+YK_NODE="$(lsusb 2>/dev/null | awk '/Yubico/{printf "/dev/bus/usb/%s/%s\n", $2, substr($4,1,3); exit}')"
+if [[ -n "$YK_NODE" && -e "$YK_NODE" ]]; then
+  if [[ "$(stat -c %G "$YK_NODE" 2>/dev/null)" == pcscd ]] || ! id pcscd >/dev/null 2>&1; then
+    ok "YubiKey USB node accessible to pcscd"
+  elif (( INSTALL )); then
+    warn "YubiKey USB node $YK_NODE not group pcscd — re-applying udev rules (key was plugged before libccid)"
+    do_or_say sudo udevadm trigger --action=add --subsystem-match=usb
+    do_or_say sudo systemctl restart pcscd
+    [[ "$(stat -c %G "$YK_NODE" 2>/dev/null)" == pcscd ]] || hint "still not group pcscd — unplug and replug the key"
+  else
+    warn "YubiKey USB node $YK_NODE not group pcscd — pcscd can't open it (install re-triggers udev)"
+  fi
+fi
+
 # ---- 2. scdaemon.conf — owned by .configs, linked into ~/.gnupg ------------
 # Mirrors 06-configs' link-or-heal: a divergent REAL file is backed up loudly
 # (it may be newer), an identical one is replaced by the link.

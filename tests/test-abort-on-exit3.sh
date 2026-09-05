@@ -33,7 +33,7 @@ assert() { if eval "$2"; then ((pass++)); echo "  ok   $1"; else ((fail++)); ech
 
 echo "bootstrap exit-3 abort"
 # check mode: no sudo, no preamble, just the phase loop
-KIT_PHASE_DIR="$TMP/phases" HOST_CONF="$TMP/host.conf" \
+KIT_LOG_DIR="$TMP/logs" KIT_PHASE_DIR="$TMP/phases" HOST_CONF="$TMP/host.conf" \
   bash "$KIT_DIR/bootstrap.sh" workstation check >"$TMP/out" 2>&1
 rc=$?
 assert "phases before the stopper ran"      'grep -q "FIRST RAN"   "$TMP/out"'
@@ -44,7 +44,7 @@ assert "bootstrap exits non-zero"           '[[ "$rc" -ne 0 ]]'
 
 # and the control: without a stopper, every phase runs
 rm "$TMP/phases/01-stop.sh"
-KIT_PHASE_DIR="$TMP/phases" HOST_CONF="$TMP/host.conf" \
+KIT_LOG_DIR="$TMP/logs" KIT_PHASE_DIR="$TMP/phases" HOST_CONF="$TMP/host.conf" \
   bash "$KIT_DIR/bootstrap.sh" workstation check >"$TMP/out2" 2>&1
 assert "control: with no exit 3, later phases DO run" 'grep -q "AFTER RAN" "$TMP/out2"'
 

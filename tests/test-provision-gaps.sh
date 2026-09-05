@@ -17,6 +17,13 @@ run() { HOME="$TMP/home" HOST_CONF="$TMP/host.conf" XDG_SESSION_TYPE="${SESSION:
 mkdir -p "$TMP/bin"; for b in bun ydotool wtype; do printf '#!/bin/sh\nexit 127\n' > "$TMP/bin/$b"; done
 # ... a stub that exits 127 still "exists" to command -v; hide instead
 rm -f "$TMP/bin/"*
+# and ydotool may really be installed here: a dpkg-query stub reports it absent
+cat > "$TMP/bin/dpkg-query" <<'EOF2'
+#!/bin/bash
+for a in "$@"; do [[ "$a" == ydotool ]] && { echo "unknown ok not-installed"; exit 0; }; done
+exec /usr/bin/dpkg-query "$@"
+EOF2
+chmod +x "$TMP/bin/dpkg-query"
 echo "provisioning gaps"
 out="$(run 08-claude-skills.sh)"
 assert "bun: phase 08 offers to install it"            'grep -qE "\[would\].*bun" <<<"$out"'
