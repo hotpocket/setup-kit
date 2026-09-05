@@ -474,16 +474,33 @@ if [[ "$(conf_get component_dictation yes)" == yes ]]; then
       warn "user not in input group — ydotool can't open /dev/uinput (takes effect at next login)"
       do_or_say sudo usermod -aG input "$USER"
     fi
-    # enabled is not running: the package presets it enabled, but ydotoold
-    # exits 2 until /dev/uinput (group input) is openable — i.e. after the
-    # next login. Start it only when the group is effective; else say so.
+    # The input group is not enough: ydotoold runs under the systemd --user
+    # manager, and with Linger=yes that manager never restarts on logout, so
+    # it keeps login-time groups forever (2026-09-05: relogin changed nothing).
+    # A uaccess ACL on /dev/uinput is per-uid for the active seat — works now,
+    # survives relogins, needs no group. 72- so it precedes 73-seat-late.rules,
+    # which is what turns the tag into the ACL.
+    UI_RULE=/etc/udev/rules.d/72-uinput-uaccess.rules
+    UI_WANT='KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess"'
+    if [[ -f "$UI_RULE" && "$(cat "$UI_RULE")" == "$UI_WANT" ]]; then
+      ok "/dev/uinput uaccess rule present"
+    else
+      warn "/dev/uinput uaccess rule missing — the seat user needs an ACL on it (group alone doesn't reach ydotoold under linger)"
+      if (( INSTALL )); then
+        printf '%s\n' "$UI_WANT" | sudo tee "$UI_RULE" >/dev/null
+        sudo udevadm control --reload && sudo udevadm trigger --action=add --name-match=uinput \
+          && log "installed $UI_RULE and re-added /dev/uinput"
+      else
+        printf '  %s[would]%s write %s and re-add /dev/uinput\n' "$C_DIM" "$C_RST" "$UI_RULE"
+      fi
+    fi
     if systemctl --user is-active ydotool.service >/dev/null 2>&1; then ok "ydotoold running (ydotool.service)"
     elif pkg_installed ydotool; then
-      if id -nG 2>/dev/null | grep -qw input; then
+      if [[ -w /dev/uinput ]]; then
         warn "ydotool.service not running — starting ydotoold"
         do_or_say systemctl --user enable --now ydotool.service
       else
-        warn "ydotoold can't start until the input group is effective — log out and back in"
+        warn "/dev/uinput not writable by you yet — ydotoold deferred (re-run after the udev rule lands)"
         (( INSTALL )) && systemctl --user enable ydotool.service >/dev/null 2>&1
       fi
     else
