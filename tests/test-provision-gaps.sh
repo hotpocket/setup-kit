@@ -38,7 +38,7 @@ assert "ydotool: input group + user service are part of it" 'grep -qE "input gro
 # Linger=yes keeps the systemd --user manager (and ydotoold under it) on the
 # login-time groups forever; a uaccess ACL on /dev/uinput is uid-based and
 # needs neither the group nor a relogin
-assert "ydotool: offers the /dev/uinput uaccess udev rule"  'grep -qE "\[would\].*72-uinput-uaccess" <<<"$out"'
+assert "ydotool: offers the /dev/uinput uaccess udev rule"  'grep -qE "\[would\].*re-add /dev/uinput" <<<"$out"'
 out="$(SESSION=x11 run 07-components.sh)"
 assert "ydotool: not pushed onto an X11 session"        '! grep -q "ydotool" <<<"$out"'
 echo "  $pass passed, $fail failed"
