@@ -136,6 +136,9 @@ case "$cmd" in
     [[ -f "$PHASE_DIR/preamble-github-auth.sh" ]] && bash "$PHASE_DIR/preamble-github-auth.sh" "$mode" || true
     # install mode loops passes until a pass changes nothing, then runs the
     # independent verifier — one command does the whole job.
+    # missing.log is THIS run's triage list: rotate the previous run's out so
+    # "Misses to triage" never points at entries an earlier run already fixed
+    [[ "$mode" == install && -s "$LOG_DIR/missing.log" ]] && mv -f "$LOG_DIR/missing.log" "$LOG_DIR/missing.prev.log"
     rc=0; settled=0
     for pass in 1 2 3; do
       RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S)-p$pass.log"

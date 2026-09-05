@@ -139,9 +139,15 @@ if [[ -d "$LS_SRC" ]]; then
     # that GTK trusts as authoritative and serves nothing from — worse than
     # none (it hides the icons entirely). Remove any stale cache and
     # let GTK live-scan the dir against the system hicolor index.theme.
-    rm -f "$HOME/.local/share/icons/hicolor/icon-theme.cache"
   fi
   (( changed )) || ok "launcher assets (applications + icons) present"
+  # Every pass, not only when links changed: .configs/setup.sh (run above) and
+  # any gtk-update-icon-cache elsewhere recreate the degenerate cache, and a
+  # cache without an index.theme beside it is never right.
+  if (( INSTALL )) && [[ -f "$HOME/.local/share/icons/hicolor/icon-theme.cache" \
+                         && ! -f "$HOME/.local/share/icons/hicolor/index.theme" ]]; then
+    rm -f "$HOME/.local/share/icons/hicolor/icon-theme.cache" && log "removed degenerate hicolor icon-theme.cache"
+  fi
 
   # Pin .configs-shipped launchers to the dock (merge, don't clobber others)
   if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; then

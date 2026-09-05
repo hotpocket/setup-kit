@@ -384,7 +384,9 @@ flap=$(systemctl show '*.service' --property=Id,NRestarts 2>/dev/null \
   || { failv "calm: restart-looping service(s):"; fnote "$flap"; }
 
 # 7c. units stuck activating right now
-act=$(systemctl list-units --state=activating --no-legend --plain 2>/dev/null | awk '{print $1}')
+# services only: a VM's virtio .device units sit in "activating (tentative)"
+# forever — udev bookkeeping, not a service failing to start
+act=$(systemctl list-units --state=activating --type=service --no-legend --plain 2>/dev/null | awk '{print $1}')
 [[ -z "$act" ]] && pass "calm: nothing stuck activating" \
   || { failv "calm: stuck activating:"; fnote "$(printf '%s\n' "$act" | sed 's/^/        /')"; }
 
