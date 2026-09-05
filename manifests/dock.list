@@ -14,8 +14,6 @@ org.gnome.Nautilus.desktop
 com.mattjakeman.ExtensionManager.desktop       # gnome-shell-extension-manager (desktop group)
 com.obsproject.Studio.desktop     @media       # obs-studio
 gimp.desktop                      @media
-libreoffice-writer.desktop                     # editors group
-org.gnome.Rhythmbox3.desktop
 # .configs launchers (phase 06 links them into ~/.local/share/applications)
 magic.desktop                                  # MTGA under wine (component_mtga)
 ocrscr.desktop
