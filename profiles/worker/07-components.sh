@@ -1,0 +1,1 @@
+../workstation/07-components.sh

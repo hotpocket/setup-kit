@@ -44,6 +44,9 @@ fnote() {
 # trim edges only — list values (skip_pkgs) are space-separated inside
 cv() { sed -n "s/^$1=\([^#]*\).*/\1/p" "$CONF" 2>/dev/null | tail -1 | sed 's/^ *//;s/ *$//'; }
 gon() { [[ "$(cv "group_${1//-/_}")" == yes ]]; }
+# headless=yes (profiles/worker): no snaps/flatpaks/debs phases ran, no
+# session exists — those checks would grade a desktop the host never wanted.
+HEADLESS=0; [[ "$(cv headless)" == yes ]] && HEADLESS=1
 
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 [[ -f "$CONF" ]] || { echo "no $CONF — nothing to verify against"; exit 1; }
@@ -84,9 +87,14 @@ if (( ${#FILES[@]} > 0 )); then
   # wine_branch swaps the manifest's stable names for the chosen branch
   # (re-derived here, not shared with lib.sh)
   WB="$(cv wine_branch)"; case "$WB" in devel|staging) ;; *) WB=stable ;; esac
+  # a working nvidia driver of ANY series satisfies the manifest's pin
+  # (installing the pinned series over a live one removes the running stack);
+  # 1b below grades whether that driver actually drives the GPU
+  CUR_DRV=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'nvidia-driver-*' 2>/dev/null | awk '/^ii /{print $2; exit}')
   while IFS= read -r p; do
     [[ "$p" =~ ^(winehq|wine)-stable$ ]] && p="${p%-stable}-$WB"
     [[ "$SKIPS" == *" $p "* ]] && continue
+    [[ "$p" =~ ^nvidia-driver-[0-9]+ && -n "$CUR_DRV" && "$p" != "$CUR_DRV" ]] && continue
     apt-cache show "$p" >/dev/null 2>&1 || continue   # not in this release's archive
     apt_total=$((apt_total+1))
     st=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null)
@@ -129,14 +137,14 @@ if [[ " ${FILES[*]} " == *conditional/nvidia.list* ]]; then
 fi
 
 # -- 2. snaps / flatpaks ------------------------------------------------------
-while IFS= read -r line; do
+(( HEADLESS )) || while IFS= read -r line; do
   line="${line%%#*}"; line=$(echo "$line" | xargs); [[ -z "$line" ]] && continue
   grp=""; [[ "$line" == *" @"* ]] && { grp="${line##*@}"; line="${line% @*}"; }
   name="${line%% *}"
   [[ -n "$grp" ]] && ! gon "$grp" && continue
   snap list "$name" >/dev/null 2>&1 && pass "snap: $name" || failv "snap: $name"
 done < manifests/snap.list
-while IFS= read -r line; do
+(( HEADLESS )) || while IFS= read -r line; do
   line="${line%%#*}"; line=$(echo "$line" | xargs); [[ -z "$line" ]] && continue
   grp=""; [[ "$line" == *" @"* ]] && { grp="${line##*@}"; line="${line% @*}"; }
   [[ -n "$grp" ]] && ! gon "$grp" && continue
@@ -144,7 +152,7 @@ while IFS= read -r line; do
 done < manifests/flatpak.list
 # gnome extensions: only on a GNOME box (CLI present); enablement is login-
 # dependent on Wayland, so verify presence (installed), not active state.
-if command -v gnome-extensions >/dev/null 2>&1; then
+if (( ! HEADLESS )) && gon desktop && command -v gnome-extensions >/dev/null 2>&1; then
   while IFS= read -r line; do
     line="${line%%#*}"; line=$(echo "$line" | xargs); [[ -z "$line" ]] && continue
     grp=""; [[ "$line" == *" @"* ]] && { grp="${line##*@}"; line="${line% @*}"; }
@@ -159,7 +167,7 @@ if command -v gnome-extensions >/dev/null 2>&1; then
 fi
 
 # -- 3. direct debs (url/github methods only; honor optional group gate) ------
-while IFS=$'\t' read -r name method arg grp; do
+(( HEADLESS )) || while IFS=$'\t' read -r name method arg grp; do
   [[ -z "$name" || "$name" == \#* || "$method" == manual ]] && continue
   [[ -n "$grp" ]] && ! gon "$grp" && continue
   dpkg -s "$name" >/dev/null 2>&1 && pass "deb: $name" || failv "deb: $name"
@@ -227,22 +235,32 @@ fi
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
+if (( ! HEADLESS )); then
 [[ -x "$TTS_FL_BIN" ]] && pass "tts flutter client bundle built" \
   || failv "tts flutter client bundle missing (run: cd ~/git/.configs/tts-flutter && flutter build linux --release)"
+fi
 if [[ "$(cv component_dictation)" == yes || -z "$(cv component_dictation)" ]]; then
   VOSK_PY="$HOME/.pyenv/versions/vosk/bin/python"
   [[ -x "$VOSK_PY" ]] && "$VOSK_PY" -c 'import vosk' 2>/dev/null \
     && pass "vosk venv: vosk importable (dictation)" \
     || failv "vosk venv missing (~/.pyenv/versions/vosk) — dictation may use a stray interpreter"
 fi
+# node/flutter per lang_ flag (empty = workstation default yes); java/docker
+# only when their apt group is on
+LN=$(cv lang_node); LF=$(cv lang_flutter)
+if [[ "${LN:-yes}" == yes ]]; then
 if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
   v=$(bash -c 'source ~/.nvm/nvm.sh >/dev/null 2>&1; node --version' 2>/dev/null)
   [[ -n "$v" ]] && pass "node: $v via nvm" || failv "node: nvm present but node unusable"
 else failv "node: nvm missing"; fi
+fi
+if gon dev_java; then
 java -version >/dev/null 2>&1 && pass "java: $(java -version 2>&1 | head -1)" || failv "java missing"
 command -v mvn >/dev/null && pass "maven present" || failv "maven missing"
-[[ -x "$HOME/development/flutter/bin/flutter" ]] && pass "flutter SDK present" || failv "flutter missing"
-if command -v docker >/dev/null; then
+fi
+[[ "${LF:-yes}" == yes ]] && { [[ -x "$HOME/development/flutter/bin/flutter" ]] && pass "flutter SDK present" || failv "flutter missing"; }
+if ! gon dev_core; then :
+elif command -v docker >/dev/null; then
   DMODE=$(cv component_docker_rootless); DMODE=${DMODE:-yes}
   if docker info 2>/dev/null | grep -qi rootless; then
     [[ "$DMODE" == yes ]] && pass "docker rootless (as configured)" \
@@ -252,9 +270,11 @@ if command -v docker >/dev/null; then
       || failv "docker NOT rootless (host conf wants rootless)"
   fi
 else failv "docker missing"; fi
-command -v gcloud >/dev/null && pass "gcloud present" || failv "gcloud missing"
-# aws must be v2 from Amazon's bundle (components/aws-cli.md); apt's awscli is v1
-if gon dev-cloud; then
+gon dev_cloud && { command -v gcloud >/dev/null && pass "gcloud present" || failv "gcloud missing"; }
+# aws must be v2 from Amazon's bundle (components/aws-cli.md); apt's awscli is v1.
+# Only when the group is on: a worker (group off) gets apt's v1 from worker.list,
+# which section 1 already verifies.
+if gon dev_cloud; then
   AWS_V="$(command -v aws >/dev/null 2>&1 && aws --version 2>&1 | sed -n 's|^aws-cli/\([0-9.]*\).*|\1|p')"
   case "$AWS_V" in
     2.*) pass "aws-cli v2 present ($AWS_V)" ;;
@@ -263,7 +283,7 @@ if gon dev-cloud; then
   esac
 fi
 command -v gh >/dev/null && pass "gh present" || failv "gh missing"
-command -v shellcheck >/dev/null && pass "shellcheck present" || failv "shellcheck missing"
+gon dev_core && { command -v shellcheck >/dev/null && pass "shellcheck present" || failv "shellcheck missing"; }
 
 # -- 4b. dotfiles actually wired (not just cloned) ------------------------------
 for df in .bashrc .bash_aliases .gitconfig; do
@@ -275,7 +295,7 @@ for df in .bashrc .bash_aliases .gitconfig; do
 done
 
 # -- 4c. launcher assets (custom-tool icons resolve) ---------------------------
-if [[ -d "$HOME/git/.configs/.local/share/icons" ]]; then
+if (( ! HEADLESS )) && [[ -d "$HOME/git/.configs/.local/share/icons" ]]; then
   for d in "$HOME"/git/.configs/.local/share/applications/*.desktop; do
     [[ -f "$d" ]] || continue
     icon=$(sed -n 's/^Icon=//p' "$d" | head -1)
@@ -317,7 +337,7 @@ done < <(find "$HOME/git/.configs/bin" -maxdepth 1 -type f -executable 2>/dev/nu
 (( bin_bad == 0 && bin_n > 0 )) && pass "bin: all $bin_n .configs tools live-linked"
 
 # -- 4e. autostart entries wired ------------------------------------------------
-for src in "$HOME"/git/.configs/.config/autostart/*.desktop; do
+(( HEADLESS )) || for src in "$HOME"/git/.configs/.config/autostart/*.desktop; do
   [[ -f "$src" ]] || continue
   n="$(basename "$src")"
   # entries whose Exec binary isn't on this box are intentionally unwired
@@ -334,7 +354,7 @@ for src in "$HOME"/git/.configs/.config/autostart/*.desktop; do
 done
 
 # -- 4f. dock pins (only meaningful inside a session) ---------------------------
-if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; then
+if (( ! HEADLESS )) && [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; then
   favs="$(gsettings get org.gnome.shell favorite-apps 2>/dev/null)"
   # manifests/dock.list is the declaration: every installed, non-gated entry
   # must be a favorite, and nothing else may be (Ubuntu's defaults included)

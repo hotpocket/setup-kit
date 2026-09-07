@@ -134,6 +134,25 @@ OPTIONAL = {  # group: (header, [pkgs])
                 "calibre", "john", "john-data", "freeipmi-tools",
                 "ipmitool", "fio", "gsmartcontrol", "qemu-system-x86",
                 "genisoimage", "libdvd-pkg", "fastfetch"]),
+    # profiles/worker — the whole apt set of a headless media/AI worker VM
+    # (bootstrap.sh worker). NOT a subset of cli-system: that list is
+    # desktop-flavored (yaru, ibus, brltty, hplip, libreoffice help). This is
+    # only what a shell, the kokoro/whisper venvs (07-components), pyenv builds
+    # (04-languages) and machine-credential CLIs need. ffmpeg/sox live in
+    # media.list too, but that group drags in players.
+    "worker": ("Headless worker (profiles/worker) — OFF for workstations;"
+               " the worker host conf turns ONLY this group on",
+               ["openssh-server", "qemu-guest-agent", "curl", "wget", "rsync",
+                "git", "gh", "jq", "unzip", "zip", "xz-utils", "lsof",
+                "tmux", "tree", "pv", "bat", "btop", "tig", "tealdeer",
+                "nvtop", "gnupg", "sqlite3",
+                "awscli",
+                "ffmpeg", "sox", "mediainfo", "libsndfile1", "libportaudio2",
+                "espeak-ng",
+                "python3-pip", "python3-venv", "pipx", "build-essential",
+                "libssl-dev", "zlib1g-dev", "libbz2-dev", "libreadline-dev",
+                "libsqlite3-dev", "libncurses-dev", "libxml2-dev",
+                "libxmlsec1-dev", "libffi-dev", "liblzma-dev"]),
 }
 # dev-go is optional too but has no apt packages (manual install) — see
 # manifests/lang/README note emitted below.

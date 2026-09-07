@@ -1,0 +1,1 @@
+../workstation/06-configs.sh

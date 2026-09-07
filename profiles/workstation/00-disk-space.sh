@@ -127,8 +127,11 @@ add_need "apt: package index lists" "$(declared_kb apt_lists)" "$(declared_tgt a
 # Live store size when snapd can answer (it's the download size, and snaps stay
 # compressed on disk, so it doubles as the installed size); declared fallback
 # when it can't — a fresh box may have no network yet.
+# headless=yes (profiles/worker): the snap/flatpak/deb phases never run there,
+# so their footprint is not charged either.
+HEADLESS=0; [[ "$(conf_get headless no)" == yes ]] && HEADLESS=1
 snap_missing=0
-while IFS= read -r entry; do
+(( HEADLESS )) || while IFS= read -r entry; do
   entry="${entry%%#*}"; entry="$(echo "$entry" | xargs)"; [[ -z "$entry" ]] && continue
   grp=""
   if [[ "$entry" == *" @"* ]]; then grp="${entry##*@}"; entry="${entry% @*}"; fi
@@ -152,7 +155,7 @@ if (( snap_missing )) && ! snap list core24 >/dev/null 2>&1; then
 fi
 
 # ---- flatpaks -------------------------------------------------------------
-while IFS= read -r entry; do
+(( HEADLESS )) || while IFS= read -r entry; do
   entry="${entry%%#*}"; entry="$(echo "$entry" | xargs)"; [[ -z "$entry" ]] && continue
   grp=""
   if [[ "$entry" == *" @"* ]]; then grp="${entry##*@}"; entry="${entry% @*}"; fi
@@ -164,7 +167,7 @@ while IFS= read -r entry; do
 done < <(grep -hvE '^[[:space:]]*(#|$)' "$MANIFEST_DIR/flatpak.list" 2>/dev/null)
 
 # ---- vendor .debs ---------------------------------------------------------
-while read -r name method arg grp _rest; do
+(( HEADLESS )) || while read -r name method arg grp _rest; do
   [[ -z "${name:-}" || "$name" == \#* ]] && continue
   [[ "$method" == manual ]] && continue          # doctor-warns only; never installed here
   [[ -n "${grp:-}" ]] && ! group_on "$grp" && continue

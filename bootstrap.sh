@@ -5,6 +5,7 @@
 #   ./bootstrap.sh workstation [check]     # doctor: report what's missing, change nothing
 #   ./bootstrap.sh workstation install     # provision (prompts once, records answers)
 #   ./bootstrap.sh workstation check -v    # verbose: per-line [ OK ] (also verbose=yes in host conf)
+#   ./bootstrap.sh worker [check|install]  # headless media/AI worker: same loop, lean phases (profiles/worker/)
 #   ./bootstrap.sh proxmox-host install    # IOMMU/VFIO/ZFS/nested-virt + VM creation
 #   ./bootstrap.sh list                    # every group/component flag + its current value
 #
@@ -14,7 +15,7 @@ set -uo pipefail
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$KIT_DIR/lib.sh"
 
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
 # Catalog of every toggleable group_/component_ flag, from the example.conf
 # template (its inline comments are the descriptions), annotated with each
@@ -84,19 +85,24 @@ case "$cmd" in
     ip -br link | grep -v '^lo'
     ;;
 
-  workstation)
+  workstation|worker)
     [[ "$mode" == doctor ]] && mode=check   # alias — same thing
+    # worker = the same pass loop over profiles/worker/ (symlinks to the
+    # workstation phases it shares + its own headless phase), a lean host-conf
+    # template, no opt-in menu. Everything below is profile-agnostic.
     # overridable so the phase-loop semantics (notably the exit-3 abort) can be
     # exercised against stub phases; unset everywhere except tests/
-    PHASE_DIR="${KIT_PHASE_DIR:-$KIT_DIR/profiles/workstation}"
+    PHASE_DIR="${KIT_PHASE_DIR:-$KIT_DIR/profiles/$cmd}"
+    TEMPLATE="$KIT_DIR/hosts/example.conf"
+    [[ "$cmd" == worker ]] && TEMPLATE="$KIT_DIR/hosts/worker.example.conf"
     case "$mode" in check|install) ;; *) usage ;; esac
     # -v (or verbose=yes in host conf): per-line [ OK ] output instead of the
     # quiet per-section rollup. Detail always lands in the run log either way.
     [[ "${3:-}" == "-v" || "$(conf_get verbose no)" == yes ]] && export KIT_VERBOSE=1
     # first run: create the host answer file from the template
     if [[ ! -f "$HOST_CONF" ]]; then
-      cp "$KIT_DIR/hosts/example.conf" "$HOST_CONF"
-      echo "Created $HOST_CONF from template."
+      cp "$TEMPLATE" "$HOST_CONF"
+      echo "Created $HOST_CONF from $(basename "$TEMPLATE")."
       if [[ -t 0 && "$mode" == install ]]; then
         read -rp "Review/edit it now? [Y/n] " a
         [[ "$a" =~ ^[Nn] ]] || "${EDITOR:-nano}" "$HOST_CONF"

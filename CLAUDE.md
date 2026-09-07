@@ -11,6 +11,12 @@ packages, toolchains, configs — idempotently.
   - `workstation check` — doctor: report drift, change nothing.
   - `workstation install` — provision; prompts once, loops passes until converged, then runs `verify.sh`.
   - `proxmox-host install` — IOMMU/VFIO/ZFS/nested-virt (run as root; reviewed-but-unrun).
+  - `worker check|install` — headless media/AI worker VM (`profiles/worker/`): the same
+    pass loop over symlinks to the workstation phases it shares plus `03-headless`
+    (multi-user.target at boot, sshd, linger, nvidia held under unattended-upgrades,
+    machine-credential doctor). Template `hosts/worker.example.conf`: one apt group
+    (`optional/worker.list`), `headless=yes` gates session work in 06-configs/verify.
+    No YubiKey anywhere: a cron can't touch one — creds are scoped keys, seeded by hand.
   - `list` — print every group/component/lang flag + its current value (from `hosts/<host>.conf`), plus informational `cond_*`. The way to discover what's installable after first run: flip a flag, re-run install.
 - `get.sh` — one-line fetcher: clones the repo, optionally execs `bootstrap.sh`.
 - `verify.sh` — independent system-vs-manifest check. Deliberately does NOT source `lib.sh` (a shared bug shouldn't lie twice).

@@ -719,7 +719,9 @@ fi
 FLUTTER_BIN="$HOME/development/flutter/bin/flutter"
 TTS_FL_SRC="$HOME/git/.configs/tts-flutter"
 TTS_FL_BIN="$TTS_FL_SRC/build/linux/x64/release/bundle/tts_client"
-if [[ ! -d "$TTS_FL_SRC" ]]; then
+if [[ "$(conf_get headless no)" == yes ]]; then
+  ok "tts flutter client: desktop-side, skipped on a headless host"
+elif [[ ! -d "$TTS_FL_SRC" ]]; then
   warn "tts flutter client: source missing ($TTS_FL_SRC) — run 06-configs"
 elif [[ ! -x "$FLUTTER_BIN" ]]; then
   warn "tts flutter client: flutter SDK missing — run 05-flutter-android"

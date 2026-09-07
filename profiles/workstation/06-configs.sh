@@ -111,6 +111,11 @@ link_tree() {
   done < <(find "$src" -type f "${LINK_FIND[@]}" 2>/dev/null)
 }
 
+# Headless host (headless=yes — profiles/worker): the shell layer below is
+# the whole point; launchers, autostart and dconf are session furniture with
+# nothing to sit in, so they end here. verify.sh mirrors the same gate.
+HEADLESS=0; [[ "$(conf_get headless no)" == yes ]] && HEADLESS=1
+
 # 1) core dotfiles (specific files at the repo root)  2) ~/bin executables
 _w=$DOCTOR_WARN
 for df in .bashrc .bash_aliases .gitconfig \
@@ -126,7 +131,9 @@ LINK_FIND=(-maxdepth 1 -executable); link_tree "$DEST/bin" "$HOME/bin"; LINK_FIN
 # hicolor icons → iconless entries, unpinned. Mirror both, refresh caches,
 # pin to the dock.
 LS_SRC="$DEST/.local/share"
-if [[ -d "$LS_SRC" ]]; then
+if (( HEADLESS )); then
+  ok "headless: launcher assets, autostart and dconf skipped (no session)"
+elif [[ -d "$LS_SRC" ]]; then
   LINK_CHANGED=0
   LINK_FIND=(\( -path '*/applications/*.desktop' -o -path '*/icons/*' \))
   link_tree "$LS_SRC" "$HOME/.local/share"; LINK_FIND=()
@@ -156,7 +163,7 @@ fi
 # but setup.sh doesn't wire them. Same symlink convention as launcher assets,
 # exec-gated so each box only autostarts apps it actually has.
 AS_SRC="$DEST/.config/autostart"
-if [[ -d "$AS_SRC" ]]; then
+if (( ! HEADLESS )) && [[ -d "$AS_SRC" ]]; then
   mkdir -p "$HOME/.config/autostart"
   _w=$DOCTOR_WARN
   link_tree "$AS_SRC" "$HOME/.config/autostart" 1
@@ -164,7 +171,7 @@ if [[ -d "$AS_SRC" ]]; then
 fi
 
 # dconf: .configs carries the dumps (dconf/ dir); load only in a session
-if [[ -d "$DEST/dconf" ]] && compgen -G "$DEST/dconf/*.ini" >/dev/null; then
+if (( ! HEADLESS )) && [[ -d "$DEST/dconf" ]] && compgen -G "$DEST/dconf/*.ini" >/dev/null; then
   if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
     for ini in "$DEST/dconf"/*.ini; do
       # files are named for their dconf path: notifications.ini -> /org/gnome/desktop/notifications/

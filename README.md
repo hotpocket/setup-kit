@@ -19,6 +19,7 @@ manifests/            WHAT to install (curated, size-annotated)
   sizes.conf          declared footprints for what apt can't measure (SDKs, models)
 profiles/
   workstation/        full dev desktop (bare metal or VM — same scripts)
+  worker/             headless media/AI worker VM — shared phases by symlink + 03-headless
   proxmox-host/       IOMMU/VFIO, ZFS, nested-virt, GPU-passthrough main VM
 components/           opt-in/conditional extras (herdr, oom-zram, dictation/ocr/tts)
 hosts/                per-machine answer files (example.conf is the template)
