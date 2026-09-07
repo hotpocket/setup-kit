@@ -40,8 +40,16 @@ chmod 600 "$HOME/.ssh/known_hosts" 2>/dev/null || true
 (( seeded )) && log "pinned GitHub host keys into known_hosts"
 ok "known_hosts: GitHub host keys"
 
-# ---- 2. deploy keys + aliases (every repo in deploy_repos) -----------------
-if [[ -z "$DEPLOY_REPOS" ]]; then
+# ---- 2. credentials: token (gh) or per-repo deploy keys -------------------
+if [[ "$GIT_AUTH" == token ]]; then
+  # gh arrives with the worker apt group, but that is a phase and this runs
+  # first; the sudo pass is already open, so fetch it here (non-interactive)
+  if ! command -v gh >/dev/null 2>&1 && (( INSTALL )); then
+    warn "gh missing — installing it ahead of the apt phase"
+    apt_install gh
+  fi
+  token_login || true
+elif [[ -z "$DEPLOY_REPOS" ]]; then
   warn "deploy_repos empty in host conf — nothing private can be cloned"
 else
   deploy_each deploy_ensure
@@ -56,9 +64,14 @@ try_clone && { ok ".configs cloned"; exit 0; }
 # The .configs deploy key is not registered yet (or configs_repo doesn't use
 # an alias). Show what to register; a tty may instead use gh's device flow
 # over https — a browser on ANY machine, nothing local.
-warn "clone failed — register the deploy key, then re-run install"
-deploy_each deploy_probe
-if [[ -t 0 ]] && command -v gh >/dev/null 2>&1; then
+if [[ "$GIT_AUTH" == token ]]; then
+  warn "clone failed — the token can't read .configs (not selected on the token, or not logged in)"
+  command -v gh >/dev/null 2>&1 && token_probe "$(sed -E 's#^(https://github.com/|git@[^:]+:)##; s#\.git$##' <<<"$REPO")"
+else
+  warn "clone failed — register the deploy key, then re-run install"
+  deploy_each deploy_probe
+fi
+if [[ "$GIT_AUTH" != token && -t 0 ]] && command -v gh >/dev/null 2>&1; then
   read -rp "Or authenticate now via device code (gh auth login, browser on any machine)? [y/N] " a
   if [[ "$a" =~ ^[Yy] ]]; then
     gh auth login --hostname github.com --git-protocol https --web && gh auth setup-git \

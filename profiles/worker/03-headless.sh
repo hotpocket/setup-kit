@@ -106,13 +106,21 @@ fi
 if compgen -G "$HOME/.ssh/*_sk*" >/dev/null || compgen -G "$HOME/.ssh/github_yub_*" >/dev/null; then
   warn "FIDO2 (-sk) ssh key present in ~/.ssh — unusable by unattended jobs (needs a touch)"
 fi
-if [[ -z "$DEPLOY_REPOS" ]]; then
+if [[ "$GIT_AUTH" == token ]]; then
+  if token_login; then
+    _cfg="$(conf_get configs_repo '')"
+    [[ -n "$_cfg" ]] && token_probe "$(sed -E 's#^(https://github.com/|git@[^:]+:)##; s#\.git$##' <<<"$_cfg")"
+    for r in $CLONE_REPOS; do token_probe "$r"; done
+  fi
+  clone_wanted
+elif [[ -z "$DEPLOY_REPOS" ]]; then
   warn "deploy_repos empty in host conf — no private repo can be pulled"
 else
   deploy_each deploy_ensure
   deploy_each deploy_probe
   _show_pub() { [[ -f "$3.pub" ]] && log "$1 public key: $(cat "$3.pub")"; }
   deploy_each _show_pub
+  clone_wanted
 fi
 
 exit 0

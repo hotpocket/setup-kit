@@ -17,17 +17,15 @@ and reboot it out of the desktop.
 - [ ] AWS: `aws configure --profile cron-deploy` with the job-scoped access key
       (bucket + CloudFront invalidation only). `chmod 600 ~/.aws/credentials`.
       The doctor proves it with `sts get-caller-identity`.
-- [ ] Git: one **read-only deploy key per private repo**, from `deploy_repos`
-      in the host conf. The kit generated `~/.ssh/deploy_<name>` and its ssh
-      alias `github.com-<name>`; you register each `.pub` on that repo's
-      Settings › Deploy keys (leave "allow write" off unless the job pushes).
-      GitHub allows one repo per key — that is why there is one per repo.
-      The doctor proves each with `ssh -T` and shows which repo answered.
-- [ ] Add the audiobook pipeline repo to `deploy_repos` (`name=owner/repo`),
-      re-run install, register its key; clone it as
-      `git@github.com-<name>:owner/repo.git`.
-- [ ] `.configs` was cloned via `gh` https if the deploy key couldn't open it;
-      `gh auth status` shows the token. Rotate/revoke it from GitHub, not here.
+- [ ] Git (`git_auth=token`): one **fine-grained PAT**, "only select
+      repositories" = `.configs` + the job repo + its gitignored children,
+      Contents: read-only. Paste it into `~/.config/setup-kit/github-token`
+      (mode 600). Install logs `gh` in with it and sets the credential helper;
+      the doctor proves it can read each repo in `configs_repo`/`clone_repos`.
+      Revoke/rotate from GitHub; on the box just replace the file and re-run.
+- [ ] Git (`git_auth=deploy-keys`, boxes with 1–2 repos): one read-only deploy
+      key per repo from `deploy_repos`; register each `~/.ssh/deploy_<name>.pub`
+      on that repo's Settings › Deploy keys. GitHub allows one repo per key.
 
 ## Wiring the job
 - [ ] Run it as a `systemd --user` timer + service, not a crontab: journald

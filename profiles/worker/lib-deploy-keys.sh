@@ -12,8 +12,67 @@
 #
 # Host conf:  deploy_repos="configs=hotpocket/.configs audiobook=owner/repo"
 # Expects lib.sh already sourced (conf_get, ok/warn/log, INSTALL, do_or_say).
+#
+# git_auth=token is the other mode: ONE fine-grained personal access token,
+# restricted to "only select repositories" with Contents: read-only, fed to
+# `gh auth login --with-token` from a file you place (never the conf, never a
+# repo). gh's credential helper then serves every https github.com URL — so a
+# repo whose own setup clones gitignored child repos needs no alias rewriting.
+# Right when a box touches more than a couple of repos; deploy keys when 1–2.
 
+GIT_AUTH="$(conf_get git_auth deploy-keys)"       # deploy-keys | token
 DEPLOY_REPOS="$(conf_get deploy_repos '')"
+TOKEN_FILE="$(conf_get github_token_file "$HOME/.config/setup-kit/github-token")"; TOKEN_FILE="${TOKEN_FILE/#\~/$HOME}"
+CLONE_REPOS="$(conf_get clone_repos '')"          # owner/repo ... → ~/git/<repo>
+
+# token_login: gh authenticated? else log in from the token file (install).
+# Never prints the token. Returns 0 when gh can talk to GitHub.
+token_login() {
+  if ! command -v gh >/dev/null 2>&1; then
+    warn "gh not installed — needed to hold the token"; return 1
+  fi
+  if gh auth status --hostname github.com >/dev/null 2>&1; then
+    ok "gh authenticated ($(gh api user --jq .login 2>/dev/null || echo '?'))"
+    gh auth setup-git >/dev/null 2>&1 || true      # idempotent credential helper
+    return 0
+  fi
+  if [[ ! -s "$TOKEN_FILE" ]]; then
+    warn "gh not authenticated and no token file at ${TOKEN_FILE/#$HOME/\~}"
+    hint "github.com → Settings › Developer settings › Fine-grained tokens: only select repos, Contents: read-only"
+    hint "then on this box:  mkdir -p $(dirname "${TOKEN_FILE/#$HOME/\~}") && (umask 077; cat > ${TOKEN_FILE/#$HOME/\~})   # paste, Ctrl-D"
+    miss "creds: github token file ${TOKEN_FILE/#$HOME/\~} missing"
+    return 1
+  fi
+  [[ "$(stat -c %a "$TOKEN_FILE")" == 600 ]] || { chmod 600 "$TOKEN_FILE"; log "chmod 600 ${TOKEN_FILE/#$HOME/\~}"; }
+  (( INSTALL )) || { warn "token file present; install logs gh in with it"; return 1; }
+  if gh auth login --hostname github.com --git-protocol https --with-token < "$TOKEN_FILE" 2>>"$LOG_DIR/${SCRIPT_NAME:-worker}.log" \
+     && gh auth setup-git; then
+    ok "gh logged in from token file ($(gh api user --jq .login 2>/dev/null || echo '?')); credential helper set"
+    return 0
+  fi
+  warn "gh auth login --with-token failed (expired or malformed token?)"
+  miss "creds: github token rejected"
+  return 1
+}
+
+# token_probe <owner/repo>: can the token READ this repo? (metadata call)
+token_probe() {
+  if gh repo view "$1" --json name >/dev/null 2>&1; then ok "token reaches $1"
+  else warn "token cannot read $1 — add it to the token's selected repositories"; miss "creds: token lacks $1"; fi
+}
+
+# clone_repos: every owner/repo in clone_repos lands in ~/git/<repo> over https
+clone_wanted() {
+  local r dest
+  for r in $CLONE_REPOS; do
+    dest="$HOME/git/${r##*/}"
+    if [[ -d "$dest/.git" ]]; then ok "repo $r at ${dest/#$HOME/\~}"
+    else
+      warn "repo $r not cloned"
+      (( INSTALL )) && { mkdir -p "$HOME/git"; do_or_say git clone "https://github.com/$r.git" "$dest" || miss "clone: $r"; }
+    fi
+  done
+}
 
 # deploy_each <fn>: call fn <name> <owner/repo> <keyfile> for every entry
 deploy_each() {
