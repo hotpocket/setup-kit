@@ -44,7 +44,9 @@ fi
 # own remote to match.
 KIT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 KIT_URL="$(git -C "$KIT_DIR" remote get-url origin 2>/dev/null || true)"
-if [[ "$KIT_URL" == https://github.com/* ]]; then
+if [[ "$(conf_get headless no)" == yes ]]; then
+  ok "setup-kit remote left as-is (headless: public https pull, per-repo deploy keys only)"
+elif [[ "$KIT_URL" == https://github.com/* ]]; then
   warn "setup-kit remote is https (push would prompt for credentials)"
   do_or_say git -C "$KIT_DIR" remote set-url origin "git@github.com:${KIT_URL#https://github.com/}"
 else

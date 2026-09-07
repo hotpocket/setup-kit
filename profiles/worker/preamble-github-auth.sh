@@ -4,7 +4,7 @@
 # pins github to FIDO2 keys; none of that belongs on a box where jobs run
 # with nobody present. Here:
 #   1. pin GitHub's published host keys (no TOFU prompt mid-run)
-#   2. a github.com stanza over 443 that offers the plain deploy key if present
+#   2. one deploy key + ssh alias per private repo (lib-deploy-keys.sh)
 #   3. clone private .configs; on failure offer `gh auth login` (device flow —
 #      the code is entered in a browser on ANY machine, no local GUI needed)
 SCRIPT_NAME="wk-preamble-github-auth"
@@ -12,9 +12,9 @@ source "$(dirname "$0")/../../lib.sh"
 require_user
 init_mode "${1:-}"
 
-REPO="$(conf_get configs_repo 'git@github.com:hotpocket/.configs.git')"
+source "$(dirname "$0")/lib-deploy-keys.sh"
+REPO="$(conf_get configs_repo 'git@github.com-configs:hotpocket/.configs.git')"
 DEST="$HOME/git/.configs"
-KEY="$(conf_get git_deploy_key "$HOME/.ssh/id_ed25519_worker")"; KEY="${KEY/#\~/$HOME}"
 
 section "github auth preamble ($MODE) — worker"
 mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
@@ -40,27 +40,11 @@ chmod 600 "$HOME/.ssh/known_hosts" 2>/dev/null || true
 (( seeded )) && log "pinned GitHub host keys into known_hosts"
 ok "known_hosts: GitHub host keys"
 
-# ---- 2. ssh config stanza: 443 (port 22 is firewall-bait), agent-free, the
-# deploy key offered when it exists. No IdentitiesOnly lock: until the deploy
-# key is registered, whatever key you copied in for bootstrapping still works.
-CFG="$HOME/.ssh/config"
-if ! grep -qE '^[[:space:]]*Host[[:space:]]+github\.com' "$CFG" 2>/dev/null; then
-  if (( INSTALL )); then
-    { echo
-      echo "Host github.com"
-      echo "  HostName ssh.github.com"
-      echo "  Port 443"
-      echo "  PreferredAuthentications publickey"
-      echo "  IdentityAgent none"
-      echo "  IdentityFile $KEY"
-    } >> "$CFG"
-    chmod 600 "$CFG"
-    log "wrote github.com stanza (deploy key ${KEY/#$HOME/\~})"
-  else
-    warn "~/.ssh/config: no github.com stanza"
-  fi
+# ---- 2. deploy keys + aliases (every repo in deploy_repos) -----------------
+if [[ -z "$DEPLOY_REPOS" ]]; then
+  warn "deploy_repos empty in host conf — nothing private can be cloned"
 else
-  ok "ssh config: github.com stanza present"
+  deploy_each deploy_ensure
 fi
 
 # ---- 3. clone .configs ------------------------------------------------------
@@ -69,15 +53,16 @@ if (( ! INSTALL )); then warn ".configs not cloned (install will clone / prompt 
 try_clone() { mkdir -p "$(dirname "$DEST")"; git clone "$REPO" "$DEST" 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"; [[ -d "$DEST/.git" ]]; }
 log "cloning .configs..."
 try_clone && { ok ".configs cloned"; exit 0; }
-# One deploy key opens ONE repo on GitHub, so the job repo's key can't clone
-# .configs. Fall back to gh's device flow over https: it prints a URL and a
-# code; open them in a browser anywhere (laptop, phone) — nothing local.
+# The .configs deploy key is not registered yet (or configs_repo doesn't use
+# an alias). Show what to register; a tty may instead use gh's device flow
+# over https — a browser on ANY machine, nothing local.
+warn "clone failed — register the deploy key, then re-run install"
+deploy_each deploy_probe
 if [[ -t 0 ]] && command -v gh >/dev/null 2>&1; then
-  warn "ssh clone failed — .configs is private and this key can't open it"
-  read -rp "Authenticate with GitHub via device code (gh auth login, browser on any machine)? [Y/n] " a
-  if [[ ! "$a" =~ ^[Nn] ]]; then
+  read -rp "Or authenticate now via device code (gh auth login, browser on any machine)? [y/N] " a
+  if [[ "$a" =~ ^[Yy] ]]; then
     gh auth login --hostname github.com --git-protocol https --web && gh auth setup-git \
-      && REPO="https://github.com/${REPO#git@github.com:}" && try_clone \
+      && REPO="https://github.com/${REPO#git@github.com*:}" && try_clone \
       && { ok ".configs cloned over https (gh token)"; exit 0; }
   fi
 fi

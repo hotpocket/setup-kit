@@ -17,10 +17,15 @@ and reboot it out of the desktop.
 - [ ] AWS: `aws configure --profile cron-deploy` with the job-scoped access key
       (bucket + CloudFront invalidation only). `chmod 600 ~/.aws/credentials`.
       The doctor proves it with `sts get-caller-identity`.
-- [ ] Git: `03-headless` generated `~/.ssh/id_ed25519_worker`. Register the
-      `.pub` as a **deploy key on the job repo** (GitHub allows one repo per
-      key) or on a machine user if several repos are needed. No YubiKey keys
-      on this box — a cron can't touch one.
+- [ ] Git: one **read-only deploy key per private repo**, from `deploy_repos`
+      in the host conf. The kit generated `~/.ssh/deploy_<name>` and its ssh
+      alias `github.com-<name>`; you register each `.pub` on that repo's
+      Settings › Deploy keys (leave "allow write" off unless the job pushes).
+      GitHub allows one repo per key — that is why there is one per repo.
+      The doctor proves each with `ssh -T` and shows which repo answered.
+- [ ] Add the audiobook pipeline repo to `deploy_repos` (`name=owner/repo`),
+      re-run install, register its key; clone it as
+      `git@github.com-<name>:owner/repo.git`.
 - [ ] `.configs` was cloned via `gh` https if the deploy key couldn't open it;
       `gh auth status` shows the token. Rotate/revoke it from GitHub, not here.
 

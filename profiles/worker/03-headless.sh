@@ -11,6 +11,7 @@
 # console session may be open, and a reboot is the honest moment anyway.
 SCRIPT_NAME="wk-03-headless"
 source "$(dirname "$0")/../../lib.sh"
+source "$(dirname "$0")/lib-deploy-keys.sh"
 require_user
 init_mode "${1:-}"
 
@@ -99,36 +100,19 @@ else
   warn "awscli not installed yet (group_worker → 02-apt-install); aws profile $AWS_PROF unverified"
 fi
 
-# git: a plain ed25519 key that needs no touch. The workstation's YubiKey
-# FIDO2 keys (github_yub_*) require a physical press per signature — a cron
-# hangs on them forever. The kit generates the keypair (local, harmless); YOU
-# register the public half (deploy key on the job repo, or a machine user).
-KEY="$(conf_get git_deploy_key "$HOME/.ssh/id_ed25519_worker")"; KEY="${KEY/#\~/$HOME}"
+# git: one read-only deploy key per private repo, each on its own ssh alias
+# (lib-deploy-keys.sh). The workstation's YubiKey FIDO2 keys need a physical
+# press per signature — a cron hangs on them forever — so none live here.
 if compgen -G "$HOME/.ssh/*_sk*" >/dev/null || compgen -G "$HOME/.ssh/github_yub_*" >/dev/null; then
   warn "FIDO2 (-sk) ssh key present in ~/.ssh — unusable by unattended jobs (needs a touch)"
 fi
-if [[ -f "$KEY" ]]; then
-  ok "git deploy key present: ${KEY/#$HOME/\~}"
+if [[ -z "$DEPLOY_REPOS" ]]; then
+  warn "deploy_repos empty in host conf — no private repo can be pulled"
 else
-  warn "git deploy key missing: ${KEY/#$HOME/\~}"
-  if (( INSTALL )); then
-    mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
-    do_or_say ssh-keygen -q -t ed25519 -N '' -C "$USER@$(hostname) worker" -f "$KEY" \
-      && log "generated ${KEY/#$HOME/\~} — register the .pub as a deploy key (see 99-manual-checklist.md)"
-  fi
+  deploy_each deploy_ensure
+  deploy_each deploy_probe
+  _show_pub() { [[ -f "$3.pub" ]] && log "$1 public key: $(cat "$3.pub")"; }
+  deploy_each _show_pub
 fi
-if [[ -f "$KEY" ]]; then
-  # GitHub answers "successfully authenticated" and exits 1 on a good key
-  out="$(timeout 20 ssh -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
-           -i "$KEY" -T git@github.com 2>&1 || true)"
-  if [[ "$out" == *"successfully authenticated"* ]]; then
-    ok "git deploy key accepted by GitHub"
-  else
-    warn "GitHub does not accept the deploy key yet"
-    hint "register: cat ${KEY/#$HOME/\~}.pub  →  repo Settings › Deploy keys (one repo per key), or a machine user's SSH keys"
-    miss "creds: git deploy key not registered with GitHub"
-  fi
-fi
-[[ -f "$KEY.pub" ]] && log "public key: $(cat "$KEY.pub")"
 
 exit 0
