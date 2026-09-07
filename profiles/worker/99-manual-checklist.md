@@ -4,13 +4,13 @@ A worker runs unattended jobs. Everything here is what a human must do
 because the kit refuses to: put secrets on the box, grant it identities,
 and reboot it out of the desktop.
 
-## First run, from the Proxmox console (once)
-- [ ] `ssh-copy-id ai@<ip>` from your laptop — after this, never use noVNC again
+## First run (over ssh)
+- [ ] `ssh-copy-id ai@<ip>` from your laptop — key auth before password login goes
 - [ ] `./bootstrap.sh worker install` — it clones `.configs` (device-code
       login if the ssh key can't), installs the worker apt set, builds pyenv
       3.12 + the kokoro venv (GPU torch verified), whisper, Claude Code
-- [ ] **Reboot.** The default target is now `multi-user.target`; the GNOME
-      session you ran this from keeps ~1 GB until you do
+- [ ] **Reboot.** The default target is now `multi-user.target`; the autologin
+      GNOME session on the console keeps ~1 GB until you do
 - [ ] `./bootstrap.sh worker` (doctor) comes back clean; triage `logs/missing.log`
 
 ## Machine credentials (never automated, never SSO)
@@ -32,6 +32,12 @@ and reboot it out of the desktop.
 - [ ] Voice/model caches are per-user (`~/.cache/huggingface`, kokoro
       weights) — run the job once by hand to warm them before trusting the timer.
 
-## Bringing the console back
+## .configs on a headless box
+- [ ] `setup.sh install` ran (it owns the claude hooks/router this box needs).
+      Check `systemctl --user status tts-server` stays inactive (condition/
+      target) and nothing complains about dconf without a session; if it
+      does, add a headless gate in `.configs/setup.sh` — that repo's job.
+
+## Bringing the console back (only if ever needed)
 - [ ] `sudo systemctl start gdm3` — Proxmox noVNC shows the desktop again;
       `sudo systemctl stop gdm3` when done. The default target is untouched.

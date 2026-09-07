@@ -15,7 +15,8 @@ packages, toolchains, configs — idempotently.
     pass loop over symlinks to the workstation phases it shares plus `03-headless`
     (multi-user.target at boot, sshd, linger, nvidia held under unattended-upgrades,
     machine-credential doctor). Template `hosts/worker.example.conf`: one apt group
-    (`optional/worker.list`), `headless=yes` gates session work in 06-configs/verify.
+    (`optional/worker.list`), `headless=yes` gates session work in 06-configs/verify;
+    `.configs/setup.sh` still runs (it owns how claude behaves on the box).
     No YubiKey anywhere: a cron can't touch one — creds are scoped keys, seeded by hand.
   - `list` — print every group/component/lang flag + its current value (from `hosts/<host>.conf`), plus informational `cond_*`. The way to discover what's installable after first run: flip a flag, re-run install.
 - `get.sh` — one-line fetcher: clones the repo, optionally execs `bootstrap.sh`.

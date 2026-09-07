@@ -7,8 +7,8 @@
 # The desktop stays INSTALLED. Only the default target changes: the kit never
 # removes packages, disk is not what a desktop costs on a worker (RAM is), and
 # `sudo systemctl start gdm3` brings the Proxmox noVNC console back any time.
-# The switch is recorded for the next boot and never isolated live — this
-# script is typically run from inside the GNOME session it would kill.
+# The switch is recorded for the next boot and never isolated live: a
+# console session may be open, and a reboot is the honest moment anyway.
 SCRIPT_NAME="wk-03-headless"
 source "$(dirname "$0")/../../lib.sh"
 require_user
@@ -29,11 +29,14 @@ if systemctl is-active --quiet graphical.target 2>/dev/null; then
 fi
 
 # ---- 2. ssh in, guest agent up ----------------------------------------------
-if systemctl is-enabled --quiet ssh 2>/dev/null && systemctl is-active --quiet ssh 2>/dev/null; then
+# 26.04 socket-activates sshd: ssh.socket is what's enabled, ssh.service
+# reports "disabled" while serving you. Either unit enabled = reachable.
+if { systemctl is-enabled --quiet ssh.socket || systemctl is-enabled --quiet ssh; } 2>/dev/null \
+   && { systemctl is-active --quiet ssh.socket || systemctl is-active --quiet ssh; } 2>/dev/null; then
   ok "sshd enabled and running"
 elif pkg_installed openssh-server; then
   warn "sshd installed but not enabled/running"
-  do_or_say sudo systemctl enable --now ssh
+  do_or_say sudo systemctl enable --now ssh.socket
 else
   warn "openssh-server not installed yet (group_worker → 02-apt-install)"
 fi
