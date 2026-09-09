@@ -44,13 +44,19 @@ hatch, not the fix.
 
 ## Setup-kit integration
 
-- Installed by `profiles/workstation/08-claude-skills.sh` when listed in
-  `claude_skills` and `component_claude_skills=yes`.
-- The phase clones `~/git/gstack` from upstream, symlinks the skill, and builds
-  the browse daemon (`bun install && bun run build`) when `bun` is present —
-  rebuilding when `browse/dist/.version` (the built-from HEAD sha) no longer
-  matches the repo HEAD. Without `bun` it flags the gap in `missing.log`.
-- Idempotent: re-runs are no-ops once the repo is cloned, the link exists, and
+- Installed by `profiles/workstation/08-claude-skills.sh` when
+  `component_claude_skills=yes` (default set includes it; `claude_skills=`
+  overrides).
+- The phase clones `~/git/gstack` from upstream, symlinks the router skill, and
+  builds the browse daemon (`bun install && bun run build`) when `bun` is
+  present — rebuilding when `browse/dist/.version` (the built-from HEAD sha) no
+  longer matches the repo HEAD. Without `bun` it flags the gap in `missing.log`.
+- Sub-skills: Claude Code only discovers `~/.claude/skills/<name>/SKILL.md`, so
+  skills inside the router link are invisible. gstack's own `./setup`/relink
+  would link all ~40; the phase links only `gstack_skills=` (default
+  `browse setup-browser-cookies`) in gstack's layout — real dir, `SKILL.md`
+  symlinked — so a later relink agrees with it.
+- Idempotent: re-runs are no-ops once the repo is cloned, the links exist, and
   the built daemon matches HEAD.
 
 ## Browser provisioning gotchas (from the field)

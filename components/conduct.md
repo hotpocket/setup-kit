@@ -25,7 +25,9 @@ memory scaffold, and matching `.gitignore` lines.
 - Installed by `profiles/workstation/08-claude-skills.sh` alongside `vault`
   (same repo, `~/git/.configs`).
 - Pure agent-behavior content — deliberately NOT in setup-kit (machines, not
-  behavior). setup-kit only clones the repo and symlinks the skill.
+  behavior). setup-kit only clones the repo and symlinks the skills — by
+  default every dir under `claude-conduct/skills/` with a `SKILL.md`, so a new
+  skill needs no conf edit (`claude_skills=` narrows it).
 - Canonical home is the `claude-conduct/` subtree of `hotpocket/.configs`
   (standalone `hotpocket/claude-conduct` archived 2026-07-03 — merged so
   settings.json hook registrations and the scripts they invoke land in one

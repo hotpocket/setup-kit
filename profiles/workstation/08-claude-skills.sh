@@ -30,7 +30,23 @@ fi
 
 [[ "$(conf_get component_claude_skills yes)" == yes ]] || exit 0
 
-SKILLS="$(conf_get claude_skills 'gstack vault conduct repo-story')"
+# Default = gstack + EVERY skill dir in claude-conduct (one with a SKILL.md).
+# A conf that names a list is an explicit override. The allow-list default it
+# replaced ("gstack vault conduct") meant each skill added to .configs needed
+# a conf edit on every host, and none got one: a fresh VM (2026-09-08) came
+# up without /filmstrip, /vet, /wargame ... (tests/test-claude-skills-all.sh).
+CONDUCT_SKILLS_SRC="$HOME/git/.configs/claude-conduct/skills"
+SKILLS="$(conf_get claude_skills '')"
+if [[ -z "$SKILLS" ]]; then
+  SKILLS="gstack"
+  for d in "$CONDUCT_SKILLS_SRC"/*/; do
+    [[ -f "$d/SKILL.md" ]] && SKILLS+=" $(basename "$d")"
+  done
+fi
+# gstack sub-skills wanted on top of the router. gstack's own relink would
+# link all ~40; these are the ones actually used here. Same layout gstack
+# uses (real dir, SKILL.md symlinked) so its relink, if ever run, agrees.
+GSTACK_SKILLS="$(conf_get gstack_skills 'browse setup-browser-cookies')"
 SKILLS_DIR="$HOME/.claude/skills"
 
 section "claude skills ($MODE) — components/{gstack,vault,conduct}.md"
@@ -127,6 +143,25 @@ for s in $SKILLS; do
     do_or_say ln -sfnT "$src" "$link"   # -n keep, -f replace, -T treat link as the target name
   fi
 done
+
+# gstack sub-skills: Claude Code only discovers ~/.claude/skills/<name>/SKILL.md,
+# so a skill inside the gstack link is invisible until it has its own entry.
+if [[ " $SKILLS " == *" gstack "* && -d "$HOME/git/gstack" ]]; then
+  for s in $GSTACK_SKILLS; do
+    src="$HOME/git/gstack/$s/SKILL.md"; dir="$SKILLS_DIR/$s"; link="$dir/SKILL.md"
+    if [[ ! -f "$src" ]]; then
+      warn "gstack skill '$s' source missing at $src"; miss "claude-skills: gstack/$s absent"; continue
+    fi
+    if [[ -L "$link" && "$(readlink -f "$link")" == "$(readlink -f "$src")" ]]; then
+      ok "gstack skill '$s' linked"
+    else
+      warn "gstack skill '$s' not linked"
+      [[ -L "$dir" ]] && do_or_say rm -f "$dir"     # an old whole-dir symlink
+      do_or_say mkdir -p "$dir"
+      do_or_say ln -sfnT "$src" "$link"
+    fi
+  done
+fi
 
 # Subagent definitions. Model pins live in these files and nowhere else (the
 # narrator's Fable pin is the load-bearing one), so an unlinked agent is a

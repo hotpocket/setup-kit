@@ -25,7 +25,7 @@ assert 'bare value with comment unchanged'    '[[ "$(get bare)" == "plain value"
 assert 'empty value falls back to default'    '[[ "$(get empty dflt)" == "dflt" ]]'
 assert 'missing key falls back to default'    '[[ "$(get nope dflt)" == "dflt" ]]'
 # the real template must survive the same reader — that is the file the VM used
-assert 'example.conf claude_skills reads clean' \
-  '[[ "$(HOST_CONF="$KIT_DIR/hosts/example.conf" bash -c "source \"$KIT_DIR/lib.sh\"; conf_get claude_skills")" == "gstack vault conduct" ]]'
+assert 'example.conf claude_skills unset -> default (commented override)' \
+  '[[ "$(HOST_CONF="$KIT_DIR/hosts/example.conf" bash -c "source \"$KIT_DIR/lib.sh\"; conf_get claude_skills gstack")" == "gstack" ]]'
 echo "  $pass passed, $fail failed"
 (( fail == 0 ))
