@@ -68,12 +68,41 @@ gh_resident_keys() {
   return $rc
 }
 
+# The github.com stanza's lines, IdentityFile values with ~ expanded — so a
+# key written as ~/.ssh/x and one written as $HOME/.ssh/x read the same.
+github_stanza() {
+  awk '/^[[:space:]]*Host[[:space:]]+github\.com([[:space:]]|$)/{g=1; next}
+       /^[[:space:]]*Host[[:space:]]/{g=0} g' "$CFG" 2>/dev/null \
+    | sed -E "s#^([[:space:]]*IdentityFile[[:space:]]+)~/#\\1$HOME/#"
+}
+stanza_has_identity() { github_stanza | grep -qE "^[[:space:]]*IdentityFile[[:space:]]+$1[[:space:]]*$"; }
+
+# ssh offers identities in stanza order. A resident key pinned SECOND, behind a
+# passphrase file key, means a passphrase prompt before every touch — and a
+# stanza that pins a resident key without `IdentityAgent none` lets an agent
+# (gnome-keyring) intercept. Presence alone hid both for two months
+# (2026-09-13); this reads order and the lock. Warns; never rewrites order.
+audit_github_stanza() {
+  local f first
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    stanza_has_identity "$f" || warn "github stanza present but resident key $f not pinned"
+  done <<<"$GH_SKS"
+  first="$(github_stanza | sed -nE 's/^[[:space:]]*IdentityFile[[:space:]]+//p' | head -1)"
+  if [[ -n "$first" ]] && ! grep -qxF "$first" <<<"$GH_SKS"; then
+    warn "github stanza offers $first before the resident key — ssh tries identities in order (passphrase prompt before every touch); move the resident key first"
+  fi
+  if ! github_stanza | grep -qE '^[[:space:]]*IdentityAgent[[:space:]]+none[[:space:]]*$'; then
+    warn "github stanza pins a resident key but lacks 'IdentityAgent none' — an agent can intercept; add it under IdentitiesOnly yes"
+  fi
+}
+
 # Idempotently pin every resident key into an existing github stanza.
 pin_resident_keys() {
   local f pinned=0
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
-    grep -qF "IdentityFile $f" "$CFG" 2>/dev/null && continue
+    stanza_has_identity "$f" && continue
     sed -i "/^Host github\.com$/a\\  IdentityFile $f" "$CFG"
     pinned=1
   done < <(gh_resident_keys || true)
@@ -146,12 +175,8 @@ else
   if [[ -n "$GH_SKS" ]]; then
     if (( INSTALL )); then
       pin_resident_keys && log "pinned resident key(s) in existing github stanza"
-    else
-      while IFS= read -r f; do
-        grep -qF "IdentityFile $f" "$CFG" 2>/dev/null \
-          || warn "github stanza present but resident key $f not pinned"
-      done <<<"$GH_SKS"
     fi
+    audit_github_stanza
   fi
   # idempotently add connection multiplexing (one YubiKey touch per burst of
   # git commands instead of one per connection)
