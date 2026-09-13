@@ -201,6 +201,22 @@ nvidia_wanted() {
   esac
   ubuntu-drivers devices 2>/dev/null | grep 'nvidia-driver' >/dev/null
 }
+# aws-cli v2 comes from Amazon's bundle, not apt (components/aws-cli.md).
+aws_cli_v2_url() {
+  case "${1:-$(uname -m)}" in
+    x86_64|aarch64) echo "https://awscli.amazonaws.com/awscli-exe-linux-${1:-$(uname -m)}.zip" ;;
+    *) echo "aws-cli v2: no Amazon bundle for arch '${1:-$(uname -m)}'" >&2; return 1 ;;
+  esac
+}
+aws_cli_v2_install() {   # idempotent: --update upgrades an existing v2 in place
+  local url tmp rc
+  url="$(aws_cli_v2_url)" || return 1
+  command -v unzip >/dev/null 2>&1 || { echo "aws-cli v2: unzip missing (apt group cli-system)" >&2; return 1; }
+  tmp="$(mktemp -d)"
+  curl -fsSL "$url" -o "$tmp/awscliv2.zip" && unzip -q "$tmp/awscliv2.zip" -d "$tmp" \
+    && sudo "$tmp/aws/install" --update; rc=$?
+  rm -rf "$tmp"; return $rc
+}
 virt_context() { local v; v="$(systemd-detect-virt 2>/dev/null)"; echo "${v:-none}"; }  # none|kvm|lxc|...
 is_vm()        { [[ "$(virt_context)" != none ]]; }
 has_kvm_dev()  { [[ -e /dev/kvm ]]; }

@@ -51,3 +51,4 @@ obsidian                                    #      0.0 MB  dropped 2026-09-05 â€
 pulseaudio                                  #      4.3 MB  host-decided: 26.04 runs PipeWire (pipewire-audio); this would REMOVE it
 pulseaudio-module-bluetooth                 #      0.3 MB  with pulseaudio
 pulseaudio-equalizer                        #      0.1 MB  with pulseaudio (use easyeffects)
+awscli                                      #      9.9 MB  v1 â€” replaced by Amazon's aws-cli v2 bundle (07-components, components/aws-cli.md)

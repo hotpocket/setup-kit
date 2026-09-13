@@ -1,4 +1,6 @@
-# Dev: cloud CLIs — aws, gcloud (default ON; gcloud needs its vendor apt repo, see repos.md)
+# Dev: cloud CLIs — gcloud (default ON; gcloud needs its vendor apt repo, see repos.md)
+# aws is NOT here: apt's awscli is v1, which cannot do IAM Identity Center
+# (sso_session) logins. 07-components installs Amazon's v2 bundle instead —
+# components/aws-cli.md. Same group flag (group_dev_cloud) gates both.
 #
-awscli                                      #      9.9 MB  admin
 google-cloud-cli                            #              +new

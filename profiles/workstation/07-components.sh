@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram/uutils-ls (default ON), docker, herdr/ollama/whisper (opt-in), dictation/ocr/tts.
+# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/whisper (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -270,6 +270,25 @@ if [[ "$OLLAMA_WANT" == yes ]]; then
   fi
 else
   ok "ollama: opt-in, currently '$OLLAMA_WANT' (flip component_ollama=yes to enable)"
+fi
+
+# ------------------------------------------------------------- aws-cli v2
+# Same flag as the dev-cloud apt group; apt's awscli is v1 and cannot do the
+# sso_session logins .configs/bin/sso needs, so v2 comes from Amazon's bundle.
+if [[ "$(conf_get group_dev_cloud yes)" == yes ]]; then
+  section "aws-cli v2 ($MODE) — components/aws-cli.md"
+  AWS_VER="$(command -v aws >/dev/null 2>&1 && aws --version 2>&1 | sed -n 's|^aws-cli/\([0-9.]*\).*|\1|p')"
+  if dpkg -s awscli >/dev/null 2>&1; then
+    warn "apt awscli (v1) installed — shadows v2 on PATH; removing"
+    do_or_say sudo apt-get remove -y awscli || miss "aws-cli: apt-get remove awscli"
+  fi
+  case "$AWS_VER" in
+    2.*) ok "aws-cli v$AWS_VER ($(command -v aws))" ;;
+    *)   warn "aws-cli v2 missing (have: ${AWS_VER:-none}) — installing Amazon's bundle to /usr/local/bin"
+         do_or_say aws_cli_v2_install || miss "aws-cli v2: bundle install failed (components/aws-cli.md)" ;;
+  esac
+else
+  ok "aws-cli: group_dev_cloud is off — skipped"
 fi
 
 # ------------------------------------------------------------- whisper

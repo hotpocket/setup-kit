@@ -2,7 +2,4 @@
 
 Open work for the setup-kit repo.
 
-(none — 2026-09-05: the fresh-install verification happened on Beast-VM, and
-the `grep -q`-under-pipefail audit closed: only a producer that writes more
-than the 64 KiB pipe buffer after grep's first match can flake; `find` in
-verify.sh was the last such producer and now uses `-print -quit`.)
+- [ ] Derive `GIT_HOME` once instead of hardcoding `$HOME/git`. `profiles/workstation/08-claude-skills.sh` names `$HOME/git/gstack` and `$HOME/git/.configs` eleven times (after ac9e59d), `components/gstack.md` once; the global conduct rule (`~/.claude/CLAUDE.md`, "`~/git` is a hardcoded absolute in disguise") says `GIT_HOME="${GIT_HOME:-$(dirname "$THIS_REPO")}"`. This repo has no `GIT_HOME` convention yet, so this introduces it — decide where the one definition lives (a shared `lib/` sourced by every phase, or `bookshelf/repos.yml` as the rule names) before touching the seven sites. Verify with a fresh-VM install where the repos are not under `~/git`.
