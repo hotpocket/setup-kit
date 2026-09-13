@@ -7,7 +7,7 @@
 # nothing). Exit 0 = system matches manifests.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-CONF="hosts/$(hostname).conf"
+CONF="${KIT_HOST_CONF:-hosts/$(hostname).conf}"   # override for tests
 PASS=0; FAILN=0
 # Quiet by default (mirrors bootstrap): FAILs and the summary print; per-line
 # PASS detail goes to logs/verify-last.log. -v (or KIT_VERBOSE=1) restores
@@ -60,13 +60,20 @@ done
 for f in manifests/apt/optional/*.list; do
   gon "$(basename "$f" .list)" && FILES+=("$f")
 done
-# conditionals re-derived independently
-# mirror installer: nvidia only when ubuntu-drivers backs the GPU (legacy cards skip)
-if lspci 2>/dev/null | grep -qi nvidia \
-   && ubuntu-drivers devices 2>/dev/null | grep -q 'nvidia-driver'; then
-  FILES+=(manifests/apt/conditional/nvidia.list)
+# conditionals re-derived independently — but the host conf's cond_* overrides
+# are the user's decision and must read the same here as in lib.sh, or an
+# opt-out makes the installer skip a package this verifier then fails forever.
+# nvidia: GPU present AND (yes forces, no blocks, auto needs ubuntu-drivers to back it)
+if lspci 2>/dev/null | grep -qi nvidia; then
+  case "$(cv cond_nvidia)" in
+    no)  ;;
+    yes) FILES+=(manifests/apt/conditional/nvidia.list) ;;
+    *)   ubuntu-drivers devices 2>/dev/null | grep -q 'nvidia-driver' && FILES+=(manifests/apt/conditional/nvidia.list) ;;
+  esac
 fi
-if [[ "$(systemd-detect-virt 2>/dev/null || true)" == "" || "$(systemd-detect-virt 2>/dev/null)" == none ]] \
+# virtualbox: OPT-IN (cond_virtualbox=yes), and only on bare-metal non-Proxmox
+if [[ "$(cv cond_virtualbox)" == yes ]] \
+   && [[ "$(systemd-detect-virt 2>/dev/null || true)" == "" || "$(systemd-detect-virt 2>/dev/null)" == none ]] \
    && ! dpkg -s proxmox-ve >/dev/null 2>&1; then
   FILES+=(manifests/apt/conditional/virtualbox.list)
 fi
@@ -246,7 +253,15 @@ if command -v docker >/dev/null; then
   fi
 else failv "docker missing"; fi
 command -v gcloud >/dev/null && pass "gcloud present" || failv "gcloud missing"
-command -v aws >/dev/null && pass "aws present" || failv "aws missing"
+# aws must be v2 from Amazon's bundle (components/aws-cli.md); apt's awscli is v1
+if gon dev-cloud; then
+  AWS_V="$(command -v aws >/dev/null 2>&1 && aws --version 2>&1 | sed -n 's|^aws-cli/\([0-9.]*\).*|\1|p')"
+  case "$AWS_V" in
+    2.*) pass "aws-cli v2 present ($AWS_V)" ;;
+    "")  failv "aws missing — aws-cli v2 (components/aws-cli.md)" ;;
+    *)   failv "aws is v$AWS_V — v2 required (apt awscli is v1; components/aws-cli.md)" ;;
+  esac
+fi
 command -v gh >/dev/null && pass "gh present" || failv "gh missing"
 command -v shellcheck >/dev/null && pass "shellcheck present" || failv "shellcheck missing"
 

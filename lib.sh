@@ -345,13 +345,20 @@ apt_wanted_pkgs() {
   else
     echo "@ok conditional nvidia: skipped"
   fi
-  # conditional: virtualbox
-  if ! is_vm && ! dpkg -s proxmox-ve >/dev/null 2>&1 \
-     && [[ "$(conf_get cond_virtualbox auto)" != no ]]; then
-    mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/conditional/virtualbox.list")
-    echo "@ok conditional virtualbox: bare metal — included"
+  # conditional: virtualbox — OPT-IN. It ships a dkms kernel module (vboxdrv)
+  # and rewrites core system state, so bare metal is not consent; the host
+  # conf must say cond_virtualbox=yes. Still gated on bare-metal non-Proxmox
+  # because it cannot run inside a VM anyway. (Was auto-on for bare metal
+  # until 2026-09-13.)
+  if [[ "$(conf_get cond_virtualbox no)" == yes ]]; then
+    if ! is_vm && ! dpkg -s proxmox-ve >/dev/null 2>&1; then
+      mapfile -t -O "${#WANT[@]}" WANT < <(manifest_pkgs "$APT_M/conditional/virtualbox.list")
+      echo "@ok conditional virtualbox: opted in, bare metal — included"
+    else
+      echo "@warn conditional virtualbox: opted in but $(virt_context) — skipped"
+    fi
   else
-    echo "@ok conditional virtualbox: skipped ($(virt_context))"
+    echo "@ok conditional virtualbox: skipped (opt-in: cond_virtualbox=yes)"
   fi
   # permanent skips recorded by the size review
   SKIPS="$(conf_get skip_pkgs "")"
