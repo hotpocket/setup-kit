@@ -60,6 +60,11 @@ packages, toolchains, configs — idempotently.
   `code` therefore installs from Microsoft's deb (`manifests/debs.list`, phase 02b), which drops its own sources file; it is not in the apt lists.
 - **Manifests must not pin host-decided packages** — bootloader (`grub-pc` vs `grub-efi-amd64` follows the firmware) and time daemon (`chrony` is the 26.04 default; `systemd-timesyncd` conflicts). Phase 02 attributes any resolver removal to the wanted package forcing it and skips that package (`tests/test-apt-removal.sh`); the generator keeps them in `dropped.list` so a re-capture doesn't re-propose them.
 - **All `apt-get install` must be non-interactive** — use the `apt_install` helper (lib.sh) or the `02-apt-install.sh` array (`DEBIAN_FRONTEND=noninteractive` + `--force-confdef --force-confold`). A bare `apt-get install` can hit a dpkg conffile prompt; because phases pipe through `tee` and sudo uses `use_pty`, that prompt is *unanswerable* and wedges the run forever (seen on 24.04 with `systemd-zram-generator`). Configs the kit owns (e.g. `zram-generator.conf`) are reconciled by content, not by answering dpkg.
+- **Qt6 SVG icons need `qt6-svg-plugins`** (media group). `libqt6svg6` ships only
+  the library; the icon engine (`libqsvgicon.so`) and SVG image plugin live in a
+  separate package nothing Depends. Without it OBS 32 draws every toolbar icon
+  blank and Qt elides the labels to `...` — the Sources `+` looks missing. Class:
+  any Qt6 app whose icons are SVG.
 - The Android emulator needs `/dev/kvm` (BIOS virt on bare metal; nested virt + `cpu=host` in a Proxmox VM).
 - **Install must never remove packages.** Phase 02 simulates every apt transaction
   and aborts if the resolver wants removals (a conflicting manifest pin can

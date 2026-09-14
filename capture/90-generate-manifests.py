@@ -181,7 +181,13 @@ ADDITIONS = {
     # is unsatisfiable next to Valve's newer libs, and that unmet dep would
     # abort the whole apt transaction.
     "games": ["steam-installer"],
-    "media": ["easyeffects"],          # pulseeffects' successor
+    # qt6-svg-plugins: the Qt6 SVG icon engine (libqsvgicon.so) + SVG image
+    # format plugin. libqt6svg6 ships only the library, and nothing Depends the
+    # plugins — so OBS 32 (whose toolbar icons are SVG) renders EVERY icon
+    # blank and Qt elides the button text to "...": the Sources "+" button
+    # looks like it is missing. Any Qt6 app with SVG icons is affected.
+    "media": ["easyeffects",           # pulseeffects' successor
+              "qt6-svg-plugins"],
     "dev-core": ["shellcheck", "git-lfs",
                  # rootless docker (rootful daemon disabled, user-level
                  # dockerd; see 07-components)

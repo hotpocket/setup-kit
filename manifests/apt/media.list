@@ -43,3 +43,4 @@ linux-sound-base                            #      0.1 MB  sound
 heif-gdk-pixbuf                             #      0.0 MB  graphics
 v4l2loopback-utils                          #      0.0 MB  graphics
 easyeffects                                 #              +new
+qt6-svg-plugins                             #              +new
