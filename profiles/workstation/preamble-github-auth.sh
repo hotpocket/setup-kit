@@ -12,9 +12,17 @@
 # NOT a numbered phase on purpose: every ssh signature with an *-sk key
 # costs a physical touch, so this must run exactly once, not once per pass.
 # Phase 06 stays as the idempotent fallback for runs that skip bootstrap.
+# `recover` — enrol the PLUGGED YubiKey on an already-provisioned machine:
+# recover its resident key (PIN + touch), pin it, prove auth. The clone
+# fallback below only runs when .configs is NOT cloned, so without this mode a
+# second token could never be added on a box that already had .configs
+# (2026-09-14: primary plugged, stanza pinned only the backup's credential,
+# every pull died FIDO_ERR_NO_CREDENTIALS, the fix lived in the unpullable repo).
 SCRIPT_NAME="ws-preamble-github-auth"
 source "$(dirname "$0")/../../lib.sh"
 require_user
+RECOVER=0
+[[ "${1:-}" == recover ]] && { RECOVER=1; set -- install; }
 init_mode "${1:-}"
 
 REPO="$(conf_get configs_repo 'git@github.com:hotpocket/.configs.git')"
@@ -61,8 +69,11 @@ declare -A SK_NAME=(
 # line — the preferred github identities. Canonical names first, legacy
 # ssh-keygen -K default names as fallback. Returns 1 if none.
 gh_resident_keys() {
-  local f rc=1
-  for f in "$HOME"/.ssh/github_yub_* "$HOME"/.ssh/id_*_sk_rk*; do
+  local f rc=1 _seen=""
+  # primary before backup (glob order would put backup first)
+  for f in "$HOME"/.ssh/github_yub_primary "$HOME"/.ssh/github_yub_backup \
+           "$HOME"/.ssh/github_yub_* "$HOME"/.ssh/id_*_sk_rk*; do
+    grep -qxF "$f" <<<"$_seen" 2>/dev/null && continue; _seen+="$f"$'\n'
     [[ -f "$f" && "$f" != *.pub ]] && { printf '%s\n' "$f"; rc=0; }
   done
   return $rc
@@ -103,13 +114,56 @@ pin_resident_keys() {
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     stanza_has_identity "$f" && continue
-    sed -i "/^Host github\.com$/a\\  IdentityFile $f" "$CFG"
+    # append BELOW the stanza's last IdentityFile (or its Host line), so an
+    # already-pinned primary stays first — ssh tries identities in order
+    awk -v add="  IdentityFile $f" '
+      { L[NR]=$0 }
+      /^[[:space:]]*Host[[:space:]]+github\.com([[:space:]]|$)/ { g=1; at=NR; next }
+      g && /^[[:space:]]*Host[[:space:]]/ { g=0 }
+      g && /^[[:space:]]*IdentityFile[[:space:]]/ { at=NR }
+      END { for (i=1;i<=NR;i++) { print L[i]; if (i==at) print add } }' "$CFG" > "$CFG.tmp" \
+      && mv "$CFG.tmp" "$CFG" && chmod 600 "$CFG"
     pinned=1
   done < <(gh_resident_keys || true)
   if (( pinned )) && ! grep -qF "IdentitiesOnly yes" "$CFG"; then
     sed -i "/^Host github\.com$/a\\  IdentitiesOnly yes\n  IdentityAgent none" "$CFG"
   fi
   return $(( ! pinned ))
+}
+
+# Recover resident keys from the plugged YubiKey (PIN + touch) into a temp
+# dir, then rename the github key to its serial's canonical name (see
+# SK_NAME) — never overwrites an existing key, so the other YubiKey's stub
+# survives when you re-run with the second token. Pins whatever is on disk.
+# Returns 0 when a new key landed.
+recover_resident_keys() {
+  local serial name tmp found=0 f dst
+  serial="$(command -v ykman >/dev/null 2>&1 && ykman list --serials 2>/dev/null | head -1 || true)"
+  name="${SK_NAME[${serial:-none}]:-}"
+  tmp="$(mktemp -d "$HOME/.ssh/recover.XXXXXX")"
+  if (cd "$tmp" && ssh-keygen -K); then
+    for f in "$tmp"/id_*_sk_rk*; do
+      [[ -f "$f" && "$f" != *.pub ]] || continue
+      if [[ -n "$name" && "$(basename "$f")" == id_*_sk_rk_github ]]; then
+        dst="$HOME/.ssh/$name"
+      else
+        dst="$HOME/.ssh/$(basename "$f")"
+        [[ -z "$name" ]] && warn "serial ${serial:-unknown} not in SK_NAME — keeping default filename"
+      fi
+      if [[ -e "$dst" ]]; then
+        warn "$(basename "$dst") already exists — keeping it (not overwriting)"
+      else
+        mv "$f" "$dst"; [[ -f "$f.pub" ]] && mv "$f.pub" "$dst.pub"
+        chmod 600 "$dst"; found=1
+      fi
+    done
+  else
+    warn "ssh-keygen -K failed (keys not resident on this YubiKey?)"
+  fi
+  rm -rf "$tmp"
+  GH_SKS="$(gh_resident_keys || true)"
+  pin_resident_keys || true
+  return $(( ! found ))
 }
 
 # ---- 1. host keys: GitHub's published values, for both the real host and
@@ -200,6 +254,22 @@ else
   fi
 fi
 
+# ---- 2b. recover mode (see header)
+if (( RECOVER )); then
+  log "recovering resident ssh keys from the plugged YubiKey (PIN, then touch)..."
+  recover_resident_keys && log "new key adopted" || ok "no new key (already on disk — kept)"
+  log "testing github auth (touch if it blinks)..."
+  # ssh -T exits 1 even on a greeting (no shell) and lib.sh sets pipefail, so
+  # judge the text, not the status; the "Confirm user presence" prompt still
+  # reaches the terminal via tee.
+  greet="$(ssh -T git@github.com 2>&1 | tee /dev/stderr || true)"
+  if grep -q 'successfully authenticated' <<<"$greet"; then
+    ok "github ssh auth works"; exit 0
+  fi
+  fail "github ssh auth failed — is this key's pubkey registered on GitHub? (ssh-keygen -lf <key>.pub)"
+  exit 1
+fi
+
 # ---- 3. auth + clone, minimum touches: just TRY the clone — a separate
 # "does auth work" probe would cost its own touch.
 try_clone() { mkdir -p "$(dirname "$DEST")"; git clone "$REPO" "$DEST" 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"; [[ -d "$DEST/.git" ]]; }
@@ -216,38 +286,10 @@ fi
 log "cloning .configs (touch the YubiKey if it blinks)..."
 if try_clone; then ok ".configs cloned"; exit 0; fi
 
-# clone failed → recover resident keys from a plugged security key.
-# Recover into a temp dir, then rename the github key to its serial's
-# canonical name (see SK_NAME) — never overwrites an existing key, so the
-# other YubiKey's stub survives when you re-run with the second token.
+# clone failed → recover resident keys from a plugged security key
 if lsusb 2>/dev/null | grep -qiE 'yubico|fido'; then
   warn "clone failed — recovering resident ssh keys from YubiKey (PIN, then touch)"
-  serial="$(command -v ykman >/dev/null 2>&1 && ykman list --serials 2>/dev/null | head -1 || true)"
-  name="${SK_NAME[${serial:-none}]:-}"
-  tmp="$(mktemp -d "$HOME/.ssh/recover.XXXXXX")"
-  found=0
-  if (cd "$tmp" && ssh-keygen -K); then
-    for f in "$tmp"/id_*_sk_rk*; do
-      [[ -f "$f" && "$f" != *.pub ]] || continue
-      if [[ -n "$name" && "$(basename "$f")" == id_*_sk_rk_github ]]; then
-        dst="$HOME/.ssh/$name"
-      else
-        dst="$HOME/.ssh/$(basename "$f")"
-        [[ -z "$name" ]] && warn "serial ${serial:-unknown} not in SK_NAME — keeping default filename"
-      fi
-      if [[ -e "$dst" ]]; then
-        warn "$(basename "$dst") already exists — keeping it (not overwriting)"
-      else
-        mv "$f" "$dst"; [[ -f "$f.pub" ]] && mv "$f.pub" "$dst.pub"
-        chmod 600 "$dst"; found=1
-      fi
-    done
-  else
-    warn "ssh-keygen -K failed (keys not resident on this YubiKey?)"
-  fi
-  rm -rf "$tmp"
-  if (( found )); then
-    pin_resident_keys || true
+  if recover_resident_keys; then
     log "recovered key(s) pinned in ssh config — retrying clone (touch again)"
     try_clone && { ok ".configs cloned (recovered resident key)"; exit 0; }
   fi
