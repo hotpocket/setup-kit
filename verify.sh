@@ -376,6 +376,16 @@ fi
 [[ -f /etc/systemd/oomd.conf.d/20-longer-duration.conf ]] && pass "oomd softened" || failv "oomd conf missing"
 [[ -f "$HOME/.config/systemd/user/dbus.service.d/oomd-avoid.conf" ]] && pass "dbus oomd shield" || failv "dbus shield missing"
 
+# -- 5b. lid-ignore component — logind's own answer, not the file ----------------
+if [[ "$(cv component_lid_ignore)" == yes ]]; then
+  LID_LIVE="$(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager HandleLidSwitch HandleLidSwitchExternalPower HandleLidSwitchDocked 2>/dev/null \
+    | awk '{print $2}' | tr -d '"' | sort -u | tr '\n' ' ')"
+  [[ "$LID_LIVE" == "ignore " ]] \
+    && pass "lid: logind ignores lid close (plain, external power, docked)" \
+    || failv "lid: logind would act on lid close — handlers: ${LID_LIVE:-unreadable}(want ignore on all three)"
+fi
+
 # -- 6. apt health (update needs root; fall back to read-only consistency) ----
 if sudo -n true 2>/dev/null; then
   upd="$(sudo -n apt-get update 2>&1 | grep -E '^(E:|Err)')"

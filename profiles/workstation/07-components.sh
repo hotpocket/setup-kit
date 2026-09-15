@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/whisper (opt-in), dictation/ocr/tts.
+# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/whisper/lid-ignore (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -676,6 +676,39 @@ PY
       pin_cpu_torch
     fi
   fi
+fi
+
+# ------------------------------------------------------------- lid-ignore
+# A laptop serving as a node (lid shut, reached over ssh) must not suspend
+# when the lid closes. Role choice, not a hardware fact — opt-in per host —
+# and refused on anything that is not a laptop, where the drop-in is noise.
+# Reconciled by CONTENT (like zram-generator.conf): all three lid handlers,
+# or a docked/AC edge case still suspends.
+LID_DROPIN="${KIT_LID_DROPIN:-/etc/systemd/logind.conf.d/10-lid-ignore.conf}"
+LID_WANT=$'[Login]\nHandleLidSwitch=ignore\nHandleLidSwitchExternalPower=ignore\nHandleLidSwitchDocked=ignore'
+if [[ "$(conf_get component_lid_ignore no)" == yes ]]; then
+  section "lid-ignore ($MODE) — components/lid-ignore.md"
+  LID_CHASSIS="$(hostnamectl chassis 2>/dev/null || true)"
+  if [[ "$LID_CHASSIS" != laptop && "$LID_CHASSIS" != convertible ]]; then
+    warn "lid-ignore: chassis is '${LID_CHASSIS:-unknown}', not a laptop — refusing (drop component_lid_ignore from this host's conf)"
+  elif [[ -f "$LID_DROPIN" && "$(cat "$LID_DROPIN")" == "$LID_WANT" ]]; then
+    ok "lid-ignore: $LID_DROPIN in place (lid close ignored on AC, battery, docked)"
+  else
+    [[ -f "$LID_DROPIN" ]] \
+      && warn "lid-ignore: $LID_DROPIN drifted — reconciling" \
+      || warn "lid-ignore: $LID_DROPIN missing — closing the lid would suspend"
+    if (( INSTALL )); then
+      sudo mkdir -p "$(dirname "$LID_DROPIN")"
+      printf '%s\n' "$LID_WANT" | sudo tee "$LID_DROPIN" >/dev/null
+      # reload, never restart: restarting logind tears down the graphical
+      # session (systemd >= 254 re-reads logind.conf.d on reload)
+      sudo systemctl reload systemd-logind \
+        && ok "lid-ignore: logind reloaded" \
+        || miss "lid-ignore: systemctl reload systemd-logind (takes effect at next boot)"
+    fi
+  fi
+else
+  ok "lid-ignore: disabled (component_lid_ignore=no) — lid close follows logind defaults"
 fi
 
 # --------------------------------------------- tts flutter client bundle
