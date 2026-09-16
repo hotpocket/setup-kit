@@ -548,16 +548,19 @@ fi
 
 # ------------------------------------------------------------- tts (kokoro)
 # Clipboard TTS server (kokoro neural TTS + sounddevice, HEAVY — pulls
-# torch). ALWAYS provisioned, NOT opt-in: .configs ships the clipboard-TTS
-# client (now the Flutter control window, replacing the old Tk client) plus
-# the server symlinks unconditionally, and the client is useless without this
-# backend — so the venv is a baseline dependency. (Heavy; kokoro ~82M runs on
+# torch, ~6 GB). Default ON: .configs ships the clipboard-TTS client (the
+# Flutter control window) plus the server symlinks unconditionally, and the
+# client is useless without this backend. Opt OUT with component_tts=no on a
+# box with no desktop session to speak from — a worker (2026-09-16, ai-3090:
+# the audiobook line uses Chatterbox, not kokoro; the venv was 5.9 GB of
+# nothing). (kokoro ~82M runs on
 # GPU when torch can drive the card, else CPU — see the torch-backend note
 # below.) Deps live in a DEDICATED pyenv virtualenv named
 # `kokoro-tts` (~/.pyenv/versions/kokoro-tts), NOT pyenv global — so the
 # .configs shebangs (#!~/.pyenv/versions/kokoro-tts/bin/python) resolve regardless
 # of global (which stays system for a clean prompt), the deps don't pollute
 # the bare 3.12, and the path is stable across machines (name, not patch).
+if [[ "$(conf_get component_tts yes)" == yes ]]; then
 section "tts (kokoro) ($MODE)"
 for d in libsndfile1 libportaudio2 espeak-ng; do
   pkg_installed "$d" && ok "tts dep $d" || { warn "tts dep $d missing"; apt_install "$d"; }
@@ -676,6 +679,9 @@ PY
       pin_cpu_torch
     fi
   fi
+fi
+else
+  ok "tts (kokoro): disabled (component_tts=no)"
 fi
 
 # ------------------------------------------------------------- lid-ignore

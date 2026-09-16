@@ -188,8 +188,10 @@ if [[ -x "$HOME/.pyenv/bin/pyenv" ]]; then
     || failv "python: $PYVER not installed"
 else failv "python: pyenv missing"; fi
 # audio-tool venvs — deps isolated in dedicated venvs, not in global/bare 3.12
-# tts venv is always provisioned (07-components): .configs ships the clipboard
-# TTS client + server unconditionally, so this backend must exist — not opt-in.
+# tts venv: default on (.configs ships the clipboard TTS client + server
+# unconditionally), opt-out with component_tts=no (a worker with no desktop
+# session to speak from — the audiobook line uses Chatterbox, not kokoro).
+if [[ "$(cv component_tts)" == yes || -z "$(cv component_tts)" ]]; then
 TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
 [[ -x "$TTS_PY" ]] && "$TTS_PY" -c 'import kokoro,soundfile,sounddevice' 2>/dev/null \
   && pass "tts venv: kokoro/soundfile/sounddevice importable" \
@@ -232,10 +234,11 @@ case $? in
   *) failv "tts venv: CUDA torch can't drive this GPU — kokoro crashes (re-run 07-components for the cu118/CPU fallback)" ;;
 esac
 fi
+else pass "tts venv: not wanted (component_tts=no)"; fi
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
-if (( ! HEADLESS )); then
+if (( ! HEADLESS )) && [[ "$(cv component_tts)" != no ]]; then
 [[ -x "$TTS_FL_BIN" ]] && pass "tts flutter client bundle built" \
   || failv "tts flutter client bundle missing (run: cd ~/git/.configs/tts-flutter && flutter build linux --release)"
 fi
