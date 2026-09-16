@@ -17,12 +17,21 @@ init_mode "${1:-}"
 
 section "headless boot ($MODE)"
 
-# ---- 1. default target: multi-user (no display manager at boot) -------------
-if [[ "$(systemctl get-default 2>/dev/null)" == multi-user.target ]]; then
-  ok "default target multi-user.target (no desktop at boot)"
+# ---- 1. default target: boot_target in the host conf (multi-user default) ---
+# A worker boots to a tty unless its owner wants the Proxmox console to show
+# the desktop (boot_target=graphical). Either way the desktop stays installed.
+WANT_TARGET="$(conf_get boot_target multi-user)"
+case "$WANT_TARGET" in
+  multi-user|graphical) WANT_TARGET="$WANT_TARGET.target" ;;
+  *) warn "boot_target=$WANT_TARGET is not multi-user|graphical — leaving the default target alone"; WANT_TARGET="" ;;
+esac
+CUR_TARGET="$(systemctl get-default 2>/dev/null)"
+if [[ -z "$WANT_TARGET" ]]; then :
+elif [[ "$CUR_TARGET" == "$WANT_TARGET" ]]; then
+  [[ "$WANT_TARGET" == multi-user.target ]] && ok "default target multi-user.target (no desktop at boot)"                                             || ok "default target graphical.target (desktop at boot, per boot_target)"
 else
-  warn "default target is $(systemctl get-default 2>/dev/null) — desktop starts at boot"
-  do_or_say sudo systemctl set-default multi-user.target
+  [[ "$WANT_TARGET" == multi-user.target ]] && warn "default target is $CUR_TARGET — desktop starts at boot"                                             || warn "default target is $CUR_TARGET — boot_target wants the desktop"
+  do_or_say sudo systemctl set-default "$WANT_TARGET"
   (( INSTALL )) && log "takes effect at next boot; the current session is left alone"
 fi
 if systemctl is-active --quiet graphical.target 2>/dev/null; then
