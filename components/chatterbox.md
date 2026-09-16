@@ -13,7 +13,7 @@ machines.
 
 1. `pyenv virtualenv <3.12.x> chatterbox` — a dedicated venv off the kit's
    pyenv 3.12 (`lang_python=yes`, phase 04). Not pyenv global.
-2. `pip install chatterbox-tts==<chatterbox_version>` — default `0.1.7`,
+2. `pip install chatterbox-tts==<chatterbox_version> 'setuptools<82'` — default `0.1.7`,
    override with `chatterbox_version=` in the host conf. The package pins
    torch/torchaudio 2.6.0, transformers, numpy<2; the default Linux torch wheel
    carries CUDA 12.4, so no system CUDA toolkit and nothing touches the driver.
@@ -43,6 +43,14 @@ machines.
   otherwise. `tests/test-chatterbox.sh` calibrates both.
 
 ## Notes
+
+- `setuptools<82` is on the install line on purpose: `resemble-perth` imports
+  `pkg_resources` inside a try/except and leaves `perth.PerthImplicitWatermarker`
+  as `None` without it, so every import succeeds and the model dies on its
+  first load with "'NoneType' object is not callable". A 3.12 venv ships no
+  setuptools, and setuptools 82+ removed `pkg_resources`, so the pin is the
+  fix, not the package. The doctor's probe asserts the watermarker, not just
+  the import (`tests/test-chatterbox.sh`).
 
 - GPU is report-only: Ampere+ and the cu124 wheel agree. A card the default
   wheel cannot drive is `component_tts`'s cu118 problem, not repeated here.

@@ -372,12 +372,19 @@ if [[ "$CHATTERBOX_WANT" == yes ]]; then
   if [[ -x "$CB_PY" ]]; then
     # the package pins torch==2.6.0 (CUDA 12.4 wheel from PyPI on Linux),
     # torchaudio, transformers, numpy<2 — one pin, everything else follows
-    if "$CB_PY" -c 'import torch, torchaudio; from chatterbox.tts_turbo import ChatterboxTurboTTS' 2>/dev/null; then
-      ok "chatterbox venv deps (chatterbox-tts, torch, torchaudio) present"
+    # The probe constructs what from_pretrained() constructs, not just the
+    # import: resemble-perth's watermarker is imported inside a try/except
+    # that leaves `perth.PerthImplicitWatermarker = None` when pkg_resources
+    # is missing (a 3.12 venv has no setuptools), and the model then dies
+    # with "'NoneType' object is not callable" on its first load — the
+    # imports all succeed (2026-09-16, ai-3090). setuptools<82 is on the
+    # line: 82 removed pkg_resources, so a bare `setuptools` fixes nothing.
+    if "$CB_PY" -c 'import torch, torchaudio, perth; from chatterbox.tts_turbo import ChatterboxTurboTTS; assert perth.PerthImplicitWatermarker is not None' 2>/dev/null; then
+      ok "chatterbox venv deps (chatterbox-tts, torch, torchaudio, perth watermarker) present"
     else
-      warn "chatterbox venv deps missing"
-      do_or_say "$CB_PY" -m pip install --quiet "chatterbox-tts==$CB_VER" \
-        || miss "chatterbox: pip install chatterbox-tts==$CB_VER"
+      warn "chatterbox venv deps missing or perth watermarker unimportable"
+      do_or_say "$CB_PY" -m pip install --quiet "chatterbox-tts==$CB_VER" 'setuptools<82' \
+        || miss "chatterbox: pip install chatterbox-tts==$CB_VER setuptools<82"
     fi
     # chatterbook (the engine's own package) as an editable install, asked from
     # / — from inside the checkout every interpreter can import ./chatterbook
