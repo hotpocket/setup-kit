@@ -15,8 +15,17 @@ and reboot it out of the desktop.
 
 ## Machine credentials (never automated, never SSO)
 - [ ] AWS: `aws configure --profile cron-deploy` with the job-scoped access key
-      (bucket + CloudFront invalidation only). `chmod 600 ~/.aws/credentials`.
-      The doctor proves it with `sts get-caller-identity`.
+      (bucket + CloudFront invalidation only), then
+      `profiles/worker/seal-aws-profile.sh cron-deploy` (install mode runs it
+      for you): the key becomes a user-scoped systemd-creds blob bound to the
+      TPM2 + host key + uid + machine-id at
+      `~/.config/credstore.encrypted/aws-cron-deploy.cred`, the profile gets a
+      `credential_process`, and the plaintext section is dropped only after
+      STS succeeds through the sealed path. The doctor reads the blob header:
+      a seal made before the VM had a TPM is reported as host-key-only and
+      upgraded by re-running the helper once a vTPM exists (Proxmox:
+      `qm set <vmid> --tpmstate0 <storage>:1,version=v2.0`, cold start).
+      A restored snapshot or a new machine cannot open the blob — re-seed.
 - [ ] Git (`git_auth=token`): one **fine-grained PAT** (user › Settings ›
       Developer settings › Fine-grained tokens), "only select repositories" =
       the repos in `clone_repos` (+ `.configs` if it is https). Repository

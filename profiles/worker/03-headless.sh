@@ -12,6 +12,7 @@
 SCRIPT_NAME="wk-03-headless"
 source "$(dirname "$0")/../../lib.sh"
 source "$(dirname "$0")/lib-deploy-keys.sh"
+source "$(dirname "$0")/lib-aws-creds.sh"
 require_user
 init_mode "${1:-}"
 
@@ -95,7 +96,37 @@ section "machine credentials ($MODE) — verified only; seeding is manual"
 # aws: a named profile with keys scoped to the jobs (S3 bucket, CloudFront
 # invalidation, ...). SSO sessions expire in hours and need a human; they are
 # not a cron identity. The check is a real STS call, not a file grep.
+#
+# How the key is STORED is the kit's business (lib-aws-creds.sh): sealed as a
+# user-scoped systemd-creds blob (TPM2 + host key + uid + machine-id) that the
+# aws CLI opens through credential_process. Plaintext in ~/.aws/credentials is
+# the human's seed; install mode converts it (seal-aws-profile.sh), check mode
+# names it. The blob header says what it is bound to: a seal made before the
+# VM had a TPM is host-key-only and is reported as such.
 AWS_PROF="$(conf_get aws_profile cron-deploy)"
+if aws_plaintext "$AWS_PROF"; then
+  warn "aws profile $AWS_PROF: static key in plaintext at ~/.aws/credentials"
+  hint "$(dirname "$0")/seal-aws-profile.sh $AWS_PROF   # → systemd-creds blob, TPM2 + host key, user-scoped"
+  if (( INSTALL )) && command -v aws >/dev/null 2>&1; then
+    bash "$(dirname "$0")/seal-aws-profile.sh" "$AWS_PROF" || miss "creds: aws profile $AWS_PROF still in plaintext (seal failed)"
+  else
+    miss "creds: aws profile $AWS_PROF stored in plaintext (run seal-aws-profile.sh)"
+  fi
+fi
+if ! aws_plaintext "$AWS_PROF"; then
+  _cp="$(aws_cred_process "$AWS_PROF")"; _cf="$(aws_cred_file "$AWS_PROF")"
+  if [[ "$_cp" == *systemd-creds* && -s "$_cf" ]]; then
+    case "$(aws_seal_kind "$_cf")" in
+      tpm2+host) ok "aws profile $AWS_PROF: sealed to TPM2 + host key (user-scoped) — $_cf" ;;
+      host) warn "aws profile $AWS_PROF: sealed to the host key only — no TPM2 when it was sealed"
+            has_tpm2 && hint "$(dirname "$0")/seal-aws-profile.sh $AWS_PROF   # re-seals to the TPM2 now present" \
+                     || hint "add a TPM 2.0 device to the VM (Proxmox: qm set <vmid> --tpmstate0 <storage>:1,version=v2.0), then seal-aws-profile.sh $AWS_PROF" ;;
+      *) warn "aws profile $AWS_PROF: $_cf has a systemd-creds header this kit does not know — sealed to what?" ;;
+    esac
+  elif [[ -n "$_cp" ]]; then
+    ok "aws profile $AWS_PROF: credential_process = $_cp"
+  fi   # neither: the STS call below reports the missing profile
+fi
 if command -v aws >/dev/null 2>&1; then
   if arn="$(timeout 20 aws --profile "$AWS_PROF" sts get-caller-identity --query Arn --output text 2>/dev/null)" \
      && [[ -n "$arn" ]]; then

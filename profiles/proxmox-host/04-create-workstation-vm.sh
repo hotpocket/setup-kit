@@ -46,6 +46,13 @@ qm create "$VMID" \
 # Main disk — on local-zfs (the host's NVMe rpool).
 qm set "$VMID" --scsi0 "local-zfs:$DISK_GB,format=raw,discard=on,iothread=1,ssd=1"
 
+# vTPM 2.0 — what a worker seals its machine credentials to (profiles/worker/
+# seal-aws-profile.sh via systemd-creds). Not hot-pluggable: a VM created
+# without one needs a cold start after `qm set --tpmstate0` (2026-09-16, VM 102).
+# The size is ignored (swtpm state is 4 MiB); snapshots/backups carry the TPM
+# state, so anything sealed after a snapshot dies with a rollback — re-seed.
+qm set "$VMID" --tpmstate0 "local-zfs:1,version=v2.0"
+
 # PCI passthrough for the dGPU.
 # x-vga=1 = use this as primary VGA (host doesn't draw to monitor through it).
 # pcie=1 = use PCIe instead of legacy PCI.

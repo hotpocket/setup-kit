@@ -14,7 +14,10 @@ packages, toolchains, configs — idempotently.
   - `worker check|install` — headless media/AI worker VM (`profiles/worker/`): the same
     pass loop over symlinks to the workstation phases it shares plus `03-headless`
     (multi-user.target at boot, sshd, linger, nvidia held under unattended-upgrades,
-    machine-credential doctor). Template `hosts/worker.example.conf`: one apt group
+    machine-credential doctor: the aws key is sealed by `seal-aws-profile.sh` into a
+    user-scoped systemd-creds blob, TPM2 + host key, read through `credential_process`;
+    the doctor reads the blob header and names a host-key-only seal — `tests/test-aws-sealed.sh`).
+    Template `hosts/worker.example.conf`: one apt group
     (`optional/worker.list`), `headless=yes` gates session work in 06-configs/verify;
     `.configs/setup.sh` still runs (it owns how claude behaves on the box).
     No YubiKey anywhere: a cron can't touch one — creds are scoped keys, seeded by hand.
