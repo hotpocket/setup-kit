@@ -17,15 +17,19 @@ and reboot it out of the desktop.
 - [ ] AWS: `aws configure --profile cron-deploy` with the job-scoped access key
       (bucket + CloudFront invalidation only). `chmod 600 ~/.aws/credentials`.
       The doctor proves it with `sts get-caller-identity`.
-- [ ] Git (`git_auth=token`): one **fine-grained PAT**, "only select
-      repositories" = `.configs` + the job repo + its gitignored children,
-      Contents: read-only. Paste it into `~/.config/setup-kit/github-token`
+- [ ] Git (`git_auth=token`): one **fine-grained PAT** (user › Settings ›
+      Developer settings › Fine-grained tokens), "only select repositories" =
+      the repos in `clone_repos` (+ `.configs` if it is https). Repository
+      permissions: Contents read-only, or read-and-write when the job pushes;
+      nothing under Account permissions. Paste it into `github_token_file`
       (mode 600). Install logs `gh` in with it and sets the credential helper;
-      the doctor proves it can read each repo in `configs_repo`/`clone_repos`.
-      Revoke/rotate from GitHub; on the box just replace the file and re-run.
-- [ ] Git (`git_auth=deploy-keys`, boxes with 1–2 repos): one read-only deploy
-      key per repo from `deploy_repos`; register each `~/.ssh/deploy_<name>.pub`
-      on that repo's Settings › Deploy keys. GitHub allows one repo per key.
+      the doctor proves it can read each https repo. Revoke/rotate from
+      GitHub; on the box just replace the file and re-run.
+- [ ] Git (`git_auth=deploy-keys`): one read-only deploy key per repo from
+      `deploy_repos`; register each `~/.ssh/deploy_<name>.pub` on that repo's
+      Settings › Deploy keys. GitHub allows one repo per key.
+- [ ] Both (`git_auth="deploy-keys token"`): the two lines above, each for its
+      own repos — a repo named in `deploy_repos` never touches the token.
 
 ## Wiring the job
 - [ ] Run it as a `systemd --user` timer + service, not a crontab: journald

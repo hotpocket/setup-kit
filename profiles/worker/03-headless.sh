@@ -100,27 +100,30 @@ else
   warn "awscli not installed yet (group_worker → 02-apt-install); aws profile $AWS_PROF unverified"
 fi
 
-# git: one read-only deploy key per private repo, each on its own ssh alias
-# (lib-deploy-keys.sh). The workstation's YubiKey FIDO2 keys need a physical
+# git: deploy keys and/or one PAT, per git_auth (lib-deploy-keys.sh); each
+# repo is served by whichever covers it. The workstation's YubiKey FIDO2 keys need a physical
 # press per signature — a cron hangs on them forever — so none live here.
 if compgen -G "$HOME/.ssh/*_sk*" >/dev/null || compgen -G "$HOME/.ssh/github_yub_*" >/dev/null; then
   warn "FIDO2 (-sk) ssh key present in ~/.ssh — unusable by unattended jobs (needs a touch)"
 fi
-if [[ "$GIT_AUTH" == token ]]; then
-  if token_login; then
-    _cfg="$(conf_get configs_repo '')"
-    [[ -n "$_cfg" ]] && token_probe "$(sed -E 's#^(https://github.com/|git@[^:]+:)##; s#\.git$##' <<<"$_cfg")"
-    for r in $CLONE_REPOS; do token_probe "$r"; done
-  fi
-  clone_wanted
-elif [[ -z "$DEPLOY_REPOS" ]]; then
-  warn "deploy_repos empty in host conf — no private repo can be pulled"
-else
-  deploy_each deploy_ensure
-  deploy_each deploy_probe
-  _show_pub() { [[ -f "$3.pub" ]] && log "$1 public key: $(cat "$3.pub")"; }
-  deploy_each _show_pub
-  clone_wanted
+auth_has token || auth_has deploy-keys || warn "git_auth='$GIT_AUTH' names no mode (deploy-keys | token | both)"
+if auth_has token && token_login; then
+  # probe every https-served repo: configs_repo unless an alias serves it,
+  # and each clone_repos entry without a deploy key of its own
+  _cfg="$(conf_get configs_repo '')"
+  [[ "$_cfg" == https://* ]] && token_probe "$(repo_slug "$_cfg")"
+  for r in $CLONE_REPOS; do r="${r%%:*}"; deploy_name_for "$r" >/dev/null || token_probe "$r"; done
 fi
+if auth_has deploy-keys; then
+  if [[ -z "$DEPLOY_REPOS" ]]; then
+    warn "deploy_repos empty in host conf — no repo can be pulled by deploy key"
+  else
+    deploy_each deploy_ensure
+    deploy_each deploy_probe
+    _show_pub() { [[ -f "$3.pub" ]] && log "$1 public key: $(cat "$3.pub")"; }
+    deploy_each _show_pub
+  fi
+fi
+clone_wanted
 
 exit 0

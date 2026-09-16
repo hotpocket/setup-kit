@@ -14,16 +14,45 @@
 # Expects lib.sh already sourced (conf_get, ok/warn/log, INSTALL, do_or_say).
 #
 # git_auth=token is the other mode: ONE fine-grained personal access token,
-# restricted to "only select repositories" with Contents: read-only, fed to
-# `gh auth login --with-token` from a file you place (never the conf, never a
-# repo). gh's credential helper then serves every https github.com URL — so a
-# repo whose own setup clones gitignored child repos needs no alias rewriting.
-# Right when a box touches more than a couple of repos; deploy keys when 1–2.
+# restricted to "only select repositories", fed to `gh auth login --with-token`
+# from a file you place (never the conf, never a repo). gh's credential helper
+# then serves every https github.com URL. Right when a box touches more than a
+# couple of repos, or when the job must PUSH (a PAT's permissions are uniform
+# across its selected repos, so a read-only repo and a read-write repo can't
+# share one token).
+#
+# The modes MIX: git_auth="deploy-keys token" — e.g. .configs pulled read-only
+# by a deploy key, the job's repos over https by a read-write PAT. Which repo
+# goes which way is decided per URL: a repo named in deploy_repos clones over
+# its alias, anything else over https via the token.
 
-GIT_AUTH="$(conf_get git_auth deploy-keys)"       # deploy-keys | token
+GIT_AUTH="$(conf_get git_auth deploy-keys)"       # deploy-keys | token | "deploy-keys token"
+auth_has() { [[ " $GIT_AUTH " == *" $1 "* ]]; }
 DEPLOY_REPOS="$(conf_get deploy_repos '')"
 TOKEN_FILE="$(conf_get github_token_file "$HOME/.config/setup-kit/github-token")"; TOKEN_FILE="${TOKEN_FILE/#\~/$HOME}"
-CLONE_REPOS="$(conf_get clone_repos '')"          # owner/repo ... → ~/git/<repo>
+CLONE_REPOS="$(conf_get clone_repos '')"          # owner/repo[:dest] ... → ~/git/<dest|repo>
+
+# token_rewrite_ssh: a manifest that names remotes as git@github.com:o/r.git
+# (audiobook's repos.yml does) would need an account ssh key this box must not
+# have. Rewrite that prefix to https so gh's credential helper serves it. The
+# deploy-key aliases (git@github.com-<name>:) don't match the prefix — the
+# colon is part of it — so they are untouched. Idempotent; install writes it.
+token_rewrite_ssh() {
+  local want="git@github.com:" have
+  have="$(git config --global --get-all url.https://github.com/.insteadOf 2>/dev/null | grep -Fx "$want" || true)"
+  if [[ -n "$have" ]]; then ok "git: ssh github remotes rewritten to https (token serves them)"; return 0; fi
+  warn "git: git@github.com: remotes not rewritten to https — manifests naming ssh remotes can't clone"
+  (( INSTALL )) && do_or_say git config --global --add url.https://github.com/.insteadOf "$want"
+}
+
+# repo_slug <url>: https://github.com/o/r.git | git@github.com-x:o/r.git → o/r
+repo_slug() { sed -E 's#^(https://github.com/|git@[^:]+:)##; s#\.git$##' <<<"$1"; }
+# deploy_name_for <owner/repo>: the deploy_repos name covering it, if any
+deploy_name_for() {
+  local entry
+  for entry in $DEPLOY_REPOS; do [[ "${entry#*=}" == "$1" ]] && { echo "${entry%%=*}"; return 0; }; done
+  return 1
+}
 
 # token_login: gh authenticated? else log in from the token file (install).
 # Never prints the token. Returns 0 when gh can talk to GitHub.
@@ -34,6 +63,7 @@ token_login() {
   if gh auth status --hostname github.com >/dev/null 2>&1; then
     ok "gh authenticated ($(gh api user --jq .login 2>/dev/null || echo '?'))"
     gh auth setup-git >/dev/null 2>&1 || true      # idempotent credential helper
+    token_rewrite_ssh
     return 0
   fi
   if [[ ! -s "$TOKEN_FILE" ]]; then
@@ -48,6 +78,7 @@ token_login() {
   if gh auth login --hostname github.com --git-protocol https --with-token < "$TOKEN_FILE" 2>>"$LOG_DIR/${SCRIPT_NAME:-worker}.log" \
      && gh auth setup-git; then
     ok "gh logged in from token file ($(gh api user --jq .login 2>/dev/null || echo '?')); credential helper set"
+    token_rewrite_ssh
     return 0
   fi
   warn "gh auth login --with-token failed (expired or malformed token?)"
@@ -61,16 +92,25 @@ token_probe() {
   else warn "token cannot read $1 — add it to the token's selected repositories"; miss "creds: token lacks $1"; fi
 }
 
-# clone_repos: every owner/repo in clone_repos lands in ~/git/<repo> over https
+# clone_repos: every owner/repo lands in ~/git/<repo>, or ~/git/<path> when
+# written owner/repo:path (a manifest may want it nested — books lives at
+# landry.bot/books). A repo that has a deploy key (deploy_repos) clones over
+# its alias; the rest over https, which only works when the token mode is on —
+# otherwise say so instead of failing an https clone with no credential.
 clone_wanted() {
-  local r dest
-  for r in $CLONE_REPOS; do
-    dest="$HOME/git/${r##*/}"
-    if [[ -d "$dest/.git" ]]; then ok "repo $r at ${dest/#$HOME/\~}"
+  local e r dest name url
+  for e in $CLONE_REPOS; do
+    r="${e%%:*}"; dest="${e#*:}"; [[ "$e" == *:* ]] || dest="${r##*/}"
+    dest="$HOME/git/$dest"
+    if [[ -d "$dest/.git" ]]; then ok "repo $r at ${dest/#$HOME/\~}"; continue; fi
+    if name="$(deploy_name_for "$r")"; then url="$(deploy_url "$name" "$r")"
+    elif auth_has token; then url="https://github.com/$r.git"
     else
-      warn "repo $r not cloned"
-      (( INSTALL )) && { mkdir -p "$HOME/git"; do_or_say git clone "https://github.com/$r.git" "$dest" || miss "clone: $r"; }
+      warn "repo $r: no deploy key in deploy_repos and git_auth has no token — nothing can clone it"
+      miss "clone: $r (no credential)"; continue
     fi
+    warn "repo $r not cloned"
+    (( INSTALL )) && { mkdir -p "$(dirname "$dest")"; do_or_say git clone "$url" "$dest" || miss "clone: $r"; }
   done
 }
 
