@@ -19,7 +19,7 @@ branch: main
 - The kit now does this for any worker: install mode converts a hand-seeded key, and the doctor reports whether a key is plain text, sealed to the TPM, or sealed to the host key only (a seal made before the box had a TPM). The plain text is deleted only after the sealed path has authenticated, so a failure anywhere leaves the key usable.
 - Every VM the kit creates gets a vTPM from now on. Existing VMs need one added by hand.
 - The root snapshot of VM 102 is taken after the seal (the user's decision, assume it holds). Rolling back to it or anything later keeps the sealed key working. Only an older restore, a new VM, or a re-minted vTPM needs the key re-seeded.
-- Still unapplied on this box: the graphical boot target from the host conf (needs the user's sudo).
+- The box boots to GNOME on the Proxmox console as its host conf asks (`boot_target=graphical`); the doctor reports it OK.
 
 ## Next Steps
 
