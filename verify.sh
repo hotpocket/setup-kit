@@ -243,6 +243,16 @@ CB_PY="$HOME/.pyenv/versions/chatterbox/bin/python3"
   && pass "chatterbox venv: chatterbox-tts + chatterbook importable" \
   || failv "chatterbox venv missing or incomplete (~/.pyenv/versions/chatterbox; re-run 07-components)"
 else pass "chatterbox venv: not wanted (component_chatterbox=yes to enable)"; fi
+# t3code: opt-in web front end for the coding agents (component_t3code=yes).
+# Wanted means a listening service, not just a binary — a t3 with a dead unit
+# is what "it worked yesterday" looks like.
+if [[ "$(cv component_t3code)" == yes ]]; then
+T3_BIN="$(PATH="$HOME/.local/bin:$PATH" command -v t3 2>/dev/null)"
+if [[ -z "$T3_BIN" ]]; then failv "t3code: t3 missing (~/.local/bin/t3; re-run 07-components)"
+elif systemctl --user is-active -q t3code.service 2>/dev/null; then
+  pass "t3code: t3 $("$T3_BIN" --version 2>/dev/null | head -1 | sed "s/^t3 //"), t3code.service active"
+else failv "t3code: t3code.service not active (t3 service status; re-run 07-components)"; fi
+else pass "t3code: not wanted (component_t3code=yes to enable)"; fi
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"

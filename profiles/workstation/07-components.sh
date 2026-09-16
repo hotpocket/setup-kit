@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/whisper/lid-ignore (opt-in), dictation/ocr/tts.
+# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/t3code/whisper/lid-ignore (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -270,6 +270,79 @@ if [[ "$OLLAMA_WANT" == yes ]]; then
   fi
 else
   ok "ollama: opt-in, currently '$OLLAMA_WANT' (flip component_ollama=yes to enable)"
+fi
+
+# ------------------------------------------------------------- t3code
+# T3 Code (t3.codes): a web/desktop front end for the coding agents already on
+# the box — it drives the `claude` CLI and its own login, no key of its own.
+# Default OFF: own installer (a self-contained binary from a GitHub release,
+# no node), and a listening service is not something every box wants.
+# `t3 service install` writes ~/.config/systemd/user/t3code.service and
+# RE-RENDERS it on every `t3 update`, so the bind address lives in a drop-in
+# the kit owns, reconciled by content (same shape as zram-generator.conf).
+# The drop-in goes down BEFORE the first `t3 service install` so the first
+# start already binds where the conf says.
+T3_WANT="$(conf_get component_t3code no)"
+if [[ "$T3_WANT" == yes ]]; then
+  section "t3code ($MODE) — components/t3code.md"
+  export PATH="$HOME/.local/bin:$PATH"
+  T3_HOST="$(conf_get t3code_host 127.0.0.1)"
+  T3_PORT="$(conf_get t3code_port 3773)"
+  T3_UNIT="$HOME/.config/systemd/user/t3code.service"
+  T3_DROPIN="$HOME/.config/systemd/user/t3code.service.d/setup-kit.conf"
+  T3_RELOAD=0
+  if command -v t3 >/dev/null 2>&1; then
+    ok "t3 $(t3 --version 2>/dev/null | head -1 | sed "s/^t3 //") ($(command -v t3))"
+  else
+    warn "t3 missing"
+    do_or_say bash -c 'curl -fsSL https://t3.codes/install.sh | sh' || miss "t3code: installer failed (components/t3code.md)"
+  fi
+  # the provider: t3code has no model access of its own
+  if command -v claude >/dev/null 2>&1; then
+    ok "claude CLI present (t3code's Claude provider — sign in once with: claude auth login)"
+  else
+    warn "claude CLI not on PATH — t3code fronts Claude Code (component_claude_code=yes, phase 08, then: claude auth login)"
+  fi
+  # bind address + port, by content
+  T3_DROPIN_WANT=$(printf '# written by setup-kit (07-components) — edit hosts/%s.conf, not this file\n[Service]\nEnvironment=T3CODE_HOST=%s\nEnvironment=T3CODE_PORT=%s\n' "$(hostname)" "$T3_HOST" "$T3_PORT")
+  if [[ -f "$T3_DROPIN" && "$(cat "$T3_DROPIN")" == "$T3_DROPIN_WANT" ]]; then
+    ok "t3code bind ${T3_HOST}:${T3_PORT} (drop-in matches)"
+  else
+    [[ -f "$T3_DROPIN" ]] \
+      && warn "t3code bind drop-in drifted — reconciling to ${T3_HOST}:${T3_PORT}" \
+      || warn "t3code bind drop-in missing — writing ${T3_HOST}:${T3_PORT}"
+    if (( INSTALL )); then
+      mkdir -p "$(dirname "$T3_DROPIN")"
+      printf '%s\n' "$T3_DROPIN_WANT" > "$T3_DROPIN"
+      T3_RELOAD=1
+    else
+      echo "  [would] write $T3_DROPIN"
+    fi
+  fi
+  # the user unit — t3 writes, enables and starts it; linger is its business
+  # (it enables it, or prints the sudo loginctl line when it cannot)
+  if [[ -f "$T3_UNIT" ]] && systemctl --user is-enabled -q t3code.service 2>/dev/null; then
+    ok "t3code.service installed + enabled"
+    if (( T3_RELOAD )); then
+      do_or_say systemctl --user daemon-reload
+      do_or_say systemctl --user restart t3code.service || miss "t3code: restart after drop-in change"
+    fi
+  else
+    warn "t3code.service not installed"
+    if command -v t3 >/dev/null 2>&1; then
+      do_or_say t3 service install || miss "t3code: t3 service install failed (t3 service status)"
+    else
+      (( INSTALL )) || echo "  [would] t3 service install"
+    fi
+  fi
+  if systemctl --user is-active -q t3code.service 2>/dev/null; then
+    ok "t3code.service active — http://${T3_HOST}:${T3_PORT} (pair another device: t3 pair)"
+  elif [[ -f "$T3_UNIT" ]]; then
+    warn "t3code.service not running (t3 service status; log path is in its output)"
+    do_or_say systemctl --user restart t3code.service || miss "t3code: service would not start (t3 service status)"
+  fi
+else
+  ok "t3code: opt-in, currently '$T3_WANT' (flip component_t3code=yes to enable)"
 fi
 
 # ------------------------------------------------------------- aws-cli v2
