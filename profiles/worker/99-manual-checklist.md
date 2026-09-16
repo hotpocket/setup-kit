@@ -39,6 +39,14 @@ and reboot it out of the desktop.
       Settings › Deploy keys. GitHub allows one repo per key.
 - [ ] Both (`git_auth="deploy-keys token"`): the two lines above, each for its
       own repos — a repo named in `deploy_repos` never touches the token.
+- [ ] `git_push=allow` (this box's agents and cron may push): the credential
+      covering EVERY repo it is expected to push must be **read-write**. A
+      deploy key is read-only by default (tick "Allow write access" per repo)
+      and a fine-grained PAT needs Contents: read-and-write. A read-only
+      credential turns a push into a 403 at 3am with nobody watching — list the
+      repos the jobs push and check each one. `./bootstrap.sh worker install`
+      then writes `~/.claude/git-push-allowed`; without it the conduct hook
+      denies every push no matter what the credential allows.
 
 ## Wiring the job
 - [ ] Run it as a `systemd --user` timer + service, not a crontab: journald

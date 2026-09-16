@@ -166,4 +166,41 @@ if auth_has deploy-keys; then
 fi
 clone_wanted
 
+# ---- 6. git push policy: may this box's agents and cron push? --------------
+# A workstation keeps pushes manual so the human watches them happen. A worker
+# has no human watching, and shipping its output upstream for other bots to
+# consume IS its job — so git_push=allow drops the marker the conduct hook
+# reads (.configs/claude-conduct/skills/conduct/templates/deny-git-push.sh,
+# wired as a PreToolUse(Bash) hook). No marker = every push denied, as before.
+# The marker's one line names the host and the conf that authorised it.
+section "git push policy ($MODE)"
+GIT_PUSH="$(conf_get git_push deny)"
+PUSH_MARKER="$HOME/.claude/git-push-allowed"
+case "$GIT_PUSH" in
+  allow)
+    if [[ -s "$PUSH_MARKER" ]]; then
+      ok "git push allowed for agents and cron on this box"
+      hint "$(head -1 "$PUSH_MARKER")  ($PUSH_MARKER)"
+    else
+      warn "git_push=allow but $PUSH_MARKER is missing — the conduct hook still denies every push"
+      if (( INSTALL )); then
+        mkdir -p "$(dirname "$PUSH_MARKER")"
+        printf '%s hosts/%s git_push=allow %s\n' "$(hostname)" "$(basename "$HOST_CONF")" "$(date -I)" > "$PUSH_MARKER"
+        log "wrote $PUSH_MARKER: $(head -1 "$PUSH_MARKER")"
+      else
+        hint "install mode writes it; every repo it pushes needs a read-write credential (99-manual-checklist.md)"
+      fi
+    fi
+    ;;
+  deny)
+    if [[ -e "$PUSH_MARKER" ]]; then
+      warn "git_push=deny but $PUSH_MARKER exists — pushes are allowed on this box"
+      do_or_say rm -f "$PUSH_MARKER"
+    else
+      ok "git push denied (git_push=deny) — the conduct hook blocks every push"
+    fi
+    ;;
+  *) warn "git_push='$GIT_PUSH' is not allow|deny — leaving $PUSH_MARKER alone" ;;
+esac
+
 exit 0

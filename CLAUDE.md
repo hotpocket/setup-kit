@@ -14,6 +14,7 @@ packages, toolchains, configs — idempotently.
   - `worker check|install` — headless media/AI worker VM (`profiles/worker/`): the same
     pass loop over symlinks to the workstation phases it shares plus `03-headless`
     (multi-user.target at boot, sshd, linger, nvidia held under unattended-upgrades,
+    `git_push=allow|deny` → the `~/.claude/git-push-allowed` marker the conduct hook reads,
     machine-credential doctor: the aws key is sealed by `seal-aws-profile.sh` into a
     user-scoped systemd-creds blob, TPM2 + host key, read through `credential_process`;
     the doctor reads the blob header and names a host-key-only seal — `tests/test-aws-sealed.sh`).
@@ -56,11 +57,11 @@ packages, toolchains, configs — idempotently.
 - **Manifests are generated** — `capture/90-generate-manifests.py` writes `manifests/apt/*`. Edit the generator (its strings become the file comments), not the `.list` files by hand — a regen overwrites them.
 - **Two repos** — setup-kit owns machine-level provisioning; `~/git/.configs` (private) owns user dotfiles/bin/dconf and is cloned + run by phase 06. setup-kit never duplicates dotfiles.
 
-## Git — ABSOLUTE RULE
+## Git — two modes, decided by the box
 
-- Claude commits. The user pushes. NEVER run `git push` — any remote, any protocol (SSH/HTTPS/gh), tags, force, anything. No exceptions, ever.
-- Never ask to push, never offer to push, never suggest pushing. Pushing is exclusively the user's action, done on their schedule.
-- After committing, just report the commit and stop.
+- **Workstation (no `~/.claude/git-push-allowed`): Claude commits, the user pushes.** NEVER run `git push` — any remote, any protocol (SSH/HTTPS/gh), tags, anything; never ask to, never offer. After committing, report the commit and stop.
+- **Headless worker whose conf says `git_push=allow`** (phase `03-headless` writes that marker; the conduct hook in `.configs` reads it): Claude and the line's scripts push after committing, because nobody is watching a cron and other bots consume what it ships. Say what was pushed and where.
+- **Never force-push, on either box.** The marker allows every push — force is governed by this line, not by the hook.
 
 ## Gotchas
 
@@ -117,6 +118,6 @@ why), write it back to the vault. **At session end**, offer `/vault recap`.
 ## Rules of conduct
 
 (Idempotency, no-silent-sudo, and commit/push rules live in **Conventions** and
-**Git — ABSOLUTE RULE** above.) Additionally:
+**Git — two modes** above.) Additionally:
 - Be brief: no preamble, no recap of what the user knows, no surveying paths not taken.
 - Reversible-by-default; confirm before hard-to-undo or outward-facing actions.
