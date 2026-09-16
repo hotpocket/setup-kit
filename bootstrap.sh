@@ -17,15 +17,36 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
-# Catalog of every toggleable group_/component_ flag, from the example.conf
+# Each profile has its own host-conf template: hosts/example.conf for the
+# workstation, hosts/<profile>.example.conf otherwise. A host conf records
+# which one it came from (profile=), so every reader agrees on the flag set.
+profile_template() {
+  [[ "$1" == workstation ]] && echo "$KIT_DIR/hosts/example.conf" \
+                            || echo "$KIT_DIR/hosts/$1.example.conf"
+}
+
+# Catalog of every toggleable group_/component_ flag, from THIS HOST'S profile
 # template (its inline comments are the descriptions), annotated with each
 # flag's CURRENT value in this host's conf. The way to discover what's
 # installable after first run: flip a 'no' to 'yes' here, re-run install.
+# Profile-aware on purpose: a worker's flag set (group_worker, no
+# desktop groups) is not the workstation's, and the footer must name the
+# command that will actually act on the file.
 list_components() {
-  local tmpl="$KIT_DIR/hosts/example.conf"
-  [[ -f "$tmpl" ]] || { echo "no template at $tmpl"; exit 1; }
-  [[ -f "$HOST_CONF" ]] && echo "host conf: $HOST_CONF" \
-                        || echo "host conf: (none yet — showing template defaults)"
+  local profile tmpl base
+  profile="$(conf_get profile workstation)"
+  tmpl="$(profile_template "$profile")"; base="$KIT_DIR/hosts/example.conf"
+  [[ -f "$tmpl" ]] || { echo "no template for profile '$profile' at $tmpl"; exit 1; }
+  [[ -f "$HOST_CONF" ]] && echo "host conf: $HOST_CONF  (profile: $profile)" \
+                        || echo "host conf: (none yet — showing $(basename "$tmpl") defaults)"
+  # Descriptions: the profile template's inline comment, else the workstation
+  # template's for the same key (lean templates comment only what differs).
+  local -A DESC=(); local line key
+  while IFS= read -r line; do
+    line="${line#\# }"
+    [[ "$line" =~ ^(group_|component_|lang_|cond_)[a-z0-9_]+= && "$line" == *"#"* ]] || continue
+    key="${line%%=*}"; DESC["$key"]="${line#*#}"
+  done < "$base"
   # Print one annotated row per template line whose key matches $1 (an
   # extended-regex prefix alternation). Tolerates `# key=val` lines (commented
   # cond_* defaults) by stripping a leading comment marker first.
@@ -36,7 +57,7 @@ list_components() {
       [[ "$line" =~ ^($1)[a-z0-9_]+= ]] || continue
       key="${line%%=*}"
       def="${line#*=}"; def="${def%%#*}"; def="${def//\"/}"; def="${def// /}"
-      desc=""; [[ "$line" == *"#"* ]] && desc="${line#*#}"
+      desc="${DESC[$key]:-}"; [[ "$line" == *"#"* ]] && desc="${line#*#}"
       cur="$(conf_get "$key" "$def")"
       printf '  %s%-7s%s%-26s %s%s%s\n' \
         "$([[ "$cur" =~ ^(yes|auto)$ || ( "$cur" != no && -n "$cur" ) ]] && echo "$C_OK" || echo "$C_DIM")" \
@@ -50,7 +71,7 @@ list_components() {
   section "conditional — INFORMATIONAL, resolved by hardware detection (override only to force)"
   _list_rows 'cond_'
   echo
-  echo "  flip a value in $HOST_CONF, then: ./bootstrap.sh workstation install"
+  echo "  flip a value in $HOST_CONF, then: ./bootstrap.sh $profile install"
 }
 
 cmd="${1:-}"; mode="${2:-check}"
@@ -93,8 +114,7 @@ case "$cmd" in
     # overridable so the phase-loop semantics (notably the exit-3 abort) can be
     # exercised against stub phases; unset everywhere except tests/
     PHASE_DIR="${KIT_PHASE_DIR:-$KIT_DIR/profiles/$cmd}"
-    TEMPLATE="$KIT_DIR/hosts/example.conf"
-    [[ "$cmd" == worker ]] && TEMPLATE="$KIT_DIR/hosts/worker.example.conf"
+    TEMPLATE="$(profile_template "$cmd")"
     case "$mode" in check|install) ;; *) usage ;; esac
     # -v (or verbose=yes in host conf): per-line [ OK ] output instead of the
     # quiet per-section rollup. Detail always lands in the run log either way.

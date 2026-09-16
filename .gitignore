@@ -3,6 +3,7 @@ snapshot/
 # real host answer files may embed machine details; example.conf is tracked
 hosts/*.conf
 !hosts/example.conf
+!hosts/*.example.conf
 logs/
 # transient/ephemeral generated docs (docs/ + docs/reports/ are tracked)
 docs/logs/

@@ -18,7 +18,7 @@ packages, toolchains, configs — idempotently.
     (`optional/worker.list`), `headless=yes` gates session work in 06-configs/verify;
     `.configs/setup.sh` still runs (it owns how claude behaves on the box).
     No YubiKey anywhere: a cron can't touch one — creds are scoped keys, seeded by hand.
-  - `list` — print every group/component/lang flag + its current value (from `hosts/<host>.conf`), plus informational `cond_*`. The way to discover what's installable after first run: flip a flag, re-run install.
+  - `list` — print every group/component/lang flag + its current value (from `hosts/<host>.conf`), plus informational `cond_*`. Profile-aware: the host conf's `profile=` picks the template (`hosts/example.conf` or `hosts/<profile>.example.conf`) so a worker sees `group_worker` and a `worker install` footer (`tests/test-list-profile.sh`). The way to discover what's installable after first run: flip a flag, re-run install.
 - `get.sh` — one-line fetcher: clones the repo, optionally execs `bootstrap.sh`.
 - `verify.sh` — independent system-vs-manifest check. Deliberately does NOT source `lib.sh` (a shared bug shouldn't lie twice).
 
