@@ -16,7 +16,7 @@ branch: main
 
 - Every renderer on the audiobook line expects one Python environment named chatterbox, and nothing in the kit built it: a worker provisioned to render could not render a chapter. The kit now provisions it as an opt-in component, on by default for workers, and the doctor and verifier both check it.
 - The first real render found a defect every import test missed: the model dies on load unless an old packaging helper is present. The doctor's probe now constructs what the model constructs, and the fix (a version pin) is on the install line with its reason.
-- ai-3090 now runs the Weakest Beast Tamer pipeline hourly, seeded with the published audio from S3 and caught up to chapter 1220 tonight. The wbt repo's own recap has the pipeline-side detail; the one human action left is switching the workstation's copies of those cron lines off.
+- ai-3090 now runs the Weakest Beast Tamer pipeline hourly, seeded with the published audio from S3 and caught up to chapter 1220 tonight. Its first unattended cycle then fetched, rendered and published 1221 and 1222 on its own. The wbt repo's own recap has the pipeline-side detail; the one human action left is switching the workstation's copies of those cron lines off.
 
 ## Next Steps
 
