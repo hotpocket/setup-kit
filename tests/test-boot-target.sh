@@ -23,7 +23,7 @@ S
 chmod +x "$TMP/bin/systemctl"
 run() {  # <conf-body> <current-target>
   printf '%b\n' "$1" > "$TMP/host.conf"; echo "$2" > "$TMP/target"
-  PATH="$TMP/bin:$PATH" STUB_TARGET="$TMP/target" HOME="$TMP/home" HOST_CONF="$TMP/host.conf" LOG_DIR="$TMP" KIT_QUIET=0 \
+  PATH="$TMP/bin:$PATH" STUB_TARGET="$TMP/target" HOME="$TMP/home" HOST_CONF="$TMP/host.conf" KIT_LOG_DIR="$TMP" KIT_QUIET=0 \
     bash "$KIT_DIR/profiles/worker/03-headless.sh" check 2>&1 | sed -n '/headless boot/,/ssh in/p' > "$TMP/out"
 }
 run 'profile=worker' graphical.target

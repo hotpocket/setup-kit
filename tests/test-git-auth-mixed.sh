@@ -23,7 +23,7 @@ assert() { if eval "$2"; then ((pass++)); echo "  ok   $1"; else ((fail++)); ech
 # run <conf-body> <shell-snippet>: source lib + deploy lib under a fake conf/HOME
 run() {
   printf '%b\n' "$1" > "$TMP/host.conf"
-  HOME="$TMP/home" HOST_CONF="$TMP/host.conf" LOG_DIR="$TMP" SCRIPT_NAME=t KIT_QUIET=0 bash -c "
+  HOME="$TMP/home" HOST_CONF="$TMP/host.conf" KIT_LOG_DIR="$TMP" SCRIPT_NAME=t KIT_QUIET=0 bash -c "
     source '$KIT_DIR/lib.sh'; init_mode check; source '$KIT_DIR/profiles/worker/lib-deploy-keys.sh'; $2" > "$TMP/out" 2>&1
 }
 mkdir -p "$TMP/home/.ssh"
