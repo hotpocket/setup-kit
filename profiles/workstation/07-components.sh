@@ -338,6 +338,84 @@ else
   ok "whisper: opt-in, currently '$WHISPER_WANT' (flip component_whisper=yes to enable)"
 fi
 
+# ------------------------------------------------------------- chatterbox
+# Chatterbox-TTS, the audiobook line's renderer (components/chatterbox.md).
+# A DEDICATED pyenv virtualenv named `chatterbox`: chatterbook/build_book.sh,
+# audiobook/scripts/render-book.sh and wbt all pin
+# ~/.pyenv/versions/chatterbox/bin/python3 (name, not patch — stable across
+# machines). Pinned package version: chatterbox-tts pins torch/transformers
+# itself, so the one number that decides the whole venv is this one; override
+# with chatterbox_version= in the host conf when a render proves a newer one.
+CHATTERBOX_WANT="$(conf_get component_chatterbox no)"
+if [[ "$CHATTERBOX_WANT" == yes ]]; then
+  section "chatterbox ($MODE) — components/chatterbox.md"
+  CB_VER="$(conf_get chatterbox_version 0.1.7)"
+  CB_PY="$HOME/.pyenv/versions/chatterbox/bin/python3"
+  CB_SRC="$HOME/git/audiobook/chatterbook"     # the engine checkout (clone_repos → audiobook, its bootstrap clones chatterbook)
+  export PYENV_ROOT="$HOME/.pyenv" PATH="$HOME/.pyenv/bin:$PATH"
+  CB_BASE="$(pyenv versions --bare 2>/dev/null | grep -E '^3\.12(\.|$)' | grep -v / | tail -1)"
+  if [[ ! -x "$CB_PY" ]]; then
+    warn "chatterbox virtualenv missing (~/.pyenv/versions/chatterbox)"
+    if (( INSTALL )); then
+      if [[ -z "$CB_BASE" ]]; then
+        fail "no pyenv 3.12 to build the chatterbox venv from — run 04-languages (lang_python=yes)"
+      else
+        pyenv virtualenv "$CB_BASE" chatterbox 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log" \
+          || miss "chatterbox: pyenv virtualenv $CB_BASE chatterbox"
+      fi
+    else
+      hint "pyenv virtualenv ${CB_BASE:-3.12} chatterbox && pip install chatterbox-tts==$CB_VER"
+    fi
+  else
+    ok "chatterbox virtualenv present"
+  fi
+  if [[ -x "$CB_PY" ]]; then
+    # the package pins torch==2.6.0 (CUDA 12.4 wheel from PyPI on Linux),
+    # torchaudio, transformers, numpy<2 — one pin, everything else follows
+    if "$CB_PY" -c 'import torch, torchaudio; from chatterbox.tts_turbo import ChatterboxTurboTTS' 2>/dev/null; then
+      ok "chatterbox venv deps (chatterbox-tts, torch, torchaudio) present"
+    else
+      warn "chatterbox venv deps missing"
+      do_or_say "$CB_PY" -m pip install --quiet "chatterbox-tts==$CB_VER" \
+        || miss "chatterbox: pip install chatterbox-tts==$CB_VER"
+    fi
+    # chatterbook (the engine's own package) as an editable install, asked from
+    # / — from inside the checkout every interpreter can import ./chatterbook
+    # whether or not it is installed (chatterbook/README.md, check-install.sh)
+    if (cd / && "$CB_PY" -c 'import chatterbook' 2>/dev/null); then
+      ok "chatterbook importable from the chatterbox venv (editable install)"
+    elif [[ -f "$CB_SRC/pyproject.toml" ]]; then
+      warn "chatterbook not installed in the chatterbox venv"
+      do_or_say "$CB_PY" -m pip install --quiet -e "$CB_SRC" \
+        || miss "chatterbox: pip install -e $CB_SRC"
+    else
+      warn "chatterbook not installed and no checkout at $CB_SRC (clone_repos → audiobook, then audiobook/scripts/bootstrap)"
+      miss "chatterbox: chatterbook checkout missing at $CB_SRC"
+    fi
+    # the GPU: report only. Ampere+ and the default cu124 wheel agree; a card
+    # the wheel can't drive is a different component's problem (tts/kokoro
+    # has the cu118 dance) and a render would say so on its first chunk.
+    if nvidia_wanted; then
+      "$CB_PY" -c 'import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)' 2>/dev/null \
+        && ok "chatterbox torch sees the GPU" \
+        || warn "chatterbox torch can't see the GPU (CUDA wheel vs driver?) — renders would run on CPU or fail"
+    fi
+    # Pre-warm the Turbo weights so the first render isn't a surprise pull.
+    # local_files_only=True is an offline cache probe against the same hub
+    # repo from_pretrained() uses; the id is read from the package, not copied.
+    CB_PROBE='from huggingface_hub import snapshot_download; from chatterbox import tts_turbo as t; snapshot_download(t.REPO_ID, local_files_only=True)'
+    if "$CB_PY" -c "$CB_PROBE" >/dev/null 2>&1; then
+      ok "chatterbox Turbo weights cached (~/.cache/huggingface)"
+    else
+      warn "chatterbox Turbo weights not cached (download on first render)"
+      do_or_say "$CB_PY" -c "${CB_PROBE/, local_files_only=True/}" \
+        || miss "chatterbox: download Turbo weights (huggingface — gated? set HF_TOKEN)"
+    fi
+  fi
+else
+  ok "chatterbox: opt-in, currently '$CHATTERBOX_WANT' (flip component_chatterbox=yes on a box that renders audiobooks)"
+fi
+
 # ------------------------------------------------------------- mtga (wine)
 # MTG Arena under Wine. Install-only: fetch WotC's bootstrap installer and run
 # it once (GUI; downloads the ~14 GB client into ~/.wine). The kit never owns

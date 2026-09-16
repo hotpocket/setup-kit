@@ -235,6 +235,14 @@ case $? in
 esac
 fi
 else pass "tts venv: not wanted (component_tts=no)"; fi
+# chatterbox venv: opt-in (component_chatterbox=yes on a box that renders the
+# audiobook line). Asked from / so an uninstalled ./chatterbook can't answer.
+if [[ "$(cv component_chatterbox)" == yes ]]; then
+CB_PY="$HOME/.pyenv/versions/chatterbox/bin/python3"
+[[ -x "$CB_PY" ]] && (cd / && "$CB_PY" -c 'from chatterbox.tts_turbo import ChatterboxTurboTTS; import chatterbook' 2>/dev/null) \
+  && pass "chatterbox venv: chatterbox-tts + chatterbook importable" \
+  || failv "chatterbox venv missing or incomplete (~/.pyenv/versions/chatterbox; re-run 07-components)"
+else pass "chatterbox venv: not wanted (component_chatterbox=yes to enable)"; fi
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
