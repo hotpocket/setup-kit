@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/t3code/whisper/lid-ignore (opt-in), dictation/ocr/tts.
+# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/t3code/codex/whisper/lid-ignore (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -343,6 +343,34 @@ if [[ "$T3_WANT" == yes ]]; then
   fi
 else
   ok "t3code: opt-in, currently '$T3_WANT' (flip component_t3code=yes to enable)"
+fi
+
+# ------------------------------------------------------------- codex
+# OpenAI's Codex CLI — the second agent t3code fronts (ChatGPT Plus/Pro/
+# Business plans include it). Default OFF. A musl binary from OpenAI's own
+# installer into ~/.local/bin, no node, no sudo; the installer skips its
+# shell-profile edit when ~/.local/bin is already on PATH (it is: claude).
+# Login is the USER's — `codex login --device-auth` on a headless box — the
+# kit only reports it, same policy as `claude auth login`.
+CODEX_WANT="$(conf_get component_codex no)"
+if [[ "$CODEX_WANT" == yes ]]; then
+  section "codex ($MODE) — components/codex.md"
+  export PATH="$HOME/.local/bin:$PATH"
+  if command -v codex >/dev/null 2>&1; then
+    ok "$(codex --version 2>/dev/null | head -1) ($(command -v codex))"
+  else
+    warn "codex missing"
+    do_or_say bash -c 'curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh' || miss "codex: installer failed (components/codex.md)"
+  fi
+  if command -v codex >/dev/null 2>&1; then
+    if codex login status >/dev/null 2>&1; then
+      ok "codex logged in ($(codex login status 2>/dev/null | head -1))"
+    else
+      warn "codex not logged in — enable device-code login in ChatGPT security settings, then: codex login --device-auth"
+    fi
+  fi
+else
+  ok "codex: opt-in, currently '$CODEX_WANT' (flip component_codex=yes to enable)"
 fi
 
 # ------------------------------------------------------------- aws-cli v2

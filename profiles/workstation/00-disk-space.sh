@@ -222,6 +222,7 @@ comp component_mtga      no  "mtga: Arena client (Arena's own installer download
                              "$HOME/.wine/drive_c/Program Files/Wizards of the Coast/MTGA"
 comp component_herdr     no  "herdr: agent multiplexer"  cmd:herdr "$HOME/.local/bin/herdr"
 comp component_t3code    no  "t3code: CLI runtime under ~/.t3" cmd:t3 "$HOME/.t3/runtime"
+comp component_codex     no  "codex: CLI release under ~/.codex" cmd:codex "$HOME/.codex/packages"
 comp component_claude_skills yes "claude skills: repo clones" "$HOME/.claude/skills"
 [[ -d "$HOME/git/.configs" ]] ||
   add_need "dotfiles: .configs clone + its setup" "$(declared_kb configs_repo)" "$(declared_tgt configs_repo)" declared

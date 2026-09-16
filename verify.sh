@@ -253,6 +253,15 @@ elif systemctl --user is-active -q t3code.service 2>/dev/null; then
   pass "t3code: t3 $("$T3_BIN" --version 2>/dev/null | head -1 | sed "s/^t3 //"), t3code.service active"
 else failv "t3code: t3code.service not active (t3 service status; re-run 07-components)"; fi
 else pass "t3code: not wanted (component_t3code=yes to enable)"; fi
+# codex: opt-in (component_codex=yes). Wanted means usable by t3code: the
+# binary AND a login — the login is the user's, so this names the command.
+if [[ "$(cv component_codex)" == yes ]]; then
+CODEX_BIN="$(PATH="$HOME/.local/bin:$PATH" command -v codex 2>/dev/null)"
+if [[ -z "$CODEX_BIN" ]]; then failv "codex: missing (~/.local/bin/codex; re-run 07-components)"
+elif "$CODEX_BIN" login status >/dev/null 2>&1; then
+  pass "codex: $("$CODEX_BIN" --version 2>/dev/null | head -1), logged in"
+else failv "codex: not logged in (codex login --device-auth)"; fi
+else pass "codex: not wanted (component_codex=yes to enable)"; fi
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
