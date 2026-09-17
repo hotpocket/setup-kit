@@ -15,6 +15,10 @@ packages, toolchains, configs — idempotently.
     pass loop over symlinks to the workstation phases it shares plus `03-headless`
     (multi-user.target at boot, sshd, linger, nvidia held under unattended-upgrades,
     `git_push=allow|deny` → the `~/.claude/git-push-allowed` marker the conduct hook reads,
+    tailnet doctor (the `tailscale` package rides `group_worker` from apt —
+    headless skips the snap phase — but `tailscale up` and
+    `tailscale set --operator=$USER` are the human's; the second is what
+    `t3 pair --tailscale` needs and nothing else names — `tests/test-tailscale.sh`),
     machine-credential doctor: the aws key is sealed by `seal-aws-profile.sh` into a
     user-scoped systemd-creds blob, TPM2 + host key, read through `credential_process`;
     the doctor reads the blob header and names a host-key-only seal — `tests/test-aws-sealed.sh`).

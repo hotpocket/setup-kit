@@ -140,9 +140,17 @@ OPTIONAL = {  # group: (header, [pkgs])
     # only what a shell, the kokoro/whisper venvs (07-components), pyenv builds
     # (04-languages) and machine-credential CLIs need. ffmpeg/sox live in
     # media.list too, but that group drags in players.
+    # tailscale: how a worker is REACHED (t3code pairs over Tailscale Serve
+    # HTTPS — components/t3code.md). A workstation gets it from snap.list, but
+    # headless=yes skips the snap phase entirely, so the worker takes the apt
+    # build from pkgs.tailscale.com (repo in 01-apt-repos.sh, same group gate).
+    # Absent from any capture box's manual.txt — the workstation's copy is the
+    # snap — so it regenerates with an unknown size, which is honest: the
+    # preflight measures apt live and never reads these comments.
     "worker": ("Headless worker (profiles/worker) — OFF for workstations;"
                " the worker host conf turns ONLY this group on",
-               ["openssh-server", "qemu-guest-agent", "curl", "wget", "rsync",
+               ["openssh-server", "qemu-guest-agent", "tailscale",
+                "curl", "wget", "rsync",
                 "git", "gh", "jq", "unzip", "zip", "xz-utils", "lsof",
                 "tmux", "tree", "pv", "bat", "btop", "tig", "tealdeer",
                 "nvtop", "gnupg", "sqlite3",

@@ -16,6 +16,7 @@
 | nvidia-container-toolkit.list | conditional/nvidia | conditional |
 | ddev.list | dev-core (ddev) | keep |
 | charm.list | cli-system (glow via charm repo) | keep |
+| tailscale.list (pkgs.tailscale.com) | worker (tailscale) | keep — signed-by the VENDOR path (/usr/share/keyrings/tailscale-archive-keyring.gpg), not $KEYDIR: if the deb ever ships its own source, matching paths is what avoids the vscode/steam Signed-By clash. Workstations take the snap instead (headless workers skip the snap phase) |
 | minetestdevs PPA | games (minetest) | keep if games group on |
 | ubuntu-esm-apps / esm-infra | cli-system | via `pro attach`, not raw lists |
 

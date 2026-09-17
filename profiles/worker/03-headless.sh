@@ -203,4 +203,52 @@ case "$GIT_PUSH" in
   *) warn "git_push='$GIT_PUSH' is not allow|deny — leaving $PUSH_MARKER alone" ;;
 esac
 
+# ---- 7. tailnet: the kit installs it, a human joins it ---------------------
+# How this box is REACHED. t3code binds the LAN/tailnet address and devices
+# pair over Tailscale Serve HTTPS (components/t3code.md) — deliberately not a
+# public tunnel, which would put a full-access agent session on the open
+# internet. The package is the kit's (group_worker: manifests/apt/optional/
+# worker.list + the repo in 01-apt-repos.sh). The IDENTITY is not: `tailscale
+# up` authenticates this machine to a human's tailnet and no cron may do that.
+# Verify, name the command, never seed — the rule every credential here follows.
+#
+# The operator line is the one that bites. `tailscale serve` is state-changing,
+# so it needs root OR the configured operator; t3code runs as a USER service,
+# so without `tailscale set --operator=$USER` pairing fails with an
+# access-denied that names nothing about operators.
+section "tailnet ($MODE)"
+if ! command -v tailscale >/dev/null 2>&1; then
+  warn "tailscale missing — group_worker installs it (apt, pkgs.tailscale.com)"
+  hint "it arrives on the next pass: 01-apt-repos adds the repo, 02-apt-install the package"
+else
+  TS_STATE="$(tailscale status --json 2>/dev/null \
+              | grep -o '"BackendState"[^,]*' | cut -d'"' -f4)"
+  case "$TS_STATE" in
+    Running)
+      TS_NAME="$(tailscale status --json 2>/dev/null \
+                 | grep -o '"DNSName"[^,]*' | head -1 | cut -d'"' -f4)"
+      ok "tailnet up: ${TS_NAME%.}"
+      # "unset" and "could not tell" are different answers. A doctor that
+      # reports the second as the first sends you to fix a working box.
+      if TS_PREFS="$(tailscale debug prefs 2>/dev/null)" && [[ -n "$TS_PREFS" ]]; then
+        TS_OP="$(printf '%s' "$TS_PREFS" | grep -o '"OperatorUser"[^,]*' | cut -d'"' -f4)"
+        if [[ -n "$TS_OP" ]]; then
+          ok "tailscale operator: $TS_OP (user services may run \`tailscale serve\`)"
+        else
+          warn "tailscale operator not set — \`tailscale serve\` is refused for user services, so \`t3 pair --tailscale\` fails"
+          hint "sudo tailscale set --operator=$USER"
+        fi
+      else
+        warn "tailscale operator unknown — \`tailscale debug prefs\` gave nothing"
+        hint "check by hand before trusting \`t3 pair --tailscale\`: sudo tailscale set --operator=$USER"
+      fi
+      ;;
+    NeedsLogin|Stopped|NoState|"")
+      warn "tailscale installed but not joined${TS_STATE:+ (state: $TS_STATE)} — this box is unreachable over the tailnet"
+      hint "sudo tailscale up --hostname=$(hostname)   # authenticates YOU; the kit never does this"
+      ;;
+    *) warn "tailscale in an unexpected state: $TS_STATE" ;;
+  esac
+fi
+
 exit 0

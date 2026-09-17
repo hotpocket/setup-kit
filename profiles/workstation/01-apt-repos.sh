@@ -11,10 +11,13 @@ ARCH="$(dpkg --print-architecture)"
 KEYDIR=/etc/apt/keyrings
 NEED_UPDATE=0
 
-# repo <group> <name> <key-url> <line>   (line may reference $KEYDIR/$name.gpg)
+# repo <group> <name> <key-url> <line> [keypath]
+# line may reference $KEYDIR/$name.gpg; keypath overrides where the key lands,
+# for vendors who publish a signed-by path of their own (see tailscale below).
 repo() {
-  local group="$1" name="$2" keyurl="$3" line="$4"
+  local group="$1" name="$2" keyurl="$3" line="$4" keypath="${5:-}"
   local listfile="/etc/apt/sources.list.d/${name}.list"
+  [[ -n "$keypath" ]] || keypath="$KEYDIR/${name}.gpg"
   if [[ "$group" != always ]] && ! group_on "$group"; then
     return 0
   fi
@@ -24,11 +27,11 @@ repo() {
   fi
   warn "repo $name missing (group: $group)"
   if (( INSTALL )); then
-    sudo mkdir -p "$KEYDIR"
+    sudo mkdir -p "$(dirname "$keypath")"
     if [[ -n "$keyurl" ]]; then
-      curl -fsSL "$keyurl" | gpg --dearmor | sudo tee "$KEYDIR/${name}.gpg" >/dev/null \
+      curl -fsSL "$keyurl" | gpg --dearmor | sudo tee "$keypath" >/dev/null \
         || { miss "repo key: $name ($keyurl)"; return 1; }
-      sudo chmod 644 "$KEYDIR/${name}.gpg"
+      sudo chmod 644 "$keypath"
     fi
     echo "$line" | sudo tee "$listfile" >/dev/null
     log "added repo: $name"
@@ -86,6 +89,19 @@ repo wine winehq \
 repo cli_system charm \
   "https://repo.charm.sh/apt/gpg.key" \
   "deb [signed-by=$KEYDIR/charm.gpg] https://repo.charm.sh/apt/ * *"
+# tailscale: a worker is reached over the tailnet, so the binary has to be on
+# the box — and the worker profile skips the snap phase (headless=yes), which
+# is where a workstation gets tailscale. Hence apt, worker-group-gated.
+# The keyring path is the VENDOR's (/usr/share/keyrings/tailscale-archive-
+# keyring.gpg, per pkgs.tailscale.com/stable/ubuntu/$CODENAME.tailscale-keyring.list),
+# not this script's $KEYDIR default. The deb ships no sources file today, but
+# apt compares keyring PATHS, not keys — if it ever starts shipping one, a
+# kit-written entry at a different path is the fatal Signed-By clash that took
+# out all of apt for vscode and steam. Matching the vendor path cannot clash.
+repo worker tailscale \
+  "https://pkgs.tailscale.com/stable/ubuntu/$CODENAME.asc" \
+  "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu $CODENAME main" \
+  /usr/share/keyrings/tailscale-archive-keyring.gpg
 
 ppa media  ppa:obsproject/obs-studio
 ppa media  ppa:marin-m/songrec

@@ -48,6 +48,29 @@ and reboot it out of the desktop.
       then writes `~/.claude/git-push-allowed`; without it the conduct hook
       denies every push no matter what the credential allows.
 
+## Tailnet (the kit installs the package; joining is yours)
+- [ ] `sudo tailscale up --hostname=<host>` — authenticates this machine to
+      YOUR tailnet. `group_worker` installs the package (apt, from
+      pkgs.tailscale.com), never the identity; 03-headless §7 reports the state
+      and stops there.
+- [ ] `sudo tailscale set --operator=$USER` — **required before
+      `t3 pair --tailscale` works.** `tailscale serve` is state-changing, so
+      it needs root or the configured operator; t3code runs as a *user*
+      service and is otherwise refused with an access-denied that says nothing
+      about operators.
+- [ ] Tailnet admin → DNS: **MagicDNS** and **HTTPS certificates** both on.
+      Tailscale Serve HTTPS (what `t3 pair --tailscale` publishes through) does
+      not come up without them.
+- [ ] Reaching t3code from your phone/laptop: `t3 pair --tailscale --label
+      <device>` on this box prints a QR against the tailnet URL. No account
+      link, no public hostname, nothing leaves the tailnet. `t3 connect link
+      --publish-only --headless` is the *optional* extra that adds phone push
+      notifications — it sends project titles, thread titles and phase to
+      t3's relay, and still provisions no tunnel (`t3 connect status` must keep
+      saying `Relay: not provisioned`). Plain `t3 connect link` (no flag) puts
+      a full-access agent session on a public Cloudflare hostname — not for a
+      worker.
+
 ## Wiring the job
 - [ ] Run it as a `systemd --user` timer + service, not a crontab: journald
       logs (`journalctl --user -u <job>`), `OnFailure=`, `EnvironmentFile=`
