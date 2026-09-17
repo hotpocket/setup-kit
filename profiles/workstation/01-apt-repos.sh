@@ -9,6 +9,12 @@ init_mode "${1:-}"
 CODENAME="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME}}")"
 ARCH="$(dpkg --print-architecture)"
 KEYDIR=/etc/apt/keyrings
+# Overridable so the calibration tests can point at a fixture dir: what a repo
+# entry DOES is decided by whether its list already exists, and a test that
+# reads the real /etc/apt answers about this box instead of about the code
+# (tests/test-tailscale.sh A/B flipped the day tailscale landed here).
+# Same idiom as HOST_CONF / KIT_LOG_DIR; the default is the real path.
+SRCDIR="${APT_SOURCES_DIR:-/etc/apt/sources.list.d}"
 NEED_UPDATE=0
 
 # repo <group> <name> <key-url> <line> [keypath]
@@ -16,12 +22,12 @@ NEED_UPDATE=0
 # for vendors who publish a signed-by path of their own (see tailscale below).
 repo() {
   local group="$1" name="$2" keyurl="$3" line="$4" keypath="${5:-}"
-  local listfile="/etc/apt/sources.list.d/${name}.list"
+  local listfile="$SRCDIR/${name}.list"
   [[ -n "$keypath" ]] || keypath="$KEYDIR/${name}.gpg"
   if [[ "$group" != always ]] && ! group_on "$group"; then
     return 0
   fi
-  if [[ -e "$listfile" ]] || grep -rqs "${name}" /etc/apt/sources.list.d/ 2>/dev/null; then
+  if [[ -e "$listfile" ]] || grep -rqs "${name}" "$SRCDIR/" 2>/dev/null; then
     ok "repo $name present"
     return 0
   fi
@@ -45,7 +51,7 @@ ppa() {  # ppa <group> <ppa:user/name>
   local group="$1" p="$2" slug
   slug="${p#ppa:}"; slug="${slug//\//-ubuntu-}"
   if [[ "$group" != always ]] && ! group_on "$group"; then return 0; fi
-  if ls /etc/apt/sources.list.d/ 2>/dev/null | grep -q "^${slug}"; then
+  if ls "$SRCDIR/" 2>/dev/null | grep -q "^${slug}"; then
     ok "ppa $p present"
   else
     warn "ppa $p missing (group: $group)"
@@ -70,9 +76,9 @@ repo dev_cloud google-cloud-sdk \
 # apt with a Signed-By conflict — apt compares the keyring PATHS, not the keys, so
 # even the byte-identical Microsoft key in two locations is fatal. Same trap as steam.
 # Heal boxes that got the bad list from an earlier setup-kit run:
-if [[ -e /etc/apt/sources.list.d/vscode.list ]]; then
+if [[ -e "$SRCDIR/vscode.list" ]]; then
   warn "removing stale vscode.list (conflicts with the code package's vscode.sources)"
-  do_or_say sudo rm -f /etc/apt/sources.list.d/vscode.list && NEED_UPDATE=1
+  do_or_say sudo rm -f "$SRCDIR/vscode.list" && NEED_UPDATE=1
 fi
 repo apps google-chrome \
   "https://dl.google.com/linux/linux_signing_key.pub" \
