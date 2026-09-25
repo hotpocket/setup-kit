@@ -172,7 +172,9 @@ conf_set() {
     # escape sed-special chars in the value (\, |, &) so a value like a URL or
     # model tag can't corrupt the replacement; preserves the line's position
     local esc=${2//\\/\\\\}; esc=${esc//|/\\|}; esc=${esc//&/\\&}
-    sed -i "s|^${1}=.*|${1}=${esc}|" "$HOST_CONF"
+    # --follow-symlinks: a host conf may link to the machine's record in a private repo; a bare -i
+    # would replace the link with a copy (tests/test-conf-set-symlink.sh)
+    sed -i --follow-symlinks "s|^${1}=.*|${1}=${esc}|" "$HOST_CONF"
   else
     echo "${1}=${2}" >> "$HOST_CONF"
   fi
