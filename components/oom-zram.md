@@ -22,6 +22,9 @@ stays commented out. zram is the only acceptable swap.
    (the installer derives `zram-size` as `min(ram/4, 8192)` MB.)
 2. **sysctl** — `/etc/sysctl.d/99-zram.conf`: `vm.page-cluster = 0`
    (single-page swap-ins; standard zram pairing).
+   Also `/etc/sysctl.d/99-swappiness.conf`: `vm.swappiness = 10` — RAM before
+   swap, always (Brandon, 2026-09-27; the stock 60 pushed idle memory to swap
+   while ~1 GB of page cache still showed as available).
 3. **Soften oomd** — Ubuntu default kills the user slice at 50% pressure /
    20s, far too trigger-happy on swapless boxes. Raise to 80% / 60s:
    - `systemctl set-property user@1000.service ManagedOOMMemoryPressureLimit=80%`
@@ -45,6 +48,7 @@ stays commented out. zram is the only acceptable swap.
 ## Verify
 
 - `swapon --show` → `/dev/zram0  partition  8G  prio 100`
+- `sysctl vm.swappiness` → `10`
 - `oomctl` → user-slice `Memory Pressure Limit: 80.00%`, duration `1min`
 - `python3 -c "import os; print(os.getxattr('/sys/fs/cgroup' +
   open('/proc/self/cgroup').read().split('::')[1].strip().rsplit('/',1)[0] +

@@ -423,6 +423,7 @@ else
   [[ -z "$DISK" ]] && pass "swap policy $POLICY: no disk swap" || failv "swap policy $POLICY: disk swap present: $DISK"
 fi
 [[ "$(sysctl -n vm.page-cluster 2>/dev/null)" == 0 ]] && pass "vm.page-cluster=0" || failv "vm.page-cluster != 0"
+[[ "$(sysctl -n vm.swappiness 2>/dev/null)" == 10 ]] && pass "vm.swappiness=10" || failv "vm.swappiness != 10 (RAM before swap)"
 [[ -f /etc/systemd/oomd.conf.d/20-longer-duration.conf ]] && pass "oomd softened" || failv "oomd conf missing"
 [[ -f "$HOME/.config/systemd/user/dbus.service.d/oomd-avoid.conf" ]] && pass "dbus oomd shield" || failv "dbus shield missing"
 

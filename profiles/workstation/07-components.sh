@@ -48,6 +48,18 @@ if [[ "$(conf_get component_oom_zram yes)" == yes ]]; then
       sudo sysctl --system >/dev/null
     fi
   fi
+  # RAM before swap, always (Brandon, 2026-09-27): the stock 60 swaps idle memory out while ~1 GB of
+  # page cache is still counted as available.
+  if [[ "$(sysctl -n vm.swappiness)" == 10 && -f /etc/sysctl.d/99-swappiness.conf ]]; then
+    ok "vm.swappiness = 10 (RAM before swap)"
+  else
+    warn "vm.swappiness is $(sysctl -n vm.swappiness), want 10 (RAM before swap)"
+    if (( INSTALL )); then
+      printf '# RAM before swap: swap only under real pressure (components/oom-zram.md)\nvm.swappiness = 10\n' \
+        | sudo tee /etc/sysctl.d/99-swappiness.conf >/dev/null
+      sudo sysctl --system >/dev/null
+    fi
+  fi
   if [[ -f /etc/systemd/oomd.conf.d/20-longer-duration.conf ]]; then
     ok "oomd pressure duration softened"
   else
