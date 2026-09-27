@@ -74,7 +74,9 @@ hub_hook_ensure() {
   [[ -e "$dst" ]] && warn "post-receive hook drifted" || warn "post-receive hook missing"
   (( INSTALL )) || return 0
   hub_as mkdir -p "$GIT_HUB_ROOT/.hooks" "$GIT_HUB_ROOT/log"
-  hub_as install -m 0755 "$src" "$dst" && log "wrote $dst"
+  # read as us (the hub user may not reach the kit's checkout), owned by the hub user
+  if [[ "$GIT_HUB_USER" == "$(id -un)" ]]; then install -m 0755 "$src" "$dst"
+  else sudo install -m 0755 -o "$GIT_HUB_USER" -g "$GIT_HUB_USER" "$src" "$dst"; fi && log "wrote $dst"
 }
 
 # hub_keys_ensure <pushers file>: <root>/.ssh/authorized_keys, by content.
