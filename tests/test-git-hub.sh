@@ -101,6 +101,14 @@ assert "H6a. policy switched off on an existing repo: check names it" \
 MODE=install run07
 assert "H6b. install restores it" '[[ "$(cfg books receive.denyNonFastForwards)" == true ]]'
 
+# a relative pushers path resolves next to the conf's REAL file: the conf is a
+# link into the machine's role folder, and the pushers file lives beside it
+mkdir -p "$TMP/role"; mv "$TMP/hub.conf" "$TMP/role/hub.conf"; ln -s "$TMP/role/hub.conf" "$TMP/hub.conf"
+sed -i "s|^git_hub_pushers=.*|git_hub_pushers=pushers.pub|" "$TMP/role/hub.conf"
+printf 'ssh-ed25519 AAAAC3NzaKEYROLE role\n' > "$TMP/role/pushers.pub"
+MODE=install run07
+assert "H7. relative git_hub_pushers resolves beside the conf's real file" 'grep -q KEYROLE "$AK" && ! grep -q KEYONE "$AK"'
+
 # ---------------------------------------------------------------- P. pushes
 W="$TMP/wk"; mkdir -p "$W"
 git init -q -b main "$W/books"; git -C "$W/books" commit -q --allow-empty -m one

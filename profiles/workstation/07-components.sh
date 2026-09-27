@@ -360,7 +360,10 @@ if [[ "$(conf_get component_git_hub no)" == yes ]]; then
   [[ -z "$GIT_HUB_REPOS" ]] && warn "git_hub_repos empty — the hub holds nothing"
   hub_hook_ensure
   hub_each hub_repo_ensure
-  hub_keys_ensure "$(conf_get git_hub_pushers '' | sed "s|^~|$HOME|")"
+  # relative = beside the conf's real file (the machine's role folder)
+  HUB_PUSHERS="$(conf_get git_hub_pushers '' | sed "s|^~|$HOME|")"
+  [[ -n "$HUB_PUSHERS" && "$HUB_PUSHERS" != /* ]] && HUB_PUSHERS="$(dirname "$(readlink -f "$HOST_CONF")")/$HUB_PUSHERS"
+  hub_keys_ensure "$HUB_PUSHERS"
   CLI_LINK="$HOME/.local/bin/git-hub"
   if [[ "$(readlink -f "$CLI_LINK" 2>/dev/null)" == "$KIT_DIR/components/git-hub/git-hub" ]]; then
     ok "git-hub CLI on PATH (git-hub status | forward | stage)"
