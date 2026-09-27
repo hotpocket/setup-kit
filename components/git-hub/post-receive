@@ -1,0 +1,16 @@
+#!/bin/bash
+# setup-kit git hub: post-receive (components/git-hub.md). Installed once under
+# <root>/.hooks and shared via core.hooksPath. Records every ref update as one
+# JSON line; forwarding to GitHub and deploying are the human's (git-hub CLI).
+# Never fails the push: the refs are already updated when this runs.
+root="$(cd "$(dirname "$0")/.." && pwd)"
+repo="$(basename "$PWD" .git)"
+log="$root/log/receive.jsonl"
+mkdir -p "$root/log" 2>/dev/null
+from="${SSH_CLIENT%% *}"
+while read -r old new ref; do
+  printf '{"time":"%s","repo":"%s","ref":"%s","old":"%s","new":"%s","from":"%s"}\n' \
+    "$(date -Iseconds)" "$repo" "$ref" "$old" "$new" "${from:-local}" >> "$log" 2>/dev/null
+done
+echo "hub: received into $repo.git — forwarding to GitHub and deploying are done by hand (git-hub status)"
+exit 0

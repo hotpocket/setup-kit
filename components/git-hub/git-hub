@@ -1,0 +1,98 @@
+#!/bin/bash
+# git-hub — the human's side of the hub (components/git-hub.md).
+#
+#   git-hub status                  per repo/branch: forwarded to GitHub or not
+#   git-hub forward <name> [branch] push hub branches to the GitHub upstream (your key)
+#   git-hub stage <name>            fast-forward your working clone from the hub,
+#                                   then PRINT the deploy command. Never deploys.
+#
+# Reads the hub through group membership; forwarded state is yours, kept in
+# ~/.local/state/git-hub/, so nothing here writes into the hub's repos.
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+KIT="$(cd "$(dirname "$SELF")/../.." && pwd)"
+SCRIPT_NAME="git-hub"
+source "$KIT/lib.sh"
+source "$KIT/components/git-hub/lib.sh"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/git-hub"
+
+# group added since login: re-run under sg rather than make the human log out
+if [[ -d "$GIT_HUB_ROOT" && ! -r "$GIT_HUB_ROOT" || -n "$(find "$GIT_HUB_ROOT" -maxdepth 1 -name '*.git' ! -readable 2>/dev/null | head -1)" ]] \
+   && [[ -z "${_GIT_HUB_SG:-}" ]] && getent group "$GIT_HUB_USER" | cut -d: -f4 | tr , '\n' | grep -qx "$USER"; then
+  exec env _GIT_HUB_SG=1 sg "$GIT_HUB_USER" -c "$(printf '%q ' "$SELF" "$@")"
+fi
+
+bare() { echo "$GIT_HUB_ROOT/$1.git"; }
+hg() { local d="$1"; shift; git -c safe.directory="$d" --git-dir="$d" "$@"; }
+known() { local e; for e in $GIT_HUB_REPOS; do e="${e%%:*}"; [[ "${e##*/}" == "$1" ]] && return 0; done; return 1; }
+clone_of() {
+  local e slug path
+  for e in $GIT_HUB_REPOS; do
+    slug="${e%%:*}"; path="${e#*:}"; [[ "$e" == *:* ]] || path="${slug##*/}"
+    [[ "${slug##*/}" == "$1" ]] && { echo "$GIT_HOME/$path"; return 0; }
+  done; return 1
+}
+deploy_of() { local e; for e in $(conf_get git_hub_deploy ''); do [[ "${e%%=*}" == "$1" ]] && { echo "${e#*=}"; return 0; }; done; return 1; }
+
+cmd_status() {
+  local e name d b sha fwd
+  for e in $GIT_HUB_REPOS; do
+    e="${e%%:*}"; name="${e##*/}"; d="$(bare "$name")"
+    [[ -f "$d/HEAD" ]] || { echo "$name: no bare repo at $d"; continue; }
+    local any=0
+    while read -r b sha; do
+      any=1; fwd="$(cat "$STATE/$name/$b" 2>/dev/null)"
+      if [[ "$fwd" == "$sha" ]]; then echo "$name  $b  ${sha:0:9}  forwarded"
+      else echo "$name  $b  ${sha:0:9}  not forwarded${fwd:+ (last ${fwd:0:9})}  → git-hub forward $name $b"; fi
+    done < <(hg "$d" for-each-ref --format='%(refname:short) %(objectname)' refs/heads)
+    (( any )) || echo "$name: empty (nothing pushed yet)"
+  done
+  local log="$GIT_HUB_ROOT/log/receive.jsonl"
+  [[ -r "$log" ]] && { echo; echo "last receives:"; tail -5 "$log"; }
+}
+
+cmd_forward() {
+  local name="${1:?usage: git-hub forward <name> [branch]}" only="${2:-}" d up b sha rc=0
+  known "$name" || { echo "git-hub: $name is not in git_hub_repos" >&2; return 2; }
+  d="$(bare "$name")"; up="$(hg "$d" config --get hub.upstream)"
+  [[ -n "$up" ]] || { echo "git-hub: $name.git has no hub.upstream" >&2; return 2; }
+  while read -r b sha; do
+    [[ -n "$only" && "$b" != "$only" ]] && continue
+    echo "$name $b ${sha:0:9} → $up"
+    # no --force, ever: a non-fast-forward is refused upstream and merged by hand
+    if hg "$d" push "$up" "refs/heads/$b:refs/heads/$b"; then
+      mkdir -p "$STATE/$name"; echo "$sha" > "$STATE/$name/$b"
+    else rc=1; echo "git-hub: $name $b not forwarded (upstream refused — fetch it, merge, push to the hub)" >&2; fi
+  done < <(hg "$d" for-each-ref --format='%(refname:short) %(objectname)' refs/heads)
+  return "$rc"
+}
+
+cmd_stage() {
+  local name="${1:?usage: git-hub stage <name>}" d clone head cur dep
+  known "$name" || { echo "git-hub: $name is not in git_hub_repos" >&2; return 2; }
+  d="$(bare "$name")"; clone="$(clone_of "$name")"
+  [[ -d "$clone/.git" ]] || { echo "git-hub: no working clone at $clone" >&2; return 2; }
+  head="$(hg "$d" symbolic-ref --short HEAD)"
+  cur="$(git -C "$clone" symbolic-ref --short HEAD 2>/dev/null)"
+  [[ "$cur" == "$head" ]] || { echo "git-hub: $clone is on '$cur', not $head — check out $head first" >&2; return 1; }
+  if [[ -n "$(git -C "$clone" status --porcelain --untracked-files=no)" ]]; then
+    echo "git-hub: $clone has uncommitted changes (dirty) — commit or stash, then stage again" >&2; return 1
+  fi
+  git -c safe.directory="$d" -C "$clone" fetch -q "$d" "$head" || return 1
+  git -C "$clone" merge -q --ff-only FETCH_HEAD \
+    || { echo "git-hub: $clone has diverged from the hub's $head — merge by hand" >&2; return 1; }
+  echo "$name: $clone at $(git -C "$clone" rev-parse --short HEAD) (hub $head)"
+  if dep="$(deploy_of "$name")"; then
+    echo "deploy is yours to run:"
+    echo "  cd $clone && $dep"
+  else
+    echo "no git_hub_deploy entry for $name — nothing to deploy"
+  fi
+}
+
+case "${1:-status}" in
+  status)  cmd_status ;;
+  forward) shift; cmd_forward "$@" ;;
+  stage)   shift; cmd_stage "$@" ;;
+  -h|--help|help) sed -n '2,11p' "$SELF" | sed 's/^# \{0,1\}//' ;;
+  *) echo "git-hub: unknown command '$1' (status | forward | stage)" >&2; exit 2 ;;
+esac

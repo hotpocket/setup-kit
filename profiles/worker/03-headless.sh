@@ -251,4 +251,20 @@ else
   esac
 fi
 
+# ---- 8. git hub: where this box's commits go instead of GitHub -------------
+# components/git-hub.md. git_hub=<host> is the ONE place the hub's address
+# lives: it becomes the HostName of the ssh alias `git-hub`, and every routed
+# clone's origin is git-hub:<name>.git. Moving the hub = change git_hub, re-run.
+# The kit never pushes; the first push from each clone seeds the hub.
+section "git hub ($MODE)"
+GIT_HUB="$(conf_get git_hub '')"
+if [[ -z "$GIT_HUB" ]]; then
+  ok "git hub: off (git_hub unset) — remotes left as they are"
+else
+  source "$(dirname "$0")/../../components/git-hub/lib.sh"
+  hub_alias_ensure "$GIT_HUB"
+  [[ -z "$GIT_HUB_REPOS" ]] && warn "git hub: git_hub_repos empty — no clone routes through $GIT_HUB"
+  hub_each hub_remote_ensure
+fi
+
 exit 0

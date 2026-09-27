@@ -345,6 +345,33 @@ else
   ok "t3code: opt-in, currently '$T3_WANT' (flip component_t3code=yes to enable)"
 fi
 
+# ------------------------------------------------------------- git-hub
+# Bare repos a worker pushes to instead of GitHub; the human forwards and
+# deploys (components/git-hub.md). Mechanism only: which repos, which pushers
+# and which deploy command are the host conf's (the machine's role).
+if [[ "$(conf_get component_git_hub no)" == yes ]]; then
+  section "git-hub ($MODE) — components/git-hub.md"
+  source "$KIT_DIR/components/git-hub/lib.sh"
+  hub_user_ensure
+  if [[ ! -d "$GIT_HUB_ROOT" ]]; then
+    warn "hub root $GIT_HUB_ROOT missing"
+    (( INSTALL )) && { sudo mkdir -p "$GIT_HUB_ROOT"; sudo chown "$GIT_HUB_USER:$GIT_HUB_USER" "$GIT_HUB_ROOT"; }
+  fi
+  [[ -z "$GIT_HUB_REPOS" ]] && warn "git_hub_repos empty — the hub holds nothing"
+  hub_hook_ensure
+  hub_each hub_repo_ensure
+  hub_keys_ensure "$(conf_get git_hub_pushers '' | sed "s|^~|$HOME|")"
+  CLI_LINK="$HOME/.local/bin/git-hub"
+  if [[ "$(readlink -f "$CLI_LINK" 2>/dev/null)" == "$KIT_DIR/components/git-hub/git-hub" ]]; then
+    ok "git-hub CLI on PATH (git-hub status | forward | stage)"
+  else
+    warn "git-hub CLI not linked at ${CLI_LINK/#$HOME/\~}"
+    (( INSTALL )) && { mkdir -p "$(dirname "$CLI_LINK")"; ln -sfn "$KIT_DIR/components/git-hub/git-hub" "$CLI_LINK"; }
+  fi
+else
+  ok "git-hub: opt-in, currently '$(conf_get component_git_hub no)' (flip component_git_hub=yes to host bare repos)"
+fi
+
 # ------------------------------------------------------------- codex
 # OpenAI's Codex CLI — the second agent t3code fronts (ChatGPT Plus/Pro/
 # Business plans include it). Default OFF. A musl binary from OpenAI's own
