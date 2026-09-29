@@ -116,7 +116,7 @@ hub_user_ensure() {
     ok "$USER reads the hub (group $GIT_HUB_USER)"
   else
     warn "$USER is not in group $GIT_HUB_USER — git-hub status/forward/stage can't read the repos"
-    do_or_say sudo usermod -aG "$GIT_HUB_USER" "$USER" && hint "takes effect at next login (git-hub uses sg meanwhile)"
+    do_or_say sudo usermod -aG "$GIT_HUB_USER" "$USER" && hint "takes effect at next login (git-hub uses sg or sudo -g meanwhile)"
   fi
 }
 

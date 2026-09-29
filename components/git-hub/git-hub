@@ -18,7 +18,9 @@ STATE="${XDG_STATE_HOME:-$HOME/.local/state}/git-hub"
 # group added since login: re-run under sg rather than make the human log out
 if [[ -d "$GIT_HUB_ROOT" && ! -r "$GIT_HUB_ROOT" || -n "$(find "$GIT_HUB_ROOT" -maxdepth 1 -name '*.git' ! -readable 2>/dev/null | head -1)" ]] \
    && [[ -z "${_GIT_HUB_SG:-}" ]] && getent group "$GIT_HUB_USER" | cut -d: -f4 | tr , '\n' | grep -qx "$USER"; then
-  exec env _GIT_HUB_SG=1 sg "$GIT_HUB_USER" -c "$(printf '%q ' "$SELF" "$@")"
+  # sg/newgrp are not installed on Ubuntu 26.04; sudo -g keeps the user, adds the group
+  if command -v sg >/dev/null; then exec env _GIT_HUB_SG=1 sg "$GIT_HUB_USER" -c "$(printf '%q ' "$SELF" "$@")"
+  else exec sudo -g "$GIT_HUB_USER" env _GIT_HUB_SG=1 "$SELF" "$@"; fi
 fi
 
 bare() { echo "$GIT_HUB_ROOT/$1.git"; }
