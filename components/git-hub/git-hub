@@ -101,7 +101,7 @@ cmd_stage() {
     || { echo "git-hub: $clone has diverged from the hub's $head — merge by hand" >&2; return 1; }
   echo "$name: $clone at $(git -C "$clone" rev-parse --short HEAD) (hub $head)"
   if dep="$(deploy_of "$name")"; then
-    echo "deploy is yours to run:"
+    echo "deploy:"
     echo "  cd $clone && $dep"
   else
     echo "no git_hub_deploy entry for $name — nothing to deploy"

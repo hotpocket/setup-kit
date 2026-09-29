@@ -1,5 +1,5 @@
 #!/bin/bash
-# git hub — shared by the hub (07-components), the worker (03-headless §8) and
+# git hub — shared by the hub (07-components), the worker (03-headless §7) and
 # the git-hub CLI. Spec: components/git-hub.md. Expects lib.sh already sourced.
 #
 # Both sides list repos like clone_repos: owner/repo[:path]. The bare repo is

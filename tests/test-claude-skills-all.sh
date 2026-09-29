@@ -13,7 +13,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 H="$TMP/home"; CONDUCT="$H/git/.configs/claude-conduct"; GSTACK="$H/git/gstack"
 # fake repos: .git so ensure_repo says "present" and never pulls
 mkdir -p "$H/git/.configs/.git" "$GSTACK/.git" "$CONDUCT/agents" "$CONDUCT/skills/conduct/templates"
-touch "$CONDUCT/skills/conduct/templates/vault-digest" "$CONDUCT/skills/conduct/templates/deny-git-push.sh"
+touch "$CONDUCT/skills/conduct/templates/vault-digest"
 for s in conduct vault filmstrip vet wargame zebra; do mkdir -p "$CONDUCT/skills/$s"; echo "---" > "$CONDUCT/skills/$s/SKILL.md"; done
 mkdir -p "$CONDUCT/skills/not-a-skill"              # no SKILL.md: must be skipped
 echo "---" > "$GSTACK/SKILL.md"

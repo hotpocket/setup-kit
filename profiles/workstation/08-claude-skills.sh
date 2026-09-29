@@ -72,8 +72,7 @@ esac; }
 # a pre-vault-digest claude-conduct left ~/bin/vault-digest unlinkable forever).
 AGENTS_SRC="$HOME/git/.configs/claude-conduct/agents"
 VD_SRC="$HOME/git/.configs/claude-conduct/skills/conduct/templates/vault-digest"
-DGP_SRC="$HOME/git/.configs/claude-conduct/skills/conduct/templates/deny-git-push.sh"
-WANT_PATHS=("$VD_SRC" "$DGP_SRC" "$AGENTS_SRC")
+WANT_PATHS=("$VD_SRC" "$AGENTS_SRC")
 for s in $SKILLS; do
   p="$(skill_path "$s")"; [[ -n "$p" ]] && WANT_PATHS+=("$p")
 done
@@ -292,21 +291,3 @@ else
   warn "vault-digest template missing (claude-conduct subtree not present?)"
 fi
 
-# No-push guard in ~/bin: the PreToolUse hook registered in the global
-# .claude/settings.json (same .configs repo) mechanically denies any agent
-# `git push`. The registration and this script MUST land together — that's
-# why conduct lives inside .configs. Canonical source is the conduct template.
-if [[ -f "$DGP_SRC" ]]; then
-  [[ -x "$DGP_SRC" ]] || do_or_say chmod +x "$DGP_SRC"
-  if [[ -L "$HOME/bin/deny-git-push.sh" \
-        && "$(readlink -f "$HOME/bin/deny-git-push.sh")" == "$(readlink -f "$DGP_SRC")" ]]; then
-    ok "~/bin/deny-git-push.sh linked"
-  else
-    warn "~/bin/deny-git-push.sh not linked"
-    do_or_say mkdir -p "$HOME/bin"
-    do_or_say ln -sfnT "$DGP_SRC" "$HOME/bin/deny-git-push.sh"
-  fi
-else
-  warn "deny-git-push template missing (claude-conduct subtree not present?)"
-  miss "claude-skills: settings.json registers deny-git-push.sh but script is absent"
-fi

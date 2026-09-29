@@ -14,7 +14,6 @@ packages, toolchains, configs — idempotently.
   - `worker check|install` — headless media/AI worker VM (`profiles/worker/`): the same
     pass loop over symlinks to the workstation phases it shares plus `03-headless`
     (multi-user.target at boot, sshd, linger, nvidia held under unattended-upgrades,
-    `git_push=allow|deny` → the `~/.claude/git-push-allowed` marker the conduct hook reads,
     tailnet doctor (the `tailscale` package rides `group_worker` from apt —
     headless skips the snap phase — but `tailscale up` and
     `tailscale set --operator=$USER` are the human's; the second is what
@@ -61,11 +60,9 @@ packages, toolchains, configs — idempotently.
 - **Manifests are generated** — `capture/90-generate-manifests.py` writes `manifests/apt/*`. Edit the generator (its strings become the file comments), not the `.list` files by hand — a regen overwrites them.
 - **Two repos** — setup-kit owns machine-level provisioning; `~/git/.configs` (private) owns user dotfiles/bin/dconf and is cloned + run by phase 06. setup-kit never duplicates dotfiles.
 
-## Git — pushes follow the marker
+## Git
 
-- **`~/.claude/git-push-allowed` present** (a worker's `03-headless` writes it for `git_push=allow`; Beast-VM's was placed by Brandon, 2026-09-28, so he can ship remotely by voice): Claude pushes after committing and says what was pushed and where.
-- **No marker:** NEVER run `git push`; after committing, report the commit and stop.
-- **Never force-push, on any box.** The marker allows every push — force is governed by this line, not by the hook.
+- Claude pushes after committing and says what was pushed and where. Never force-push.
 - On the hub box, "pushing to GitHub" is `git-hub forward <name>` (components/git-hub.md).
 
 ## Gotchas

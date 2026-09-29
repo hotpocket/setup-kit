@@ -2,7 +2,7 @@
 
 **Status:** opt-in (`component_git_hub=yes` on the hub; `git_hub=<host>` on a worker).
 Code: `components/git-hub/` (lib, hook, `git-hub` CLI); hub side in
-`profiles/workstation/07-components.sh`, worker side in `profiles/worker/03-headless.sh` §8.
+`profiles/workstation/07-components.sh`, worker side in `profiles/worker/03-headless.sh` §7.
 Calibration: `tests/test-git-hub.sh`.
 
 ## Why
@@ -11,7 +11,8 @@ A worker (ai-3090) commits to repos outside its domain — the PAT that pushes i
 own line is scoped, so those commits sat on the box awaiting a "fetch request".
 Widening the PAT gives an unattended LLM-driven box write access to GitHub. Instead
 the worker pushes to a **hub**: bare repos on a machine the human controls. What
-leaves the hub for GitHub, and what gets deployed, is the human's act.
+leaves the hub for GitHub, and what gets deployed, happens on the hub box
+(`git-hub forward`, then the repo's deploy script — Claude there runs both).
 
 ```
 worker ──ssh, git-shell only──▶ hub:/srv/git/<name>.git ──human: git-hub forward──▶ GitHub
@@ -66,8 +67,8 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
 - Bare repos are created **empty**; the first push from the worker seeds them with
   its full history (workers are usually ahead of GitHub — that is the point).
 - `post-receive` (one copy under `<root>/.hooks`, `core.hooksPath`) appends one JSON
-  line per ref to `<root>/log/receive.jsonl` and tells the pusher that forwarding
-  and deploying are the human's. It cannot fail a push.
+  line per ref to `<root>/log/receive.jsonl` and tells the pusher how to forward
+  and deploy. It cannot fail a push.
 - The human reads through group `git` (the kit adds the user; `core.sharedRepository=group`).
 - `git-hub status` — per repo/branch: hub head vs last forwarded. Local state only
   (`~/.local/state/git-hub/`), no network.
@@ -78,7 +79,7 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
   (`$GIT_HOME/<path>`) from the hub, refusing a dirty tree or a diverged branch, then
   prints the `git_hub_deploy` command. **It never deploys.**
 
-## Worker side (`03-headless` §8)
+## Worker side (`03-headless` §7)
 
 key → alias block → for each `git_hub_repos` clone: `origin` → `git-hub:<name>.git`,
 the old GitHub URL kept as remote `github` (fetch still works with a read-only PAT)

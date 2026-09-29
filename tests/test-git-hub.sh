@@ -14,7 +14,7 @@
 #      a changed pushers file is drift, reconciled by content.
 #   P. pushes into the hub: fast-forward accepted and logged as JSON; forced
 #      non-fast-forward refused; branch deletion refused.
-#   W. worker (03-headless §8): off when git_hub is unset; check changes nothing;
+#   W. worker (03-headless §7): off when git_hub is unset; check changes nothing;
 #      install writes key + alias + re-points origin (old URL kept as `github`)
 #      and the probe reaches the hub; idempotent; CHANGING git_hub moves only the
 #      alias's HostName — the remote URLs stay put (the durability claim).

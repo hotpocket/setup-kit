@@ -39,4 +39,4 @@ then test `curl … | bash` on a fresh 26.04 box.
 
 ## Hard rules
 
-- **Never push.** Brandon pushes, on his own schedule. This applies to both repos.
+- Claude pushes after committing and says what was pushed and where. Never force-push.
