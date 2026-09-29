@@ -179,4 +179,25 @@ assert "C4a. stage fast-forwards a clean clone to hub main" '(( rc == 0 )) && [[
 assert "C4b. stage prints the deploy command and does NOT run it" \
   'grep -q "scripts/deploy-site.sh" "$TMP/out" && [[ ! -e "$TMP/DEPLOYED" ]]'
 
+# forward with a token: the upstream is GitHub, the box has no YubiKey in reach
+# (Brandon drives it remotely), so a fine-grained token file serves the push.
+# A git stub records GitHub pushes instead of making them; everything else is real git.
+git -C "$W/books" push -q "$ROOT/wbt.git" main:main >/dev/null 2>&1
+git --git-dir="$ROOT/wbt.git" config hub.upstream git@github.com:acme/wbt.git
+cat > "$BIN/git" <<'S'
+#!/bin/bash
+for a in "$@"; do case "$a" in *github.com*) printf '%s|%s|%s\n' "$*" "${GIT_CONFIG_KEY_0:-}" "${GIT_CONFIG_VALUE_0:-}" >> "$TMP/gh.calls"; exit 0 ;; esac; done
+exec /usr/bin/git "$@"
+S
+chmod +x "$BIN/git"; : > "$TMP/gh.calls"
+cli forward wbt
+assert "C5a. no token file: forwards over the ssh upstream (the human's key)" \
+  'grep -q "push git@github.com:acme/wbt.git refs/heads/main:refs/heads/main" "$TMP/gh.calls"'
+mkdir -p "$HH/.config/setup-kit"; printf 'tok123\n' > "$HH/.config/setup-kit/hub-forward-token"; : > "$TMP/gh.calls"
+cli forward wbt
+AUTH="Authorization: Basic $(printf 'x-access-token:tok123' | base64 -w0)"
+assert "C5b. token file: forwards over https with the token as a header, not in argv or output" \
+  'grep -qF "push https://github.com/acme/wbt.git refs/heads/main:refs/heads/main|http.https://github.com/.extraHeader|$AUTH" "$TMP/gh.calls" && ! grep -q "tok123" "$TMP/out" && ! cut -d"|" -f1 "$TMP/gh.calls" | grep -q tok123'
+rm -f "$BIN/git"
+
 echo "  $pass passed, $fail failed"; (( fail == 0 ))

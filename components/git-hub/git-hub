@@ -52,6 +52,23 @@ cmd_status() {
   [[ -r "$log" ]] && { echo; echo "last receives:"; tail -5 "$log"; }
 }
 
+# A token file (fine-grained PAT, Contents read/write) lets forward run with no
+# YubiKey in reach — Brandon drives the hub box remotely. It rides in the env as
+# an http header: never argv (ps shows argv), never output. No file: the ssh
+# upstream and the human's own key, as before.
+TOKEN_FILE="$(conf_get git_hub_forward_token "$HOME/.config/setup-kit/hub-forward-token" | sed "s|^~|$HOME|")"
+push_up() {  # push_up <bare> <upstream> <refspec>
+  local d="$1" up="$2" ref="$3" slug
+  if [[ -s "$TOKEN_FILE" && "$up" == git@github.com:* ]]; then
+    slug="${up#git@github.com:}"
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraHeader" \
+    GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$(head -1 "$TOKEN_FILE")" | base64 -w0)" \
+      hg "$d" push "https://github.com/$slug" "$ref"
+  else
+    hg "$d" push "$up" "$ref"
+  fi
+}
+
 cmd_forward() {
   local name="${1:?usage: git-hub forward <name> [branch]}" only="${2:-}" d up b sha rc=0
   known "$name" || { echo "git-hub: $name is not in git_hub_repos" >&2; return 2; }
@@ -59,9 +76,9 @@ cmd_forward() {
   [[ -n "$up" ]] || { echo "git-hub: $name.git has no hub.upstream" >&2; return 2; }
   while read -r b sha; do
     [[ -n "$only" && "$b" != "$only" ]] && continue
-    echo "$name $b ${sha:0:9} → $up"
+    echo "$name $b ${sha:0:9} → $up$([[ -s "$TOKEN_FILE" && "$up" == git@github.com:* ]] && echo " (token)")"
     # no --force, ever: a non-fast-forward is refused upstream and merged by hand
-    if hg "$d" push "$up" "refs/heads/$b:refs/heads/$b"; then
+    if push_up "$d" "$up" "refs/heads/$b:refs/heads/$b"; then
       mkdir -p "$STATE/$name"; echo "$sha" > "$STATE/$name/$b"
     else rc=1; echo "git-hub: $name $b not forwarded (upstream refused — fetch it, merge, push to the hub)" >&2; fi
   done < <(hg "$d" for-each-ref --format='%(refname:short) %(objectname)' refs/heads)
