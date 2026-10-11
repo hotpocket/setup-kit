@@ -45,6 +45,8 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
 | `component_git_hub` | hub | `yes` provisions the hub. |
 | `git_hub_root` | hub | default `/srv/git` (the `git` user's home). |
 | `git_hub_pushers` | hub | file of public keys allowed to push, one per line; the kit renders them into the `git` user's `authorized_keys`, each prefixed `restrict`. |
+| `git_hub_review_to` | hub | `server:project` where `git-hub release` opens review threads (`beast-vm:setup-kit`). Unset: it names what waits. |
+| `git_hub_content` | hub | `name=glob,glob ...` — paths (bash globs, `*` crosses `/`) that forward without review, beyond `vault/*` `docs/*`. |
 | `git_hub_deploy` | hub | `name=command ...` — what `git-hub stage <name>` tells the human to run. Printed, never run. |
 
 ## Authentication: worker → hub
@@ -78,6 +80,19 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
 - `git-hub stage <name>` — fast-forwards the human's working clone
   (`$GIT_HOME/<path>`) from the hub, refusing a dirty tree or a diverged branch, then
   prints the `git_hub_deploy` command. **It never deploys.**
+- `git-hub release` — the release pipeline (global CLAUDE.md, "What is live runs from
+  main"). A worker's *done* is a push of main to the hub; a user path unit on
+  `receive.jsonl` (`git-hub-release.path`, a 30-min timer as backstop) runs this:
+  - base = GitHub's main (`ls-remote`), not local state, so a hand forward is seen.
+  - hub behind GitHub → hub main fast-forwarded (back-propagation). Diverged → named, nothing moves.
+  - hub ahead, every changed path content (`vault/*`, `docs/*`, plus `git_hub_content`)
+    and no secret / >50 MB blob → forwarded unattended, no model spent.
+  - otherwise one review thread per repo in `git_hub_review_to` (`t3x start`), leased
+    for `git_hub_review_lease_hours` (default 6): Opus runs the repo's gate, Sol reviews
+    code with broad impact, then `git-hub verdict <name> <sha> pass|reject "<line>"`.
+    pass forwards **exactly that sha**; reject holds it until main moves again.
+  - hub branches already in main are deleted. Feature branches are never merged or forwarded.
+  - every outcome is one line in `~/.local/state/git-hub/release.log`.
 
 ## Worker side (`03-headless` §7)
 
@@ -90,5 +105,4 @@ first `git push origin <branch>` from the worker, named in the handoff.
 
 - Machine role (which repos, which pushers, which deploy command) lives in the
   per-VM answer file in the private infra repo; this repo holds the mechanism only.
-- Automatic forwarding (the control-VM design: post-receive pushes on with a sealed
-  PAT) is a later `git_hub_forward=auto`. Today forwarding is manual on purpose.
+- Code forwards only on a review verdict; content forwards unattended (`git-hub release`).

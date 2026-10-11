@@ -383,6 +383,7 @@ if [[ "$(conf_get component_git_hub no)" == yes ]]; then
     warn "git-hub CLI not linked at ${CLI_LINK/#$HOME/\~}"
     (( INSTALL )) && { mkdir -p "$(dirname "$CLI_LINK")"; ln -sfn "$KIT_DIR/components/git-hub/git-hub" "$CLI_LINK"; }
   fi
+  hub_release_units_ensure
 else
   ok "git-hub: opt-in, currently '$(conf_get component_git_hub no)' (flip component_git_hub=yes to host bare repos)"
 fi

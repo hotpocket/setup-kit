@@ -188,3 +188,49 @@ hub_remote_ensure() {
     miss "git-hub: $name unreachable through git-hub"
   fi
 }
+
+# hub_release_units_ensure: user units that run `git-hub release` whenever the
+# hub receives a push (a path unit on the receive log), with a timer as a
+# backstop for a missed event. Written by content; install enables them.
+hub_release_units_ensure() {
+  local ud="$HOME/.config/systemd/user" drift=0 u want
+  declare -A units=(
+    [git-hub-release.service]="[Unit]
+Description=git-hub release: forward content, open reviews for code, on hub main moving
+[Service]
+Type=oneshot
+TimeoutStartSec=30min
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/git-hub release"
+    [git-hub-release.path]="[Unit]
+Description=git-hub release on every push the hub receives
+[Path]
+PathChanged=$GIT_HUB_ROOT/log/receive.jsonl
+Unit=git-hub-release.service
+[Install]
+WantedBy=default.target"
+    [git-hub-release.timer]="[Unit]
+Description=git-hub release backstop, for a push whose event was missed
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Unit=git-hub-release.service
+[Install]
+WantedBy=timers.target"
+  )
+  for u in "${!units[@]}"; do
+    want="${units[$u]}"
+    [[ -f "$ud/$u" && "$(cat "$ud/$u")" == "$want" ]] && continue
+    drift=1; warn "$u missing or drifted"
+    (( INSTALL )) && { mkdir -p "$ud"; printf '%s\n' "$want" > "$ud/$u.tmp" && mv -f "$ud/$u.tmp" "$ud/$u"; log "wrote $ud/$u"; }
+  done
+  (( drift && INSTALL )) && systemctl --user daemon-reload
+  # enablement is its own state: an install that died after writing the files
+  # would otherwise read "current" forever and never start them
+  for u in git-hub-release.path git-hub-release.timer; do
+    systemctl --user is-enabled -q "$u" 2>/dev/null && systemctl --user is-active -q "$u" 2>/dev/null && continue
+    drift=1; warn "$u not enabled and running"
+    (( INSTALL )) && systemctl --user enable --now "$u" && log "$u: enabled"
+  done
+  (( drift )) || ok "git-hub-release units current (reviews open in $(conf_get git_hub_review_to 'nowhere: git_hub_review_to unset'))"
+}
