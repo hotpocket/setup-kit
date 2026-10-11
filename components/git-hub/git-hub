@@ -141,17 +141,25 @@ content_globs() {
   for e in $(conf_get git_hub_content ''); do [[ "${e%%=*}" == "$1" ]] && echo "${e#*=}" | tr , ' '; done
 }
 # agent instruction files steer whoever reads the repo next: never content, wherever they sit
-is_instructions() { case "${1##*/}" in CLAUDE.md|AGENTS.md|GEMINI.md|SKILL.md|*.prompt.md|.cursorrules) return 0 ;; esac
-                    [[ "/$1" == */.claude/* || "/$1" == */.codex/* ]]; }
-is_content() {  # is_content <name> <bare> <base> <head>: every changed path matches
-  local - f g hit globs; set -f; globs="$(content_globs "$1")"   # -f: the globs match paths, not this dir
-  # --no-renames: a move reports BOTH paths, so code moved into docs/ is still code
+is_instructions() {  # names any agent reads as instructions, any case, any variant (AGENTS.override.md)
+  local p="/${1,,}" n="${1##*/}"; n="${n,,}"
+  case "$n" in claude*.md|agents*.md|gemini*.md|skill.md|*.prompt.md|*.instructions.md|copilot-instructions.md|.cursorrules|.windsurfrules) return 0 ;; esac
+  [[ "$p" == */.claude/* || "$p" == */.codex/* || "$p" == */.cursor/* || "$p" == */.agents/* || "$p" == */.github/* ]]
+}
+is_content() {  # is_content <name> <bare> <base> <head>: every path any commit in the range touches matches
+  local - f g hit globs list; set -f; globs="$(content_globs "$1")"   # -f: the globs match paths, not this dir
+  # every commit, not the endpoints: code added then removed still leaves in the history.
+  # --no-renames: a move names both paths. -m: merges against each parent.
+  # Into a file first, status checked: a listing that fails must not read as "no paths".
+  list="$(mktemp)" || return 1
+  if ! hg "$2" log --format= --name-only --no-renames -m -z "$3..$4" > "$list"; then rm -f "$list"; return 1; fi
   while IFS= read -r -d '' f; do
-    is_instructions "$f" && return 1
+    [[ -z "$f" ]] && continue
+    is_instructions "$f" && { rm -f "$list"; return 1; }
     hit=0; for g in $globs; do [[ "$f" == $g ]] && { hit=1; break; }; done
-    (( hit )) || return 1
-  done < <(hg "$2" diff --name-only --no-renames -z "$3" "$4")
-  return 0
+    (( hit )) || { rm -f "$list"; return 1; }
+  done < "$list"   # already NUL-delimited: no helper whose failure would read as "no paths"
+  rm -f "$list"; return 0
 }
 # a key or a big blob can't be taken back once on GitHub: those go to a human-led
 # review. Every blob new in the range (history too, not just the end state:
@@ -165,13 +173,16 @@ suspicious() {  # suspicious <bare> <base> <head>: prints why, or nothing
     || { echo "could not list the range's objects"; return; }
   big="$(awk '$1=="blob" && $3>50000000 {print $2; exit}' <<<"$objs")"
   [[ -n "$big" ]] && echo "blob over 50 MB: $big"
-  # grep -c reads to the end: grep -q would exit at the first hit, SIGPIPE the
-  # writer, and under pipefail turn "found" into "failed" (Sol, 2026-10-11)
-  # PIPESTATUS is read inside the substitution: outside it, it is the assignment's
-  n="$( { awk '$1=="blob" {print $2}' <<<"$objs" | hg "$d" cat-file --batch; hg "$d" log --format=%B "$2..$3"; } \
-        | grep -acE "$SECRET_RE"; echo "rc ${PIPESTATUS[0]} ${PIPESTATUS[1]}")"
-  [[ "$n" =~ ^([0-9]+)$'\n'"rc 0 "[01]$ ]] || { echo "could not read the range's blobs"; return; }
-  n="${BASH_REMATCH[1]}"
+  # each producer to a file with its status checked, then one grep that reads
+  # to the end: a pipeline reports only its last stage (an unread blob looked
+  # clean), and grep -q SIGPIPEs its writer (Sol, 2026-10-11, twice)
+  local tmp; tmp="$(mktemp)" || { echo "no temp file for the scan"; return; }
+  if ! awk '$1=="blob" {print $2}' <<<"$objs" | hg "$d" cat-file --batch > "$tmp" \
+     || ! hg "$d" log --format=%B "$2..$3" >> "$tmp"; then
+    rm -f "$tmp"; echo "could not read the range's blobs"; return
+  fi
+  n="$(grep -acE "$SECRET_RE" "$tmp")"; local rc=$?; rm -f "$tmp"
+  (( rc <= 1 )) || { echo "could not scan the range's blobs"; return; }
   (( ${n:-0} > 0 )) && echo "possible secret in the range"
   return 0
 }
@@ -201,10 +212,10 @@ release_one() {  # release_one <name>
   b="$(hg "$d" symbolic-ref --short HEAD 2>/dev/null)" || return 0
   hub="$(hg "$d" rev-parse -q --verify "refs/heads/$b")" || return 0
   release_prune "$name" "$d" "$b" "$hub"
-  upsha="$(up_git "$d" "$up" ls-remote "refs/heads/$b" 2>/dev/null | cut -f1)"
+  upsha="$(exec 9>&-; up_git "$d" "$up" ls-remote "refs/heads/$b" 2>/dev/null | cut -f1)"   # no child keeps the lock
   [[ -n "$upsha" ]] || { echo "$name: upstream $b unreadable or absent -- skipped"; return 0; }
   [[ "$upsha" == "$hub" ]] && return 0
-  hg "$d" cat-file -e "$upsha^{commit}" 2>/dev/null || up_git "$d" "$up" fetch -q "refs/heads/$b" 2>/dev/null
+  hg "$d" cat-file -e "$upsha^{commit}" 2>/dev/null || up_git "$d" "$up" fetch -q "refs/heads/$b" 2>/dev/null 9>&-
   if hg "$d" merge-base --is-ancestor "$hub" "$upsha" 2>/dev/null; then
     # GitHub is ahead (a commit made on this box): carry it back to the hub
     hg "$d" update-ref "refs/heads/$b" "$upsha" "$hub" \
@@ -215,16 +226,29 @@ release_one() {  # release_one <name>
     echo "$name $b: hub ${hub:0:9} and GitHub ${upsha:0:9} diverged -- merge by hand, then push to the hub"; return 0
   fi
   base="$upsha"
+  # A rejected sha anywhere in the range holds the range: nothing forwards
+  # unattended past a reject. With only content after it the reject stands and
+  # no review reopens (bookshelf pushes data every few minutes; re-reviewing the
+  # same rejected code each time would burn Sol). Code after it: a new review.
+  # Per sha, so a late reject of an ancestor can't reopen a rejected head.
+  local r held=""
+  for r in "$RSTATE/$name.rejected.d"/*; do
+    [[ -e "$r" ]] || continue; r="${r##*/}"
+    [[ "$r" == "$hub" ]] && return 0
+    hg "$d" merge-base --is-ancestor "$r" "$hub" 2>/dev/null || continue
+    [[ "$r" == "$base" ]] && continue
+    hg "$d" merge-base --is-ancestor "$base" "$r" 2>/dev/null || continue
+    held="$r"
+    [[ -z "$(suspicious "$d" "$r" "$hub")" ]] && is_content "$name" "$d" "$r" "$hub" && return 0
+  done
   why="$(suspicious "$d" "$base" "$hub")" || why="${why:-secret scan failed}"   # fails closed
-  if [[ -z "$why" ]] && is_content "$name" "$d" "$base" "$hub"; then
+  if [[ -z "$held" && -z "$why" ]] && is_content "$name" "$d" "$base" "$hub"; then
     if push_up "$d" "$up" "$hub:refs/heads/$b" >/dev/null 2>&1; then
       atomic "$STATE/$name/$b" "$hub"
       rlog "$name $b ${base:0:9}..${hub:0:9}: forwarded (content only)"
     else rlog "$name $b ${hub:0:9}: content forward refused upstream"; fi
     return 0
   fi
-  rej="$(cat "$RSTATE/$name.rejected" 2>/dev/null)"
-  [[ "$rej" == "$hub" ]] && return 0
   read -r lsha lexp 2>/dev/null < "$RSTATE/$name.lease"
   if [[ -n "${lsha:-}" ]] && (( ${lexp:-0} > $(date +%s) )); then return 0; fi
   if [[ -z "$REVIEW_TO" ]]; then
@@ -238,6 +262,15 @@ release_one() {  # release_one <name>
        "$(review_brief "$name" "$b" "$base" "$hub")${why:+$'\n'"Held from unattended forward: $why."}" 2>&1 >/dev/null 9>&-)"; then
     rlog "$name $b ${base:0:9}..${hub:0:9}: review thread opened in $REVIEW_TO${why:+ ($why)}"
   else
+    local half
+    half="$(grep -oE 'started [^ ,]+, but its first message failed' <<<"$err" | awk '{print $2}' | head -1)"
+    if [[ -n "$half" ]]; then
+      # the thread exists: keep the lease (no second thread) and hand it the brief
+      if timeout 120 t3x send "$half" --from "git-hub release" "$(review_brief "$name" "$b" "$base" "$hub")${why:+$'\n'"Held from unattended forward: $why."}" >/dev/null 2>&1 9>&-; then
+        rlog "$name $b ${base:0:9}..${hub:0:9}: review thread $half opened (brief resent)${why:+ ($why)}"
+      else rlog "$name $b ${hub:0:9}: review thread $half exists but has no brief -- send it by hand or let the lease expire"; fi
+      return 0
+    fi
     rm -f "$RSTATE/$name.lease"
     echo "$name $b ${hub:0:9}: could not open a review thread in $REVIEW_TO -- next run retries (t3x said: $(tail -1 <<<"$err"))" >&2
   fi
@@ -282,10 +315,14 @@ cmd_verdict() {
     fi
     atomic "$STATE/$name/$b" "$sha"
     [[ "${lsha:-}" == "$sha" ]] && rm -f "$RSTATE/$name.lease"
+    local r   # clear only the rejections this pass covers: a newer rejected head stays rejected
+    for r in "$RSTATE/$name.rejected.d"/*; do
+      [[ -e "$r" ]] && hg "$d" merge-base --is-ancestor "${r##*/}" "$sha" 2>/dev/null && rm -f "$r"
+    done
     rlog "$name $b ${sha:0:9}: forwarded after review -- $line"
     if deploy_of "$name" >/dev/null; then echo "runs live: git-hub stage $name $sha, then: $(deploy_of "$name")"; fi
   else
-    atomic "$RSTATE/$name.rejected" "$sha"
+    atomic "$RSTATE/$name.rejected.d/$sha" "$line"
     [[ "${lsha:-}" == "$sha" ]] && rm -f "$RSTATE/$name.lease"
     rlog "$name $b ${sha:0:9}: rejected -- $line"
   fi

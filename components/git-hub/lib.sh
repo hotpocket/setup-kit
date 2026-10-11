@@ -232,5 +232,11 @@ WantedBy=timers.target"
     drift=1; warn "$u not enabled and running"
     (( INSTALL )) && systemctl --user enable --now "$u" && log "$u: enabled"
   done
+  # user units run only while the user manager does: without linger they stop at
+  # logout and never start at boot, and the pushes come in as the hub user
+  if [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != yes ]]; then
+    drift=1; warn "linger off for $USER: git-hub-release stops at logout and never starts at boot"
+    (( INSTALL )) && loginctl enable-linger "$USER" && log "linger enabled for $USER"
+  fi
   (( drift )) || ok "git-hub-release units current (reviews open in $(conf_get git_hub_review_to 'nowhere: git_hub_review_to unset'))"
 }

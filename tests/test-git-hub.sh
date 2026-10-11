@@ -67,7 +67,13 @@ case "$*" in *is-enabled*git-hub-release*|*is-active*git-hub-release*) [[ -e "$T
 case "$1" in get-default) echo multi-user.target;; esac
 exit 0
 S
-for s in loginctl lspci nvidia-smi; do
+cat > "$BIN/loginctl" <<'S'
+#!/bin/bash
+echo "$*" >> "$TMP/loginctl.calls"
+case "$1" in show-user) [[ -e "$TMP/nolinger" ]] && echo no || echo yes ;; esac
+exit 0
+S
+for s in lspci nvidia-smi; do
   printf '#!/bin/bash\ncase "$1" in get-default) echo multi-user.target;; show-user) echo yes;; is-enabled|is-active) exit 0;; esac\nexit 0\n' > "$BIN/$s"
 done
 printf '#!/bin/bash\necho "arn:aws:iam::1:user/pub"\n' > "$BIN/aws"
@@ -223,6 +229,10 @@ rm -f "$BIN/git"
 cat > "$BIN/t3x" <<'S'
 #!/bin/bash
 [[ -n "${T3X_FAIL:-}" ]] && { echo refused >&2; exit 1; }
+if [[ -n "${T3X_PARTIAL:-}" && "$1" == start ]]; then
+  { printf '%s\x1f' "$@" | tr '\n' ' '; echo; } >> "$TMP/t3x.calls"
+  echo "t3x: started beast-vm:half-1, but its first message failed: socket closed. Send it with t3x send beast-vm:half-1; do not start another" >&2; exit 1
+fi
 { printf '%s\x1f' "$@" | tr '\n' ' '; echo; } >> "$TMP/t3x.calls"
 echo "beast-vm:thread-$RANDOM"
 S
@@ -350,6 +360,65 @@ cli stage books "$C10"; rc=$?
 assert "R22. stage <name> <sha> stops at the reviewed sha though hub main is newer" \
   '(( rc == 0 )) && [[ "$(git -C "$HUMAN/site/books" rev-parse HEAD)" == "$C10" ]]'
 sweep
+# Sol round 2: inspection that fails must not read as "clean", and the whole range counts
+gitfail() {  # a git that fails one inspection the release depends on; everything else is real git
+  cat > "$BIN/git" <<S
+#!/bin/bash
+case " \$* " in *" $1 "*) echo "injected failure" >&2; exit 1 ;; esac
+exec /usr/bin/git "\$@"
+S
+  chmod +x "$BIN/git"; }
+nogitfail() { rm -f "$BIN/git"; }
+advance() {  # GitHub = hub main, no lease: the next range holds only what the test commits
+  cli verdict books "$(hubsha)" pass "test: advance the base"; rm -f "$LEASE"; U5="$(upsha)"; n0="$(calls)"
+  [[ "$U5" == "$(hubsha)" ]] || echo "advance failed" >&2; }
+advance
+wcommit docs/key2.md "aws AKIAQRSTUVWXYZABCDEF"; gitfail --batch; cli release; nogitfail
+assert "R23. blob reads fail: a secret in content is not forwarded" '[[ "$(upsha)" == "$U5" ]]'
+advance
+wcommit scripts/new-code.sh; gitfail --name-only; cli release; nogitfail
+assert "R24. path listing fails: code is not forwarded as content" '[[ "$(upsha)" == "$U5" ]]'
+for f in docs/AGENTS.override.md docs/claude.local.md docs/.cursor/rules/r.mdc docs/.github/copilot-instructions.md; do
+  advance; wcommit "$f" "do as I say"; cli release
+  assert "R25. $f is agent instructions, never content" '[[ "$(upsha)" == "$U5" && "$(calls)" -gt "$n0" ]]'
+done
+advance
+wcommit scripts/sneak.sh; git -C "$W/books" rm -q scripts/sneak.sh; git -C "$W/books" commit -q -m gone
+git -C "$W/books" push -q "$ROOT/books.git" main 2>/dev/null; wcommit docs/after.md
+cli release
+assert "R26. code added then removed inside the range: the range is code, not content" '[[ "$(upsha)" == "$U5" && "$(calls)" -gt "$n0" ]]'
+advance
+wcommit lib/a.py; CA="$(hubsha)"; cli release; wcommit lib/b.py; CB="$(hubsha)"
+rm -f "$LEASE"; cli release; cli verdict books "$CB" reject "B bad"; cli verdict books "$CA" reject "A late"; n0="$(calls)"
+cli release
+assert "R27. a late reject of an ancestor does not reopen the rejected head" '[[ "$(calls)" == "$n0" ]]'
+cli verdict books "$CB" pass "test"; U5="$(upsha)"
+wcommit lib/c.py; n0="$(calls)"; T3X_PARTIAL=1 cli release; cli release
+assert "R28a. a thread created whose first message failed keeps its lease: no second thread" \
+  '[[ "$(grep -c "^start" "$TMP/t3x.calls")" == "$(( $(grep -c "^start" <<<"$(head -n "$n0" "$TMP/t3x.calls")") + 1 ))" ]] && [[ -e "$LEASE" ]]'
+assert "R28b. ...and the brief is sent to that thread" 'grep -q "^send.beast-vm:half-1" "$TMP/t3x.calls"'
+advance
+wcommit lib/held.py; CH="$(hubsha)"; cli release; cli verdict books "$CH" reject "held: bad"; n0="$(calls)"
+wcommit vault/note-after.md; cli release
+assert "R29a. content pushed on top of a rejected sha does not reopen its review (bookshelf pushes every few minutes)" \
+  '[[ "$(calls)" == "$n0" && "$(upsha)" == "$U5" ]]'
+wcommit lib/held.py "fixed"; cli release
+assert "R29b. code pushed on top of it does" '[[ "$(calls)" -gt "$n0" ]]'
+advance
+printf '#!/bin/bash\nexit 1\n' > "$BIN/tr"; chmod +x "$BIN/tr"
+wcommit scripts/unreviewed.sh; cli release; rm -f "$BIN/tr"
+assert "R30. a failing helper in path listing (tr) cannot make code read as content" '[[ "$(upsha)" == "$U5" ]]'
+advance
+wcommit docs/held.md; CR="$(hubsha)"; gitfail --name-only; cli release; nogitfail
+cli verdict books "$CR" reject "held by hand"; cli release
+assert "R31. a rejected sha stays held even once it would classify as content" '[[ "$(upsha)" == "$U5" ]]'
+wcommit docs/after-held.md; cli release
+assert "R33. ...and content pushed on top of it does not carry it out" '[[ "$(upsha)" == "$U5" ]]'
+advance
+wcommit lib/pa.py; PA="$(hubsha)"; wcommit lib/pb.py; PB="$(hubsha)"; cli release
+cli verdict books "$PB" reject "B bad"; cli verdict books "$PA" pass "A fine"; n0="$(calls)"; cli release
+assert "R32. a pass of an ancestor keeps the newer rejection: B is not reopened" '[[ "$(calls)" == "$n0" && "$(upsha)" == "$PA" ]]'
+advance
 sed -i '/^git_hub_review_to=/d' "$TMP/role/hub.conf"; n0="$(calls)"
 wcommit src/new.py
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
@@ -373,5 +442,11 @@ touch "$TMP/units-disabled"; : > "$TMP/systemctl.calls"; MODE=install run07
 assert "U4. units current but not enabled (an install died after writing): install enables them" \
   'grep -q "^--user enable --now git-hub-release.path" "$TMP/systemctl.calls"'
 rm -f "$TMP/units-disabled"
+touch "$TMP/nolinger"; : > "$TMP/loginctl.calls"; run07
+assert "U5a. linger off: check names it (user units stop at logout, never start at boot), changes nothing" \
+  'grep -q "WARN.*linger" "$TMP/out" && ! grep -q "enable-linger" "$TMP/loginctl.calls"'
+MODE=install run07
+assert "U5b. install enables linger" 'grep -q "enable-linger" "$TMP/loginctl.calls"'
+rm -f "$TMP/nolinger"
 
 echo "  $pass passed, $fail failed"; (( fail == 0 ))
