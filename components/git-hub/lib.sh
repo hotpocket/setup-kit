@@ -200,7 +200,7 @@ Description=git-hub release: forward content, open reviews for code, on hub main
 [Service]
 Type=oneshot
 TimeoutStartSec=30min
-Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.local/bin:%h/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.local/bin/git-hub release"
     [git-hub-release.path]="[Unit]
 Description=git-hub release on every push the hub receives

@@ -222,7 +222,7 @@ rm -f "$BIN/git"
 # t3x stub records what would start a review thread; T3X_FAIL makes it fail.
 cat > "$BIN/t3x" <<'S'
 #!/bin/bash
-[[ -n "${T3X_FAIL:-}" ]] && exit 1
+[[ -n "${T3X_FAIL:-}" ]] && { echo refused >&2; exit 1; }
 { printf '%s\x1f' "$@" | tr '\n' ' '; echo; } >> "$TMP/t3x.calls"
 echo "beast-vm:thread-$RANDOM"
 S
@@ -278,7 +278,7 @@ echo "$C3 1" > "$LEASE"
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
 assert "R8. an expired lease (reviewer died) is retried" '[[ "$(calls)" == 4 ]]'
 rm -f "$LEASE"; T3X_FAIL=1 cli release
-assert "R9a. a failed start leaves no lease" '[[ "$(calls)" == 4 && ! -e "$LEASE" ]]'
+assert "R9a. a failed start leaves no lease, and says why" '[[ "$(calls)" == 4 && ! -e "$LEASE" ]] && grep -q "t3x said: refused" "$TMP/out"'
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
 assert "R9b. ...so the next run retries" '[[ "$(calls)" == 5 ]]'
 cli verdict books "$C3" pass "ok"
@@ -366,6 +366,8 @@ assert "U2. install: a path unit on the receive log, a timer backstop, a service
   'grep -q "PathChanged=$ROOT/log/receive.jsonl" "$UD/git-hub-release.path" && grep -q "OnUnitActiveSec=" "$UD/git-hub-release.timer" && grep -q "git-hub release" "$UD/git-hub-release.service"'
 MODE=install run07
 assert "U3. second install: no warning for the release units" '! grep -q "WARN.*git-hub-release" "$TMP/out"'
+assert "U2b. the service PATH reaches bun (t3x is a bun script; without it every review start failed, 2026-10-11)" \
+  'grep -q "^Environment=PATH=.*%h/.bun/bin" "$UD/git-hub-release.service"'
 assert "U3b. the service has a wall-clock limit (a hung child can't hold the lock forever)" 'grep -q "^TimeoutStartSec=" "$UD/git-hub-release.service"'
 touch "$TMP/units-disabled"; : > "$TMP/systemctl.calls"; MODE=install run07
 assert "U4. units current but not enabled (an install died after writing): install enables them" \

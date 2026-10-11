@@ -233,12 +233,13 @@ release_one() {  # release_one <name>
   fi
   # lease first: a crash after the start costs one duplicate thread after expiry, never a lost review
   atomic "$RSTATE/$name.lease" "$hub $(( $(date +%s) + LEASE_H * 3600 ))"
-  if timeout 120 t3x start "$REVIEW_TO" --from "git-hub release" --title "Release review: $name ${hub:0:9}" \
-       "$(review_brief "$name" "$b" "$base" "$hub")${why:+$'\n'"Held from unattended forward: $why."}" >/dev/null 9>&-; then
+  local err
+  if err="$(timeout 120 t3x start "$REVIEW_TO" --from "git-hub release" --title "Release review: $name ${hub:0:9}" \
+       "$(review_brief "$name" "$b" "$base" "$hub")${why:+$'\n'"Held from unattended forward: $why."}" 2>&1 >/dev/null 9>&-)"; then
     rlog "$name $b ${base:0:9}..${hub:0:9}: review thread opened in $REVIEW_TO${why:+ ($why)}"
   else
     rm -f "$RSTATE/$name.lease"
-    echo "$name $b ${hub:0:9}: could not open a review thread in $REVIEW_TO -- next run retries" >&2
+    echo "$name $b ${hub:0:9}: could not open a review thread in $REVIEW_TO -- next run retries (t3x said: $(tail -1 <<<"$err"))" >&2
   fi
 }
 release_prune() {  # release_prune <name> <bare> <head> <hubsha>: branches already in main go
