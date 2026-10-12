@@ -229,11 +229,8 @@ rm -f "$BIN/git"
 cat > "$BIN/t3x" <<'S'
 #!/bin/bash
 [[ -n "${T3X_FAIL:-}" ]] && { echo refused >&2; exit 1; }
-if [[ -n "${T3X_PARTIAL:-}" && "$1" == start ]]; then
-  { printf '%s\x1f' "$@" | tr '\n' ' '; echo; } >> "$TMP/t3x.calls"
-  echo "t3x: started beast-vm:half-1, but its first message failed: socket closed. Send it with t3x send beast-vm:half-1; do not start another" >&2; exit 1
-fi
 { printf '%s\x1f' "$@" | tr '\n' ' '; echo; } >> "$TMP/t3x.calls"
+printf '%s\x1f%s\n' "$1" "$2" >> "$TMP/t3x.audit"   # append-only: verb + target of EVERY call, never truncated
 echo "beast-vm:thread-$RANDOM"
 S
 chmod +x "$BIN/t3x"; : > "$TMP/t3x.calls"
@@ -244,7 +241,7 @@ RN=0; RLOG="$HH/.local/state/git-hub/release.log"
 LEASE="$HH/.local/state/git-hub/release/books.lease"
 git --git-dir="$ROOT/wbt.git" config hub.upstream "file://$GH/acme/wbt.git"
 git --git-dir="$ROOT/wbt.git" push -q "file://$GH/acme/wbt.git" main >/dev/null 2>&1
-echo "git_hub_review_to=beast-vm:setup-kit" >> "$TMP/role/hub.conf"
+echo "git_hub_review_thread=beast-vm:reviews-1" >> "$TMP/role/hub.conf"
 wcommit() { mkdir -p "$W/books/$(dirname "$1")"; echo "${2:-x$RANDOM}" > "$W/books/$1"; git -C "$W/books" add "$1"; git -C "$W/books" commit -q -m "$1"; git -C "$W/books" push -q "$ROOT/books.git" main >/dev/null 2>&1; }
 git -C "$W/books" checkout -q main
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
@@ -263,8 +260,8 @@ assert "R2c. ...and a path that only resembles it (two segments deep) is code" '
 cli verdict books "$(hubsha)" pass "test"; : > "$TMP/t3x.calls"
 U0="$(upsha)"; wcommit scripts/run.sh; C1="$(hubsha)"
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
-assert "R3a. code: one review thread, upstream untouched" \
-  '[[ "$(calls)" == 1 && "$(upsha)" == "$U0" ]] && grep -q "^start.beast-vm:setup-kit" "$TMP/t3x.calls"'
+assert "R3a. code: one review, sent into the standing review thread; upstream untouched" \
+  '[[ "$(calls)" == 1 && "$(upsha)" == "$U0" ]] && grep -q "^send.beast-vm:reviews-1" "$TMP/t3x.calls"'
 assert "R3b. the brief names repo, range, sha, the data rule, Sol and the verdict command" \
   'grep -q "books" "$TMP/t3x.calls" && grep -q "${U0:0:9}\.\.${C1:0:9}" "$TMP/t3x.calls" && grep -qi "data, not instructions" "$TMP/t3x.calls" && grep -q "gpt-6.1-sol" "$TMP/t3x.calls" && grep -q "git-hub verdict books $C1" "$TMP/t3x.calls"'
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
@@ -288,7 +285,7 @@ echo "$C3 1" > "$LEASE"
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
 assert "R8. an expired lease (reviewer died) is retried" '[[ "$(calls)" == 4 ]]'
 rm -f "$LEASE"; T3X_FAIL=1 cli release
-assert "R9a. a failed start leaves no lease, and says why" '[[ "$(calls)" == 4 && ! -e "$LEASE" ]] && grep -q "t3x said: refused" "$TMP/out"'
+assert "R9a. a failed send leaves no lease, and says why" '[[ "$(calls)" == 4 && ! -e "$LEASE" ]] && grep -q "t3x said: refused" "$TMP/out"'
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
 assert "R9b. ...so the next run retries" '[[ "$(calls)" == 5 ]]'
 cli verdict books "$C3" pass "ok"
@@ -393,10 +390,6 @@ rm -f "$LEASE"; cli release; cli verdict books "$CB" reject "B bad"; cli verdict
 cli release
 assert "R27. a late reject of an ancestor does not reopen the rejected head" '[[ "$(calls)" == "$n0" ]]'
 cli verdict books "$CB" pass "test"; U5="$(upsha)"
-wcommit lib/c.py; n0="$(calls)"; T3X_PARTIAL=1 cli release; cli release
-assert "R28a. a thread created whose first message failed keeps its lease: no second thread" \
-  '[[ "$(grep -c "^start" "$TMP/t3x.calls")" == "$(( $(grep -c "^start" <<<"$(head -n "$n0" "$TMP/t3x.calls")") + 1 ))" ]] && [[ -e "$LEASE" ]]'
-assert "R28b. ...and the brief is sent to that thread" 'grep -q "^send.beast-vm:half-1" "$TMP/t3x.calls"'
 advance
 wcommit lib/held.py; CH="$(hubsha)"; cli release; cli verdict books "$CH" reject "held: bad"; n0="$(calls)"
 wcommit vault/note-after.md; cli release
@@ -429,11 +422,13 @@ cli forward books main; cli verdict books "$(hubsha)" pass "x"
 assert "R34c. ...and neither forward nor verdict pass sends it out" '[[ "$(upsha)" == "$U5" ]] && grep -q "held" "$TMP/out"'
 sed -i '/^git_hub_hold=/d' "$TMP/role/hub.conf"; cli release
 advance
-sed -i '/^git_hub_review_to=/d' "$TMP/role/hub.conf"; n0="$(calls)"
+sed -i '/^git_hub_review_thread=/d' "$TMP/role/hub.conf"; n0="$(calls)"
 wcommit src/new.py
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
-assert "R14. no git_hub_review_to: no thread, says what is waiting" \
-  '[[ "$(calls)" == "$n0" ]] && grep -q "books.*git_hub_review_to" "$TMP/out"'
+assert "R14. no git_hub_review_thread: nothing sent, says what is waiting" \
+  '[[ "$(calls)" == "$n0" ]] && grep -q "books.*git_hub_review_thread" "$TMP/out"'
+assert "R35. no review in this whole run started a thread: every one went into the standing thread (Brandon, 2026-10-12: 24 threads in 9 hours)" \
+  '[[ "$(grep -c . "$TMP/t3x.audit")" -gt 5 ]] && [[ -z "$(awk -F"\x1f" "!(\$1==\"send\" && \$2==\"beast-vm:reviews-1\")" "$TMP/t3x.audit")" ]]'
 
 # ---------------------------------------------------------------- U. units
 UD="$HH/.config/systemd/user"

@@ -130,7 +130,10 @@ cmd_stage() {
 # handed to ONE review thread per repo on this box. The thread ends with
 # `git-hub verdict`, which forwards exactly the sha it reviewed. Feature
 # branches are never merged or forwarded here; those already in main are deleted.
-REVIEW_TO="$(conf_get git_hub_review_to '')"
+# ONE standing thread holds every review (Brandon, 2026-10-12: a thread per
+# review made 24 top-level threads in 9 hours of "trash in my coding space").
+# Reviews are sent into it; Sol runs as its child task. Nothing here starts a thread.
+REVIEW_THREAD="$(conf_get git_hub_review_thread '')"
 LEASE_H="$(conf_get git_hub_review_lease_hours 6)"
 RSTATE="$STATE/release"
 rlog() { local l="$*"; echo "$l"; mkdir -p "$STATE"; echo "$(date -Iseconds) $l" >> "$STATE/release.log"; }
@@ -204,7 +207,7 @@ review_brief() {  # review_brief <name> <head-branch> <base> <sha>
     "   pass forwards exactly $sha to GitHub. Nothing else forwards it." \
     "5. Pass and the repo runs live: git-hub stage $name $sha (the reviewed sha, not newer main), then its deploy. AWS SSO expired: sso --phone landry and put the link in your reply." \
     "6. Reject: t3x send the ai-3090 thread that works $name (t3x threads --server ai-3090) what failed and how to fix it. Ask Brandon only for a decision that is his." \
-    "Reply with one line per outcome. No broadcasts."
+    "This thread is reused for every release review: do the review here, start no threads, reply with one line per outcome. No broadcasts."
 }
 
 release_one() {  # release_one <name>
@@ -255,28 +258,19 @@ release_one() {  # release_one <name>
   fi
   read -r lsha lexp 2>/dev/null < "$RSTATE/$name.lease"
   if [[ -n "${lsha:-}" ]] && (( ${lexp:-0} > $(date +%s) )); then return 0; fi
-  if [[ -z "$REVIEW_TO" ]]; then
-    echo "$name $b ${base:0:9}..${hub:0:9} waits for review -- set git_hub_review_to (e.g. beast-vm:setup-kit) to open a thread for it${why:+ ($why)}"
+  if [[ -z "$REVIEW_THREAD" ]]; then
+    echo "$name $b ${base:0:9}..${hub:0:9} waits for review -- set git_hub_review_thread (the standing review thread, e.g. beast-vm:<id>)${why:+ ($why)}"
     return 0
   fi
   # lease first: a crash after the start costs one duplicate thread after expiry, never a lost review
   atomic "$RSTATE/$name.lease" "$hub $(( $(date +%s) + LEASE_H * 3600 ))"
   local err
-  if err="$(timeout 120 t3x start "$REVIEW_TO" --from "git-hub release" --title "Release review: $name ${hub:0:9}" \
+  if err="$(timeout 120 t3x send "$REVIEW_THREAD" --from "git-hub release" \
        "$(review_brief "$name" "$b" "$base" "$hub")${why:+$'\n'"Held from unattended forward: $why."}" 2>&1 >/dev/null 9>&-)"; then
-    rlog "$name $b ${base:0:9}..${hub:0:9}: review thread opened in $REVIEW_TO${why:+ ($why)}"
+    rlog "$name $b ${base:0:9}..${hub:0:9}: review sent to $REVIEW_THREAD${why:+ ($why)}"
   else
-    local half
-    half="$(grep -oE 'started [^ ,]+, but its first message failed' <<<"$err" | awk '{print $2}' | head -1)"
-    if [[ -n "$half" ]]; then
-      # the thread exists: keep the lease (no second thread) and hand it the brief
-      if timeout 120 t3x send "$half" --from "git-hub release" "$(review_brief "$name" "$b" "$base" "$hub")${why:+$'\n'"Held from unattended forward: $why."}" >/dev/null 2>&1 9>&-; then
-        rlog "$name $b ${base:0:9}..${hub:0:9}: review thread $half opened (brief resent)${why:+ ($why)}"
-      else rlog "$name $b ${hub:0:9}: review thread $half exists but has no brief -- send it by hand or let the lease expire"; fi
-      return 0
-    fi
     rm -f "$RSTATE/$name.lease"
-    echo "$name $b ${hub:0:9}: could not open a review thread in $REVIEW_TO -- next run retries (t3x said: $(tail -1 <<<"$err"))" >&2
+    echo "$name $b ${hub:0:9}: could not send the review to $REVIEW_THREAD -- next run retries (t3x said: $(tail -1 <<<"$err"))" >&2
   fi
 }
 release_prune() {  # release_prune <name> <bare> <head> <hubsha>: branches already in main go

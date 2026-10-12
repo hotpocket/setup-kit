@@ -45,7 +45,7 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
 | `component_git_hub` | hub | `yes` provisions the hub. |
 | `git_hub_root` | hub | default `/srv/git` (the `git` user's home). |
 | `git_hub_pushers` | hub | file of public keys allowed to push, one per line; the kit renders them into the `git` user's `authorized_keys`, each prefixed `restrict`. |
-| `git_hub_review_to` | hub | `server:project` where `git-hub release` opens review threads (`beast-vm:setup-kit`). Unset: it names what waits. |
+| `git_hub_review_thread` | hub | the ONE standing thread (`server:<thread id>`) every review is sent into (`t3x send`); Sol runs as its child. Nothing starts a thread. Unset: it names what waits. |
 | `git_hub_content` | hub | `name=glob,glob ...` — paths (bash globs, `*` crosses `/`) that forward without review, beyond `vault/*` `docs/*`. |
 | `git_hub_deploy` | hub | `name=command ...` — what `git-hub stage <name>` tells the human to run. Printed, never run. |
 
@@ -87,7 +87,7 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
   - hub behind GitHub → hub main fast-forwarded (back-propagation). Diverged → named, nothing moves.
   - hub ahead, every changed path content (`vault/*`, `docs/*`, plus `git_hub_content`)
     and no secret / >50 MB blob → forwarded unattended, no model spent.
-  - otherwise one review thread per repo in `git_hub_review_to` (`t3x start`), leased
+  - otherwise the review is sent into the standing `git_hub_review_thread` (`t3x send`), one per repo at a time, leased
     for `git_hub_review_lease_hours` (default 6): Opus runs the repo's gate, Sol reviews
     code with broad impact, then `git-hub verdict <name> <sha> pass|reject "<line>"`.
     pass forwards **exactly that sha**; reject holds it until main moves again.
