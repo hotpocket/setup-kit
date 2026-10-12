@@ -419,6 +419,16 @@ wcommit lib/pa.py; PA="$(hubsha)"; wcommit lib/pb.py; PB="$(hubsha)"; cli releas
 cli verdict books "$PB" reject "B bad"; cli verdict books "$PA" pass "A fine"; n0="$(calls)"; cli release
 assert "R32. a pass of an ancestor keeps the newer rejection: B is not reopened" '[[ "$(calls)" == "$n0" && "$(upsha)" == "$PA" ]]'
 advance
+echo 'git_hub_hold="books"' >> "$TMP/role/hub.conf"
+wcommit docs/paused.md; git -C "$W/books" push -q "$ROOT/books.git" "$(hubsha):refs/heads/feature/held-done" 2>/dev/null; cli release
+assert "R34a. a held repo: content is not forwarded, a merged branch is not deleted, it says held" \
+  '[[ "$(upsha)" == "$U5" ]] && git --git-dir="$ROOT/books.git" rev-parse -q --verify feature/held-done >/dev/null && grep -q "books.*held" "$TMP/out"'
+wcommit lib/paused.py; cli release
+assert "R34b. ...code opens no review" '[[ "$(calls)" == "$n0" && "$(upsha)" == "$U5" ]]'
+cli forward books main; cli verdict books "$(hubsha)" pass "x"
+assert "R34c. ...and neither forward nor verdict pass sends it out" '[[ "$(upsha)" == "$U5" ]] && grep -q "held" "$TMP/out"'
+sed -i '/^git_hub_hold=/d' "$TMP/role/hub.conf"; cli release
+advance
 sed -i '/^git_hub_review_to=/d' "$TMP/role/hub.conf"; n0="$(calls)"
 wcommit src/new.py
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
