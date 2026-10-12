@@ -422,6 +422,45 @@ cli forward books main; cli verdict books "$(hubsha)" pass "x"
 assert "R34c. ...and neither forward nor verdict pass sends it out" '[[ "$(upsha)" == "$U5" ]] && grep -q "held" "$TMP/out"'
 sed -i '/^git_hub_hold=/d' "$TMP/role/hub.conf"; cli release
 advance
+# lease owner liveness: T3's own run records (global rule: a lease is reclaimed when its owner is dead)
+T3DB="$TMP/t3.sqlite"
+sqlite3 "$T3DB" "create table orchestration_v2_projection_runs (run_id text primary key, thread_id text, ordinal int, provider text, provider_thread_id text, status text, requested_at text, completed_at text, payload_json text, provider_instance_id text);
+  create table orchestration_v2_projection_threads (thread_id text primary key, payload_json text);
+  create table orchestration_v2_projection_runtime_requests (runtime_request_id text primary key, thread_id text, node_id text, provider_turn_id text, kind text, status text, created_at text, resolved_at text, payload_json text);"
+run_state() {  # run_state <review thread's run status> [<its Sol child's run status>]
+  sqlite3 "$T3DB" "delete from orchestration_v2_projection_runs; delete from orchestration_v2_projection_threads; delete from orchestration_v2_projection_runtime_requests;
+    insert into orchestration_v2_projection_threads values ('reviews-1','{}');
+    insert into orchestration_v2_projection_runs values ('r$RANDOM','reviews-1',1,'claudeAgent',null,'$1','t',null,'{}',null);"
+  [[ -n "${2:-}" ]] && sqlite3 "$T3DB" "insert into orchestration_v2_projection_threads values ('thread:delegated-task:sol-1','{\"lineage\":{\"parentThreadId\":\"reviews-1\"}}');
+    insert into orchestration_v2_projection_runs values ('c$RANDOM','thread:delegated-task:sol-1',1,'codex',null,'$2','t',null,'{}',null);"
+  return 0; }
+printf '%s\n' "git_hub_t3_db=$T3DB" git_hub_review_grace_secs=0 >> "$TMP/role/hub.conf"
+wcommit lib/live.py; run_state running; cli release; s0="$(calls)"; cli release
+assert "R36a. the review's run is running: the lease is kept, nothing resent" '[[ "$(calls)" == "$s0" && -e "$LEASE" ]]'
+run_state completed running; cli release
+assert "R36g. the review's own run finished but its Sol child task is running (async): kept" '[[ "$(calls)" == "$s0" && -e "$LEASE" ]]'
+run_state completed; sqlite3 "$T3DB" "insert into orchestration_v2_projection_runtime_requests values ('q1','reviews-1','n',null,'user_input','pending','t',null,'{}');"; cli release
+assert "R36i. its run finished but a question to Brandon is pending: kept" '[[ "$(calls)" == "$s0" && -e "$LEASE" ]]'
+run_state completed; sqlite3 "$T3DB" "delete from orchestration_v2_projection_threads;"; cli release
+assert "R36j. the review thread has no state in this database (another server, wrong db): kept, not read as dead" '[[ "$(calls)" == "$s0" && -e "$LEASE" ]]'
+run_state completed; cli release
+assert "R36b. its run finished with no verdict: reclaimed on the next tick and resent, and it says so" \
+  '[[ "$(calls)" == "$((s0 + 1))" ]] && grep -q "books.*lease reclaimed" "$RLOG"'
+cli release; cli release
+assert "R36c. a second run ended without a verdict: not resent again, one line asks for a human" \
+  '[[ "$(calls)" == "$((s0 + 1))" && "$(grep -c "books.*needs a human" "$RLOG")" == 1 ]]'
+read -r _ _ rest <<<"$(cat "$LEASE")"; echo "$(hubsha) 1 $rest" > "$LEASE"; cli release
+assert "R36h. a lease that expires after 'needs a human' does not restart the loop" '[[ "$(calls)" == "$((s0 + 1))" ]]'
+wcommit lib/live2.py; cli release
+assert "R36d. main moved past a stuck review: the new head is reviewed" '[[ "$(calls)" == "$((s0 + 2))" ]]'
+sed -i 's/^git_hub_review_grace_secs=0$/git_hub_review_grace_secs=3600/' "$TMP/role/hub.conf"; cli release
+assert "R36e. just sent, no run recorded yet (within grace): kept" '[[ "$(calls)" == "$((s0 + 2))" ]]'
+sed -i 's/^git_hub_review_grace_secs=3600$/git_hub_review_grace_secs=0/' "$TMP/role/hub.conf"
+sed -i "s|^git_hub_t3_db=.*|git_hub_t3_db=$TMP/no-such.sqlite|" "$TMP/role/hub.conf"; cli release
+assert "R36f. run state unreadable: kept (expiry is the backstop), never a duplicate review" '[[ "$(calls)" == "$((s0 + 2))" ]]'
+sed -i '/^git_hub_t3_db=/d; /^git_hub_review_grace_secs=/d' "$TMP/role/hub.conf"
+advance
+advance
 sed -i '/^git_hub_review_thread=/d' "$TMP/role/hub.conf"; n0="$(calls)"
 wcommit src/new.py
 cli release; cp "$TMP/out" "$TMP/rel.$((++RN))"
