@@ -194,6 +194,15 @@ cli forward books
 assert "C2a. forward pushes hub main to the upstream" '[[ "$(git --git-dir="$GH/acme/books.git" rev-parse main)" == "$S1" ]]'
 cli status
 assert "C2b. then status says forwarded" 'grep -q "books.*main.*forwarded" "$TMP/out" && ! grep -q "books.*main.*not forwarded" "$TMP/out"'
+# a slash-named branch (feature/...) forwards AND is recorded: its state file
+# sits one directory deeper than the repo's (2026-10-15: push ok, state lost)
+git -C "$W/books" push -q "$ROOT/books.git" main:refs/heads/feature/slash >/dev/null 2>&1
+cli forward books feature/slash; rc=$?
+assert "C2c. forward of a slash-named branch succeeds and pushes it upstream" \
+  '(( rc == 0 )) && git --git-dir="$GH/acme/books.git" rev-parse -q --verify feature/slash >/dev/null'
+cli status
+assert "C2d. then status says the slash-named branch is forwarded" \
+  'grep -q "books  feature/slash .* forwarded" "$TMP/out" && ! grep -q "feature/slash.*not forwarded" "$TMP/out"'
 echo dirt > "$HUMAN/site/books/dirt"; git -C "$HUMAN/site/books" add dirt
 cli stage books; rc=$?
 assert "C3. stage refuses a dirty clone" '(( rc != 0 )) && grep -qi "dirty\|uncommitted" "$TMP/out"'
@@ -512,5 +521,39 @@ assert "U5a. linger off: check names it (user units stop at logout, never start 
 MODE=install run07
 assert "U5b. install enables linger" 'grep -q "enable-linger" "$TMP/loginctl.calls"'
 rm -f "$TMP/nolinger"
+
+# ---------------------------------------------------------------- T. forward token expiry
+# The token is a fine-grained PAT with an expiry GitHub set; a forward that starts
+# failing on that day is the first anyone hears of it. Its expiry is recorded
+# beside it (a date, not secret) and the doctor warns ahead of the day.
+TOK="$HH/.config/setup-kit/hub-forward-token"; mkdir -p "$(dirname "$TOK")"; printf 'tok123\n' > "$TOK"
+rm -f "$TOK.expires"; run07
+assert "T1. token with no recorded expiry: named, with the file to write" \
+  'grep -q "WARN.*forward token.*expiry unknown.*hub-forward-token.expires" "$TMP/out"'
+date -d "+10 days" +%F > "$TOK.expires"; run07
+assert "T2. expiry 10 days out: warned, with days left and what to do" \
+  'grep -q "WARN.*forward token expires $(cat "$TOK.expires") (10 days)" "$TMP/out" && grep -qi "new token" "$TMP/out"'
+date -d "+60 days" +%F > "$TOK.expires"; run07
+assert "T3. expiry 60 days out: ok, no token warning" \
+  'grep -q "OK.*forward token.*$(cat "$TOK.expires")" "$TMP/out" && ! grep -q "WARN.*forward token" "$TMP/out"'
+date -d "-1 days" +%F > "$TOK.expires"; run07
+assert "T4. past its expiry: warned as expired" 'grep -q "WARN.*forward token EXPIRED" "$TMP/out"'
+echo "tok123" > "$TOK.expires"; run07   # the token pasted into the wrong file
+assert "T5. unreadable expiry is a warning, not a pass" 'grep -q "WARN.*forward token.*not a date" "$TMP/out"'
+assert "T6. the token never reaches the doctor output, even pasted into the expiry file" '! grep -q tok123 "$TMP/out"'
+# whole days across a spring-forward (a 23 h day): local-midnight arithmetic says one
+# short. Find an offset from today where that arithmetic is wrong -- the test sees
+# the defect before trusting the fix -- then check the doctor counts it exactly.
+echo "git_hub_token_warn_days=400" >> "$TMP/role/hub.conf"
+dst_n=""; for n in $(seq 1 366) $(seq -1 -1 -366); do
+  e="$(TZ=America/Los_Angeles date -d "$n days" +%F)"
+  (( ($(TZ=America/Los_Angeles date -d "$e" +%s) - $(TZ=America/Los_Angeles date -d "$(TZ=America/Los_Angeles date +%F)" +%s)) / 86400 != n )) && { dst_n=$n; break; }
+done
+echo "$e" > "$TOK.expires"; TZ=America/Los_Angeles run07
+assert "T8. day count is exact across a DST change (offset ${dst_n:-none found})" \
+  '[[ -n "$dst_n" ]] && grep -q "forward token.* $e (${dst_n#-} days" "$TMP/out"'
+sed -i '/^git_hub_token_warn_days=/d' "$TMP/role/hub.conf"
+rm -f "$TOK" "$TOK.expires"; run07
+assert "T7. no token file: nothing to warn about" '! grep -q "forward token" "$TMP/out"'
 
 echo "  $pass passed, $fail failed"; (( fail == 0 ))

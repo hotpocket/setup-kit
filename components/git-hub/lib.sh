@@ -11,6 +11,7 @@ GIT_HUB_REPOS="$(conf_get git_hub_repos '')"
 GIT_HUB_USER="$(conf_get git_hub_user git)"
 GIT_HUB_ROOT="$(conf_get git_hub_root /srv/git)"
 GIT_HUB_UPSTREAM_BASE="$(conf_get git_hub_upstream_base git@github.com:)"
+GIT_HUB_TOKEN_FILE="$(conf_get git_hub_forward_token "$HOME/.config/setup-kit/hub-forward-token" | sed "s|^~|$HOME|")"
 
 # hub_each <fn>: fn <name> <owner/repo> <clone dir> for every git_hub_repos entry
 hub_each() {
@@ -97,6 +98,32 @@ hub_keys_ensure() {
   printf '%s\n' "$want" | sudo tee "$ak" >/dev/null
   sudo chown root:root "$GIT_HUB_ROOT/.ssh" "$ak"; sudo chmod 755 "$GIT_HUB_ROOT/.ssh"; sudo chmod 644 "$ak"
   log "wrote $ak from $pushers"
+}
+
+# hub_token_check: the forward token's expiry, read from <token>.expires (one
+# YYYY-MM-DD line, not secret; GitHub sets the date when the token is made).
+# Warns git_hub_token_warn_days ahead, so a forward never first fails on the day.
+hub_token_check() {
+  local tok="$GIT_HUB_TOKEN_FILE" exp="$GIT_HUB_TOKEN_FILE.expires" d days
+  local warn_days; warn_days="$(conf_get git_hub_token_warn_days 21)"
+  [[ -s "$tok" ]] || return 0
+  if [[ ! -s "$exp" ]]; then
+    warn "git-hub forward token: expiry unknown — write its expiry date (YYYY-MM-DD, from GitHub's token page) to ${exp/#$HOME/\~}"
+    return 0
+  fi
+  d="$(head -1 "$exp")"
+  if [[ ! "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || ! date -u -d "$d" +%s >/dev/null 2>&1; then
+    warn "git-hub forward token: ${exp/#$HOME/\~} is not a date (want one YYYY-MM-DD line; contents not shown, they may be secret)"; return 0
+  fi
+  # both as UTC midnights: local midnights straddling DST are 23 or 25 h apart
+  days=$(( ($(date -u -d "$d" +%s) - $(date -u -d "$(date +%F)" +%s)) / 86400 ))
+  if (( days < 0 )); then
+    warn "git-hub forward token EXPIRED $d ($(( -days )) days ago) — forwards to GitHub fail while it stays. Make a new token (fine-grained, Contents read/write), replace ${tok/#$HOME/\~}, update ${exp/#$HOME/\~}"
+  elif (( days <= warn_days )); then
+    warn "git-hub forward token expires $d ($days days) — make a new token (fine-grained, Contents read/write), replace ${tok/#$HOME/\~}, update ${exp/#$HOME/\~}"
+  else
+    ok "git-hub forward token valid until $d ($days days)"
+  fi
 }
 
 # hub_user_ensure: system user, git-shell login, home = root; the human in its group

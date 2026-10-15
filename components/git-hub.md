@@ -47,6 +47,7 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
 | `git_hub_pushers` | hub | file of public keys allowed to push, one per line; the kit renders them into the `git` user's `authorized_keys`, each prefixed `restrict`. |
 | `git_hub_review_thread` | hub | the ONE standing thread (`server:<thread id>`) every review is sent into (`t3x send`); Sol runs as its child. Nothing starts a thread. Unset: it names what waits. |
 | `git_hub_content` | hub | `name=glob,glob ...` — paths (bash globs, `*` crosses `/`) that forward without review, beyond `vault/*` `docs/*`. |
+| `git_hub_forward_token` | hub | default `~/.config/setup-kit/hub-forward-token`: a fine-grained PAT (Contents read/write) `forward` uses over https when present. Its expiry date goes beside it in `<token>.expires` (one `YYYY-MM-DD` line, not secret); the doctor warns `git_hub_token_warn_days` (default 21) ahead, and names a token with no recorded expiry. |
 | `git_hub_deploy` | hub | `name=command ...` — what `git-hub stage <name>` tells the human to run. Printed, never run. |
 
 ## Authentication: worker → hub
@@ -76,7 +77,8 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
   (`~/.local/state/git-hub/`), no network.
 - `git-hub forward <name> [branch]` — pushes hub branches to the GitHub upstream as
   the human (their key — the YubiKey on a workstation). Never forces; GitHub refuses
-  a non-fast-forward and the human merges by hand.
+  a non-fast-forward and the human merges by hand. A token file
+  (`git_hub_forward_token`) serves instead when no key is in reach.
 - `git-hub stage <name>` — fast-forwards the human's working clone
   (`$GIT_HOME/<path>`) from the hub, refusing a dirty tree or a diverged branch, then
   prints the `git_hub_deploy` command. **It never deploys.**

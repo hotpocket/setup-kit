@@ -62,7 +62,7 @@ cmd_status() {
 # YubiKey in reach — Brandon drives the hub box remotely. It rides in the env as
 # an http header: never argv (ps shows argv), never output. No file: the ssh
 # upstream and the human's own key, as before.
-TOKEN_FILE="$(conf_get git_hub_forward_token "$HOME/.config/setup-kit/hub-forward-token" | sed "s|^~|$HOME|")"
+TOKEN_FILE="$GIT_HUB_TOKEN_FILE"
 up_git() {  # up_git <bare> <upstream> <push|fetch|ls-remote> <args...>
   local d="$1" up="$2" verb="$3"; shift 3
   if [[ -s "$TOKEN_FILE" && "$up" == git@github.com:* ]]; then
@@ -86,7 +86,7 @@ cmd_forward() {
     echo "$name $b ${sha:0:9} → $up$([[ -s "$TOKEN_FILE" && "$up" == git@github.com:* ]] && echo " (token)")"
     # no --force, ever: a non-fast-forward is refused upstream and merged by hand
     if push_up "$d" "$up" "refs/heads/$b:refs/heads/$b"; then
-      mkdir -p "$STATE/$name"; echo "$sha" > "$STATE/$name/$b"
+      atomic "$STATE/$name/$b" "$sha"   # b may hold a slash: atomic makes its own parent
     else rc=1; echo "git-hub: $name $b not forwarded (upstream refused — fetch it, merge, push to the hub)" >&2; fi
   done < <(hg "$d" for-each-ref --format='%(refname:short) %(objectname)' refs/heads)
   return "$rc"
