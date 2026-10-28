@@ -21,6 +21,10 @@ while IFS= read -r entry; do
   fi
   if snap list "$name" >/dev/null 2>&1; then
     ok "snap $name"
+  elif [[ "$name" == tailscale ]] && dpkg-query -W -f='${Status}' tailscale 2>/dev/null | grep -q 'ok installed'; then
+    # A second tailscaled from snap would fight the deb's over tailscale0 and
+    # drop the node off the tailnet (tests/test-tailscale-deb.sh).
+    ok "tailscale: installed from apt (pkgs.tailscale.com) — no snap copy"
   else
     warn "snap $name missing"
     # shellcheck disable=SC2086 — flags is intentionally word-split (--classic)

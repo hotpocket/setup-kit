@@ -3,12 +3,13 @@
 # methods: url=stable latest link, github=owner/repo:asset-suffix
 #          (asset-suffix is a regex anchored at the URL end — e.g.
 #          'without_gui_.*amd64.deb' picks one of several same-suffix assets),
-#          optional 4th field = group gate (host-conf group_<name>=yes)
+#          optional 4th field = group gate (host-conf group_<name>=yes);
+#          daily-use desktop apps ride `apps`, so a server box (group_apps=no) skips them
 #          manual=doctor-warns only (version-pinned vendor URLs)
-zoom	url	https://zoom.us/client/latest/zoom_amd64.deb
-discord	url	https://discord.com/api/download?platform=linux&format=deb
+zoom	url	https://zoom.us/client/latest/zoom_amd64.deb	apps
+discord	url	https://discord.com/api/download?platform=linux&format=deb	apps
 code	url	https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64
 amdgpu-top	github	Umio-Yasuno/amdgpu_top:without_gui_.*amd64.deb
 minikube	url	https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb	dev_k8s
-master-pdf-editor-5	manual	https://code-industry.net/free-pdf-editor/ — version-pinned URLs
-ganttproject	manual	https://www.ganttproject.biz/download — version-pinned URLs
+master-pdf-editor-5	manual	https://code-industry.net/free-pdf-editor/ — version-pinned URLs	apps
+ganttproject	manual	https://www.ganttproject.biz/download — version-pinned URLs	apps

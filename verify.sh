@@ -47,6 +47,11 @@ gon() { [[ "$(cv "group_${1//-/_}")" == yes ]]; }
 # headless=yes (profiles/worker): no snaps/flatpaks/debs phases ran, no
 # session exists — those checks would grade a desktop the host never wanted.
 HEADLESS=0; [[ "$(cv headless)" == yes ]] && HEADLESS=1
+# configs=no (a box without the owner's .configs): dictation/ocr/tts default
+# off, as in 07 — each serves a .configs tool. dflt KEY prints the value with
+# that default applied.
+CFG_DEF=yes; [[ "$(cv configs)" == no ]] && CFG_DEF=no
+dflt() { local v; v="$(cv "$1")"; echo "${v:-$CFG_DEF}"; }
 
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 [[ -f "$CONF" ]] || { echo "no $CONF — nothing to verify against"; exit 1; }
@@ -142,6 +147,9 @@ fi
   grp=""; [[ "$line" == *" @"* ]] && { grp="${line##*@}"; line="${line% @*}"; }
   name="${line%% *}"
   [[ -n "$grp" ]] && ! gon "$grp" && continue
+  if [[ "$name" == tailscale ]] && dpkg-query -W -f='${Status}' tailscale 2>/dev/null | grep -q 'ok installed'; then
+    pass "tailscale: from apt, not snap (one tailscaled only)"; continue
+  fi
   snap list "$name" >/dev/null 2>&1 && pass "snap: $name" || failv "snap: $name"
 done < manifests/snap.list
 (( HEADLESS )) || while IFS= read -r line; do
@@ -191,7 +199,7 @@ else failv "python: pyenv missing"; fi
 # tts venv: default on (.configs ships the clipboard TTS client + server
 # unconditionally), opt-out with component_tts=no (a worker with no desktop
 # session to speak from — the audiobook line uses Chatterbox, not kokoro).
-if [[ "$(cv component_tts)" == yes || -z "$(cv component_tts)" ]]; then
+if [[ "$(dflt component_tts)" == yes ]]; then
 TTS_PY="$HOME/.pyenv/versions/kokoro-tts/bin/python"
 [[ -x "$TTS_PY" ]] && "$TTS_PY" -c 'import kokoro,soundfile,sounddevice' 2>/dev/null \
   && pass "tts venv: kokoro/soundfile/sounddevice importable" \
@@ -265,11 +273,11 @@ else pass "codex: not wanted (component_codex=yes to enable)"; fi
 # tts flutter client: .configs ships source only (build/ gitignored); 07 builds
 # the bundle the ~/bin/tts-clipboard-flutter wrapper execs. Source ≠ usable bin.
 TTS_FL_BIN="$HOME/git/.configs/tts-flutter/build/linux/x64/release/bundle/tts_client"
-if (( ! HEADLESS )) && [[ "$(cv component_tts)" != no ]]; then
+if (( ! HEADLESS )) && [[ "$(dflt component_tts)" == yes ]]; then
 [[ -x "$TTS_FL_BIN" ]] && pass "tts flutter client bundle built" \
   || failv "tts flutter client bundle missing (run: cd ~/git/.configs/tts-flutter && flutter build linux --release)"
 fi
-if [[ "$(cv component_dictation)" == yes || -z "$(cv component_dictation)" ]]; then
+if [[ "$(dflt component_dictation)" == yes ]]; then
   VOSK_PY="$HOME/.pyenv/versions/vosk/bin/python"
   [[ -x "$VOSK_PY" ]] && "$VOSK_PY" -c 'import vosk' 2>/dev/null \
     && pass "vosk venv: vosk importable (dictation)" \
@@ -316,7 +324,8 @@ command -v gh >/dev/null && pass "gh present" || failv "gh missing"
 gon dev_core && { command -v shellcheck >/dev/null && pass "shellcheck present" || failv "shellcheck missing"; }
 
 # -- 4b. dotfiles actually wired (not just cloned) ------------------------------
-for df in .bashrc .bash_aliases .gitconfig; do
+[[ "$(cv configs)" == no ]] && pass "dotfiles: configs=no — the owner's .configs is not used here"
+[[ "$(cv configs)" == no ]] || for df in .bashrc .bash_aliases .gitconfig; do
   if [[ -L "$HOME/$df" ]] && readlink -f "$HOME/$df" | grep -q "/.configs/"; then
     pass "dotfile: $df → .configs"
   else
@@ -384,7 +393,9 @@ done < <(find "$HOME/git/.configs/bin" -maxdepth 1 -type f -executable 2>/dev/nu
 done
 
 # -- 4f. dock pins (only meaningful inside a session) ---------------------------
-if (( ! HEADLESS )) && [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; then
+if (( ! HEADLESS )) && [[ "$(cv dock)" == no ]]; then
+  pass "dock: dock=no — the user's own, not checked"
+elif (( ! HEADLESS )) && [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; then
   favs="$(gsettings get org.gnome.shell favorite-apps 2>/dev/null)"
   # manifests/dock.list is the declaration: every installed, non-gated entry
   # must be a favorite, and nothing else may be (Ubuntu's defaults included)
@@ -402,30 +413,106 @@ if (( ! HEADLESS )) && [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gs
   for n in $(grep -oE "[A-Za-z0-9_.+-]+\.desktop" <<<"$favs"); do
     printf '%s\n' "${DOCK_WANT[@]}" | grep -qxF "$n" || failv "dock: $n pinned but not in manifests/dock.list"
   done
-  # middle-click paste of the PRIMARY selection. 26.04's gschema default is
-  # false; .configs/setup.sh forces it true. A false here = the override
-  # didn't take (or got reset).
-  [[ "$(gsettings get org.gnome.desktop.interface gtk-enable-primary-paste 2>/dev/null)" == true ]] \
-    && pass "middle-click primary paste enabled" \
-    || failv "middle-click primary paste disabled (gtk-enable-primary-paste != true)"
 fi
 
-# -- 5. oom-zram component — kernel-level truth --------------------------------
-swapon --show=NAME,PRIO --noheadings 2>/dev/null | grep -q 'zram.*100' \
-  && pass "zram swap active at prio 100" || failv "zram swap not active"
-RAM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
-POLICY=$(cv swap_policy); [[ -z "$POLICY" || "$POLICY" == auto ]] \
-  && { (( RAM_MB < 16384 )) && POLICY=zram+disk || POLICY=zram-only; }
-DISK=$(swapon --show=NAME --noheadings 2>/dev/null | grep -v zram || true)
-if [[ "$POLICY" == zram+disk ]]; then
-  [[ -n "$DISK" ]] && pass "swap policy $POLICY: overflow $DISK" || failv "swap policy $POLICY: no overflow"
-else
-  [[ -z "$DISK" ]] && pass "swap policy $POLICY: no disk swap" || failv "swap policy $POLICY: disk swap present: $DISK"
+# -- 4g. clipboard component (components/clipboard.md) ---------------------------
+if [[ "$(cv component_clipboard)" == no ]]; then
+  pass "clipboard: not wanted (component_clipboard=no)"
+elif (( ! HEADLESS )); then
+  # middle-click paste of the PRIMARY selection. 26.04's gschema default is
+  # false; the component forces it true. A false here = the override didn't
+  # take (or got reset). Only inside a session.
+  if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null; then
+    [[ "$(gsettings get org.gnome.desktop.interface gtk-enable-primary-paste 2>/dev/null)" == true ]] \
+      && pass "middle-click primary paste enabled" \
+      || failv "middle-click primary paste disabled (gtk-enable-primary-paste != true)"
+  fi
+  grep -Eq "^[[:space:]]*([^#]*(&&|\\|\\||;)[[:space:]]*)?(source|\\.)[[:space:]]+[^#;]*clipboard\\.bash([[:space:]\"';]|$)" "$HOME/.bashrc" 2>/dev/null \
+    && pass "clipboard: ~/.bashrc sources clipboard.bash" \
+    || failv "clipboard: ~/.bashrc doesn't source clipboard.bash (pbcopy/copy missing)"
 fi
-[[ "$(sysctl -n vm.page-cluster 2>/dev/null)" == 0 ]] && pass "vm.page-cluster=0" || failv "vm.page-cluster != 0"
-[[ "$(sysctl -n vm.swappiness 2>/dev/null)" == 10 ]] && pass "vm.swappiness=10" || failv "vm.swappiness != 10 (RAM before swap)"
-[[ -f /etc/systemd/oomd.conf.d/20-longer-duration.conf ]] && pass "oomd softened" || failv "oomd conf missing"
-[[ -f "$HOME/.config/systemd/user/dbus.service.d/oomd-avoid.conf" ]] && pass "dbus oomd shield" || failv "dbus shield missing"
+
+# -- 5. memory safeguards — independent kernel/service observations -----------
+VROOT="${KIT_MEMORY_ROOT:-}"; VROOT="${VROOT%/}"
+RAM_MB=$(awk '/^MemTotal:/{print int($2/1024)}' "$VROOT/proc/meminfo")
+RAM_CLASS_MB=$(( (RAM_MB + 1023) / 1024 * 1024 ))
+if [[ "$(cv tmp_on_disk)" != no ]]; then
+  TMP_FS=$(findmnt -rn -o FSTYPE --target "$VROOT/tmp" 2>/dev/null)
+  case "$TMP_FS" in
+    ''|tmpfs|ramfs) failv "tmp: live ${TMP_FS:-unknown}; disk policy requires next reboot (check fstab/tmp.mount)" ;;
+    *) pass "tmp: live disk filesystem $TMP_FS" ;;
+  esac
+  grep -qx 'q /tmp 1777 root root 10d' "$VROOT/etc/tmpfiles.d/tmp.conf" 2>/dev/null \
+    && systemctl is-active --quiet systemd-tmpfiles-clean.timer \
+    && pass 'tmp: aged cleanup configured and timer active' || failv 'tmp: aged cleanup or timer missing'
+fi
+if [[ "$(cv component_oom_zram)" != no ]]; then
+  SWAP_ROWS=$(swapon --show=NAME,SIZE,PRIO --bytes --noheadings 2>/dev/null)
+  awk '$1 ~ /zram/ && $3 == 100 {found=1} END {exit !found}' <<< "$SWAP_ROWS" \
+    && pass 'zram swap active at prio 100' || failv 'zram swap not active at prio 100'
+  (( RAM_CLASS_MB < 16384 )) && WANT_ZRAM=$((RAM_MB/2)) || WANT_ZRAM=$(( RAM_MB/4 < 8192 ? RAM_MB/4 : 8192 ))
+  ZRAM_BYTES=$(awk '$1 ~ /zram/ {s+=$2} END {printf "%.0f",s}' <<< "$SWAP_ROWS")
+  # zram/swap metadata can cost a page; allow 1 MiB, never a GiB shortfall.
+  (( ZRAM_BYTES >= WANT_ZRAM * 1048576 - 1048576 )) \
+    && pass "zram size >= ${WANT_ZRAM} MiB" || failv "zram size below ${WANT_ZRAM} MiB (reboot after config change)"
+  POLICY=$(cv swap_policy); POLICY=${POLICY:-auto}
+  [[ "$POLICY" == auto ]] && { (( RAM_CLASS_MB < 16384 )) && POLICY=zram+disk || POLICY=zram-only; }
+  DISK_BYTES=$(awk '$1 !~ /zram/ {s+=$2} END {printf "%.0f",s}' <<< "$SWAP_ROWS")
+  case "$POLICY" in
+    zram+disk)
+      WANT_DISK=4096; (( RAM_CLASS_MB < 16384 )) && WANT_DISK=$(( (RAM_MB+1023)/1024*1024 ))
+      (( DISK_BYTES + 1048576 >= WANT_DISK * 1048576 )) \
+        && pass "disk overflow $(((DISK_BYTES+1048575)/1048576)) MiB >= ${WANT_DISK} MiB (metadata tolerance 1 MiB)" \
+        || failv "disk overflow $((DISK_BYTES/1048576)) MiB < ${WANT_DISK} MiB"
+      awk '$1 !~ /zram/ && $3 >= 100 {bad=1} END {exit bad}' <<< "$SWAP_ROWS" \
+        && pass 'disk overflow priority below zram' || failv 'disk overflow priority >= zram 100' ;;
+    zram-only) (( DISK_BYTES == 0 )) && pass 'swap policy zram-only' || failv 'swap policy zram-only: disk swap preserved; review by hand' ;;
+    *) failv "invalid swap_policy=$POLICY" ;;
+  esac
+  [[ "$(sysctl -n vm.page-cluster 2>/dev/null)" == 0 ]] && pass 'vm.page-cluster=0' || failv 'vm.page-cluster != 0'
+  [[ "$(sysctl -n vm.swappiness 2>/dev/null)" == 10 ]] && pass 'vm.swappiness=10' || failv 'vm.swappiness != 10'
+  grep -qx DefaultMemoryPressureDurationSec=60s "$VROOT/etc/systemd/oomd.conf.d/20-longer-duration.conf" 2>/dev/null \
+    && pass 'oomd duration 60s' || failv 'oomd duration config drifted'
+  LIMIT=$(systemctl show "user@$(id -u).service" -p ManagedOOMMemoryPressureLimit --value 2>/dev/null)
+  [[ "$LIMIT" == 8000 || "$LIMIT" == 80% ]] && pass 'oomd live pressure limit 80%' || failv "oomd live pressure limit $LIMIT != 80%"
+  for unit in dbus.service org.gnome.Shell@wayland.service org.gnome.Shell@x11.service; do
+    [[ "$(systemctl --user show "$unit" -p LoadState --value 2>/dev/null)" == loaded ]] || continue
+    [[ "$(systemctl --user show "$unit" -p ManagedOOMPreference --value 2>/dev/null)" == avoid ]] \
+      && pass "$unit live oomd shield" || failv "$unit live oomd shield missing"
+  done
+  for unit in ssh.service tailscaled.service snap.tailscale.tailscaled.service; do
+    [[ "$(systemctl show "$unit" -p LoadState --value 2>/dev/null)" == loaded ]] || continue
+    PID=$(systemctl show "$unit" -p MainPID --value 2>/dev/null)
+    if [[ "$unit" == ssh.service && "$PID" == 0 ]] && systemctl is-active --quiet ssh.socket; then
+      pass 'ssh.socket ready; native listener OOM protection applies on activation'; continue
+    fi
+    SCORE='unknown'; [[ "$PID" =~ ^[1-9][0-9]*$ ]] && SCORE=$(cat "$VROOT/proc/$PID/oom_score_adj" 2>/dev/null)
+    [[ "$SCORE" =~ ^-[0-9]+$ ]] && (( SCORE <= -500 )) \
+      && pass "$unit kernel OOM preference" || failv "$unit kernel OOM preference pending next start/reboot"
+  done
+  if [[ "$(cv component_t3code)" == yes ]]; then
+    [[ "$(systemctl --user show t3code.service -p OOMPolicy --value 2>/dev/null)" == continue ]] \
+      && [[ "$(systemctl --user show t3code.service -p ManagedOOMPreference --value 2>/dev/null)" == avoid ]] \
+      && pass 't3code OOM continuation/shield' || failv 't3code OOM policy/shield missing'
+  fi
+fi
+RES=$(cv component_resource_guards); RES=${RES:-auto}
+[[ "$RES" == auto ]] && { (( RAM_CLASS_MB < 16384 )) && RES=yes || RES=no; }
+if [[ "$RES" == yes ]]; then
+  grep -qx SystemMaxUse=512M "$VROOT/etc/systemd/journald.conf.d/60-setup-kit.conf" 2>/dev/null \
+    && grep -qx RuntimeMaxUse=64M "$VROOT/etc/systemd/journald.conf.d/60-setup-kit.conf" 2>/dev/null \
+    && pass 'journal disk/RAM cap' || failv 'journal disk/RAM cap missing'
+  W=$(sysctl -n fs.inotify.max_user_watches); I=$(sysctl -n fs.inotify.max_user_instances)
+  [[ "$W" =~ ^[0-9]+$ && "$I" =~ ^[0-9]+$ ]] && (( W >= 524288 && I >= 512 )) \
+    && pass 'inotify live watch/instance floors' || failv 'inotify live watch/instance limits too low'
+  systemctl --user is-active --quiet setup-kit-memory.timer \
+    && pass 'memory history timer active' || failv 'memory history timer inactive'
+  while read -r unit _; do
+    [[ "$unit" =~ ^(localsearch|tracker-miner|tracker-extract)[A-Za-z0-9@_.-]*\.service$ ]] || continue
+    [[ "$(systemctl --user show "$unit" -p MemoryMax --value 2>/dev/null)" == 268435456 ]] \
+      && pass "indexer $unit memory cap" || failv "indexer $unit memory cap missing"
+  done < <(systemctl --user list-unit-files --type=service --no-legend 2>/dev/null)
+fi
 
 # -- 5b. lid-ignore component — logind's own answer, not the file ----------------
 if [[ "$(cv component_lid_ignore)" == yes ]]; then
@@ -460,31 +547,30 @@ fi
 # driver that didn't support the GPU.
 # SETTLE parsed with the other args at the top of the script
 
-# 7a. failed units
-nf=$(systemctl --failed --no-legend --plain 2>/dev/null | wc -l)
-(( nf == 0 )) && pass "calm: no failed systemd units" \
-  || { failv "calm: $nf failed unit(s):"
-       fnote "$(systemctl --failed --no-legend --plain | sed 's/^/        /')"
-       systemctl --failed --no-legend --plain | grep -q not-found \
-         && fnote "        ('not-found' = unit was removed mid-failure; a tombstone —" \
-         && fnote "         sudo systemctl reset-failed clears it)"; }
-
-# 7b. flapping units — restart counter is the loop detector ("activating"
-# units never show in --failed while systemd is busy restarting them)
-flap=$(systemctl show '*.service' --property=Id,NRestarts 2>/dev/null \
-  | awk -v RS='' -F'\n' '{id="";n=0
-      for(i=1;i<=NF;i++){p=index($i,"=");k=substr($i,1,p-1);v=substr($i,p+1)
-        if(k=="Id")id=v; if(k=="NRestarts")n=v}
-      if(n+0>5) print "        "id" ("n" restarts)"}')
-[[ -z "$flap" ]] && pass "calm: no flapping services (NRestarts ≤ 5)" \
-  || { failv "calm: restart-looping service(s):"; fnote "$flap"; }
-
-# 7c. units stuck activating right now
-# services only: a VM's virtio .device units sit in "activating (tentative)"
-# forever — udev bookkeeping, not a service failing to start
-act=$(systemctl list-units --state=activating --type=service --no-legend --plain 2>/dev/null | awk '{print $1}')
-[[ -z "$act" ]] && pass "calm: nothing stuck activating" \
-  || { failv "calm: stuck activating:"; fnote "$(printf '%s\n' "$act" | sed 's/^/        /')"; }
+# 7a–c. The user manager owns T3, GNOME and agent services; system-only
+# checks missed the recorded 94-restarts/5min TTS loop.
+for scope in system user; do
+  manager=(systemctl); [[ "$scope" == user ]] && manager+=(--user)
+  FAILED_UNITS=$("${manager[@]}" --failed --no-legend --plain 2>/dev/null)
+  if [[ -z "$FAILED_UNITS" ]]; then pass "calm: $scope no failed units"
+  else failv "calm: $scope failed units:"; fnote "$FAILED_UNITS"; fi
+  flap=$("${manager[@]}" show '*.service' --property=Id,NRestarts 2>/dev/null \
+    | awk -v RS='' -F'\n' '{id="";n=0
+        for(i=1;i<=NF;i++){p=index($i,"=");k=substr($i,1,p-1);v=substr($i,p+1)
+          if(k=="Id")id=v; if(k=="NRestarts")n=v}
+        if(n+0>5) print "        "id" ("n" restarts)"}')
+  [[ -z "$flap" ]] && pass "calm: $scope no flapping services (NRestarts ≤ 5)" \
+    || { failv "calm: $scope restart-looping service(s):"; fnote "$flap"; }
+  act=$("${manager[@]}" list-units --state=activating --type=service --no-legend --plain 2>/dev/null | awk '{print $1}')
+  [[ -z "$act" ]] && pass "calm: $scope nothing stuck activating" \
+    || { failv "calm: $scope stuck activating:"; fnote "$act"; }
+done
+# Keep OOM evidence visible even after an automatic service restart succeeds.
+OOM_LOG=$(journalctl -k --since '-1 hour' --grep='Out of memory|Killed process|oom-kill' -o cat --no-pager 2>/dev/null)
+if [[ -n "$OOM_LOG" ]]; then
+  failv 'calm: recent kernel OOM kill(s) — inspect memory history and reduce concurrency'
+  fnote "$(head -3 <<< "$OOM_LOG")"
+else pass 'calm: no recent kernel OOM kills'; fi
 
 # 7d. journal noise — warnings+errors per 5 min, with top repeat offenders
 JWMAX=$(cv calm_journal_warns); JWMAX=${JWMAX:-50}

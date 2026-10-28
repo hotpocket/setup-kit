@@ -15,6 +15,12 @@ DOCK_LIST="${DOCK_LIST:-$MANIFEST_DIR/dock.list}"
 [[ -f "$DOCK_LIST" ]] || exit 0
 
 section "dock ($MODE) — manifests/dock.list"
+# dock=no: the dock is the user's — this phase sets it EXACTLY, which would
+# unpin whatever they pinned themselves on every re-run.
+if [[ "$(conf_get dock yes)" == no ]]; then
+  ok "dock=no — left as the user set it"
+  exit 0
+fi
 
 if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]] || ! command -v gsettings >/dev/null 2>&1; then
   warn "no DBus session — run from a desktop terminal to manage the dock"

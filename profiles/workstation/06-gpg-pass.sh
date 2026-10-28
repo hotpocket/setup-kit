@@ -33,6 +33,11 @@ GNUPG="$HOME/.gnupg"
 STORE="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
 
 section "gpg + pass ($MODE)"
+# The chain is the kit owner's: his YubiKeys, scdaemon.conf from .configs.
+if [[ "$(conf_get configs yes)" == no ]]; then
+  ok "configs=no — gpg/pass chain skipped (it needs .configs and the owner's YubiKeys)"
+  exit 0
+fi
 
 # ---- 0. deps present? (apt manifest installs them; just verify here) --------
 for b in gpg pass scdaemon; do

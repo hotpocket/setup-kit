@@ -28,6 +28,84 @@ if [[ "$(conf_get component_claude_code yes)" == yes || "$(conf_get component_cl
   fi
 fi
 
+# Brevity hook: a UserPromptSubmit hook that puts components/claude-brevity.md
+# in front of every prompt. Opt-in — the owner's .configs settings.json carries
+# its own; this is for a box without it (configs=no). The hook cats a link the
+# kit keeps pointed at its own file, so a moved kit is re-linked on the next run.
+if [[ "$(conf_get component_claude_brevity no)" == yes ]]; then
+  section "claude brevity hook ($MODE)"
+  BR_SRC="$KIT_DIR/components/claude-brevity.md"
+  BR_LINK="$HOME/.local/share/setup-kit/claude-brevity.md"
+  BR_SETTINGS="$HOME/.claude/settings.json"
+  if [[ -L "$BR_LINK" && "$(readlink -f "$BR_LINK")" == "$(readlink -f "$BR_SRC")" ]]; then
+    ok "claude-brevity.md linked"
+  else
+    warn "claude-brevity.md not linked at ${BR_LINK/#$HOME/\~}"
+    do_or_say mkdir -p "$(dirname "$BR_LINK")"
+    do_or_say ln -sfnT "$BR_SRC" "$BR_LINK"
+  fi
+  # Only an actual prompt command counts; permissions, prompt hooks and
+  # commands under other events may mention the same file without loading it.
+  if python3 -I - "$BR_SETTINGS" "$BR_LINK" <<'PY'
+import json, shlex, sys
+try:
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+except (OSError, ValueError):
+    sys.exit(1)
+hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
+groups = hooks.get("UserPromptSubmit", []) if isinstance(hooks, dict) else []
+suffix = "/.local/share/setup-kit/claude-brevity.md"
+# Preserve quotes while tokenizing: single-quoted $HOME is a literal path,
+# and quoted ~ does not expand. Never execute a settings command to check it.
+paths = {sys.argv[2], '"' + sys.argv[2] + '"', "'" + sys.argv[2] + "'", "~" + suffix}
+for home in ("$HOME", "${HOME}"):
+    paths.update((home + suffix, '"' + home + suffix + '"'))
+for group in groups if isinstance(groups, list) else []:
+    entries = group.get("hooks", []) if isinstance(group, dict) else []
+    for hook in entries if isinstance(entries, list) else []:
+        if not isinstance(hook, dict) or hook.get("type") != "command":
+            continue
+        command = hook.get("command")
+        if not isinstance(command, str):
+            continue
+        try:
+            argv = shlex.split(command, comments=True, posix=False)
+        except ValueError:
+            continue
+        if argv and argv[0] in ("cat", "/bin/cat", "/usr/bin/cat"):
+            args = argv[1:]
+            if args[:1] == ["--"]:
+                args = args[1:]
+            if len(args) == 1 and args[0] in paths:
+                sys.exit(0)
+sys.exit(1)
+PY
+  then
+    ok "settings.json has the brevity hook"
+  elif [[ -L "$BR_SETTINGS" ]]; then
+    # someone else's file (the owner's .configs): never write through it
+    warn "~/.claude/settings.json is managed elsewhere ($(readlink -f "$BR_SETTINGS")) and has no brevity hook — add it there"
+  else
+    warn "settings.json has no brevity hook"
+    if (( INSTALL )); then
+      mkdir -p "$(dirname "$BR_SETTINGS")"
+      # merge, keeping every other key and hook; whole file or nothing (temp + rename)
+      python3 -I - "$BR_SETTINGS" <<'PY' && log "added the brevity hook to ~/.claude/settings.json" || miss "claude-brevity: settings.json merge failed"
+import json, os, sys
+path = sys.argv[1]
+data = json.load(open(path)) if os.path.exists(path) and os.path.getsize(path) else {}
+data.setdefault("hooks", {}).setdefault("UserPromptSubmit", []).append(
+    {"hooks": [{"type": "command", "command": 'cat "$HOME/.local/share/setup-kit/claude-brevity.md"'}]})
+tmp = path + ".setup-kit.tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2); f.write("\n")
+os.replace(tmp, path)
+PY
+    fi
+  fi
+fi
+
 [[ "$(conf_get component_claude_skills yes)" == yes ]] || exit 0
 
 # Default = gstack + EVERY skill dir in claude-conduct (one with a SKILL.md).
@@ -35,11 +113,14 @@ fi
 # replaced ("gstack vault conduct") meant each skill added to .configs needed
 # a conf edit on every host, and none got one: a fresh VM (2026-09-08) came
 # up without /filmstrip, /vet, /wargame ... (tests/test-claude-skills-all.sh).
+# configs=no: no .configs on the box, so gstack is the whole default and the
+# conduct-only links below (agents, vault-digest) are not this box's business.
+CONFIGS=1; [[ "$(conf_get configs yes)" == no ]] && CONFIGS=0
 CONDUCT_SKILLS_SRC="$HOME/git/.configs/claude-conduct/skills"
 SKILLS="$(conf_get claude_skills '')"
 if [[ -z "$SKILLS" ]]; then
   SKILLS="gstack"
-  for d in "$CONDUCT_SKILLS_SRC"/*/; do
+  (( CONFIGS )) && for d in "$CONDUCT_SKILLS_SRC"/*/; do
     [[ -f "$d/SKILL.md" ]] && SKILLS+=" $(basename "$d")"
   done
 fi
@@ -57,7 +138,7 @@ skill_repo() { case "$1" in
   *)             echo "$HOME/git/.configs" ;;   # every other skill lives in claude-conduct
 esac; }
 skill_url() { case "$1" in
-  gstack)        echo "git@github.com:garrytan/gstack.git" ;;
+  gstack)        echo "https://github.com/garrytan/gstack.git" ;;   # public: no auth, no YubiKey touch
   *)             echo "git@github.com:hotpocket/.configs.git" ;;
 esac; }
 skill_path() { case "$1" in
@@ -72,7 +153,7 @@ esac; }
 # a pre-vault-digest claude-conduct left ~/bin/vault-digest unlinkable forever).
 AGENTS_SRC="$HOME/git/.configs/claude-conduct/agents"
 VD_SRC="$HOME/git/.configs/claude-conduct/skills/conduct/templates/vault-digest"
-WANT_PATHS=("$VD_SRC" "$AGENTS_SRC")
+WANT_PATHS=(); (( CONFIGS )) && WANT_PATHS=("$VD_SRC" "$AGENTS_SRC")
 for s in $SKILLS; do
   p="$(skill_path "$s")"; [[ -n "$p" ]] && WANT_PATHS+=("$p")
 done
@@ -168,7 +249,9 @@ fi
 # error anyone would see. Per-file because ~/.claude/agents holds a flat set
 # of .md files; there is no per-agent directory to point at.
 AGENTS_DIR="$HOME/.claude/agents"
-if [[ -d "$AGENTS_SRC" ]]; then
+if (( ! CONFIGS )); then
+  :
+elif [[ -d "$AGENTS_SRC" ]]; then
   [[ -d "$AGENTS_DIR" ]] || do_or_say mkdir -p "$AGENTS_DIR"
   for a in "$AGENTS_SRC"/*.md; do
     [[ -e "$a" ]] || continue
@@ -278,7 +361,9 @@ fi
 # SessionStart router (claude-orient) for repos you don't own (external vaults
 # under ~/Documents/AgentMemory/<repo>). Owned repos carry their own copy in
 # scripts/ via `/conduct init`. Canonical source is the conduct skill template.
-if [[ -f "$VD_SRC" ]]; then
+if (( ! CONFIGS )); then
+  :
+elif [[ -f "$VD_SRC" ]]; then
   if [[ -L "$HOME/bin/vault-digest" \
         && "$(readlink -f "$HOME/bin/vault-digest")" == "$(readlink -f "$VD_SRC")" ]]; then
     ok "~/bin/vault-digest linked"

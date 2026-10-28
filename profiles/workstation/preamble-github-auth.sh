@@ -29,6 +29,13 @@ REPO="$(conf_get configs_repo 'git@github.com:hotpocket/.configs.git')"
 DEST="$HOME/git/.configs"
 
 section "github auth preamble ($MODE)"
+# configs=no: a box that isn't the kit owner's (no private .configs, no YubiKey).
+# Nothing to clone, and the GNOME ssh agent stays — it is the user's, and the
+# masking below exists only for the owner's FIDO2 keys.
+if [[ "$(conf_get configs yes)" == no ]]; then
+  ok "configs=no — no .configs to clone; GitHub auth is the user's own (gh auth login)"
+  exit 0
+fi
 [[ "$REPO" == git@github.com:* ]] || { ok "configs_repo is not github-ssh — nothing to do"; exit 0; }
 
 mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"

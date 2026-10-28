@@ -10,6 +10,10 @@ REPO="$(conf_get configs_repo 'git@github.com:hotpocket/.configs.git')"
 DEST="$HOME/git/.configs"
 
 section ".configs ($MODE)"
+if [[ "$(conf_get configs yes)" == no ]]; then
+  ok "configs=no — the kit owner's .configs is not used on this box"
+  exit 0
+fi
 if [[ -d "$DEST/.git" ]]; then
   ok ".configs cloned at $DEST"
 else

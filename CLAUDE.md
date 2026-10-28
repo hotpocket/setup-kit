@@ -59,6 +59,7 @@ packages, toolchains, configs — idempotently.
   the row; an estimate nobody revisits is how the preflight starts lying.
 - **Manifests are generated** — `capture/90-generate-manifests.py` writes `manifests/apt/*`. Edit the generator (its strings become the file comments), not the `.list` files by hand — a regen overwrites them.
 - **Two repos** — setup-kit owns machine-level provisioning; `~/git/.configs` (private) owns user dotfiles/bin/dconf and is cloned + run by phase 06. setup-kit never duplicates dotfiles.
+  A box that isn't the owner's (a friend's) sets `configs=no`: no .configs, no GPG/YubiKey chain, no conduct skills, and dictation/ocr/tts default off; `dock=no` leaves the user's dock alone (`tests/test-no-configs.sh`).
 
 ## Git
 

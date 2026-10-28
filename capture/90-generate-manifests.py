@@ -100,16 +100,18 @@ DROPS = {  # pkg: reason
 # Apps that came from direct .deb downloads (no apt repo) — pulled out of
 # the apt manifests into debs.list, installed by 02b-debs.sh.
 # method: url (stable latest-URL) | github (latest release asset) | manual
-# name: (method, arg[, group]) — optional 4th 'group' gates on group_<x>=yes
+# name: (method, arg[, group]) — optional 4th 'group' gates on group_<x>=yes.
+# Daily-use desktop apps ride "apps", so a server box (group_apps=no) skips
+# them; programming tools (code) stay ungated.
 DIRECT_DEBS = {
-    "zoom": ("url", "https://zoom.us/client/latest/zoom_amd64.deb"),
-    "discord": ("url", "https://discord.com/api/download?platform=linux&format=deb"),
+    "zoom": ("url", "https://zoom.us/client/latest/zoom_amd64.deb", "apps"),
+    "discord": ("url", "https://discord.com/api/download?platform=linux&format=deb", "apps"),
     # apt knows `code` only once the deb has dropped its own vscode.sources
     # (CLAUDE.md: never add a vscode.list) — so a fresh box gets it as a deb
     "code": ("url", "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64"),
     "minikube": ("url", "https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb", "dev_k8s"),
-    "master-pdf-editor-5": ("manual", "https://code-industry.net/free-pdf-editor/ — version-pinned URLs"),
-    "ganttproject": ("manual", "https://www.ganttproject.biz/download — version-pinned URLs"),
+    "master-pdf-editor-5": ("manual", "https://code-industry.net/free-pdf-editor/ — version-pinned URLs", "apps"),
+    "ganttproject": ("manual", "https://www.ganttproject.biz/download — version-pinned URLs", "apps"),
 }
 
 OPTIONAL = {  # group: (header, [pkgs])
@@ -207,6 +209,10 @@ ADDITIONS = {
     # boxes already running Valve's steam-launcher — its exact steam-libs pin
     # is unsatisfiable next to Valve's newer libs, and that unmet dep would
     # abort the whole apt transaction.
+    # resources: GNOME's system monitor app (CPU/GPU/RAM/disk/net/processes),
+    # beside Astra Monitor in the top bar; installed by hand after the last
+    # capture, so the snapshot never saw it.
+    "desktop": ["resources"],
     "games": ["steam-installer"],
     # qt6-svg-plugins: the Qt6 SVG icon engine (libqsvgicon.so) + SVG image
     # format plugin. libqt6svg6 ships only the library, and nothing Depends the
@@ -383,7 +389,8 @@ def main():
     deb_lines = ["# Apps with no apt repo — installed from vendor .debs by",
                  "# profiles/workstation/02b-debs.sh. Fields: name method arg",
                  "# methods: url=stable latest link, github=owner/repo:asset-suffix,",
-                 "#          optional 4th field = group gate (host-conf group_<name>=yes)",
+                 "#          optional 4th field = group gate (host-conf group_<name>=yes);",
+                 "#          daily-use desktop apps ride `apps`, so a server box (group_apps=no) skips them",
                  "#          manual=doctor-warns only (version-pinned vendor URLs)"]
     for name, spec in DIRECT_DEBS.items():
         method, arg = spec[0], spec[1]

@@ -6,128 +6,13 @@ source "$(dirname "$0")/../../lib.sh"
 require_user
 init_mode "${1:-}"
 
-# ------------------------------------------------------------- oom-zram
+# Memory guards use a prefixed filesystem only in calibration tests.
+source "$KIT_DIR/components/tmp-on-disk.sh"
 if [[ "$(conf_get component_oom_zram yes)" == yes ]]; then
-  section "oom-zram ($MODE) — components/oom-zram.md"
-  # zram size: min(ram/4, 8192) MB  (TODO from component doc: done here)
-  RAM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
-  ZRAM_MB=$(( RAM_MB / 4 < 8192 ? RAM_MB / 4 : 8192 ))
-
-  if dpkg -s systemd-zram-generator >/dev/null 2>&1; then
-    ok "systemd-zram-generator installed"
-  else
-    warn "systemd-zram-generator missing"
-    apt_install systemd-zram-generator
-  fi
-  # Reconcile by CONTENT, not just presence: the package ships its own
-  # zram-generator.conf (a dpkg conffile), so the old "write only when missing"
-  # left a package-default file in place and never restored our prio-100 tuning
-  # (and, on 24.04, the differing default is what triggered the conffile prompt
-  # that hung the run). Render what we want and write iff it differs. Pairs with
-  # apt_install's --force-confold, which keeps THIS file across package upgrades.
-  ZRAM_WANT=$(printf '[zram0]\nzram-size = %s\ncompression-algorithm = zstd\nswap-priority = 100\n' "$ZRAM_MB")
-  if [[ -f /etc/systemd/zram-generator.conf && "$(cat /etc/systemd/zram-generator.conf)" == "$ZRAM_WANT" ]]; then
-    ok "zram-generator.conf matches (${ZRAM_MB} MB zstd, prio 100)"
-  else
-    [[ -f /etc/systemd/zram-generator.conf ]] \
-      && warn "zram-generator.conf drifted — reconciling to ${ZRAM_MB} MB zstd prio 100" \
-      || warn "zram-generator.conf missing — writing ${ZRAM_MB} MB zstd prio 100"
-    if (( INSTALL )); then
-      printf '%s\n' "$ZRAM_WANT" | sudo tee /etc/systemd/zram-generator.conf >/dev/null
-      sudo systemctl daemon-reload
-      sudo systemctl restart systemd-zram-setup@zram0.service
-    fi
-  fi
-  if [[ -f /etc/sysctl.d/99-zram.conf ]]; then
-    ok "sysctl page-cluster tuned"
-  else
-    warn "vm.page-cluster not tuned for zram"
-    if (( INSTALL )); then
-      printf '# zram pairing: swap-ins are RAM reads, no readahead clustering\nvm.page-cluster = 0\n' \
-        | sudo tee /etc/sysctl.d/99-zram.conf >/dev/null
-      sudo sysctl --system >/dev/null
-    fi
-  fi
-  # RAM before swap, always (Brandon, 2026-09-27): the stock 60 swaps idle memory out while ~1 GB of
-  # page cache is still counted as available.
-  if [[ "$(sysctl -n vm.swappiness)" == 10 && -f /etc/sysctl.d/99-swappiness.conf ]]; then
-    ok "vm.swappiness = 10 (RAM before swap)"
-  else
-    warn "vm.swappiness is $(sysctl -n vm.swappiness), want 10 (RAM before swap)"
-    if (( INSTALL )); then
-      printf '# RAM before swap: swap only under real pressure (components/oom-zram.md)\nvm.swappiness = 10\n' \
-        | sudo tee /etc/sysctl.d/99-swappiness.conf >/dev/null
-      sudo sysctl --system >/dev/null
-    fi
-  fi
-  if [[ -f /etc/systemd/oomd.conf.d/20-longer-duration.conf ]]; then
-    ok "oomd pressure duration softened"
-  else
-    warn "oomd at trigger-happy defaults (50%/20s)"
-    if (( INSTALL )); then
-      sudo mkdir -p /etc/systemd/oomd.conf.d
-      printf '[OOM]\nDefaultMemoryPressureDurationSec=60s\n' \
-        | sudo tee /etc/systemd/oomd.conf.d/20-longer-duration.conf >/dev/null
-      sudo systemctl restart systemd-oomd
-      # live + persistent for THIS uid; does not restart the user session
-      sudo systemctl set-property "user@$(id -u).service" ManagedOOMMemoryPressureLimit=80%
-    fi
-  fi
-  # Swap policy: zram is always the first tier.
-  #   auto      : RAM < 16G → zram + 4G disk overflow at prio -2 (emergency
-  #               only — SSD writes only under genuine overcommit)
-  #               RAM ≥ 16G → zram-only (no disk swap ever — SSD wear)
-  #   zram-only | zram+disk : explicit override per host
-  SWAP_POLICY="$(conf_get swap_policy auto)"
-  if [[ "$SWAP_POLICY" == auto ]]; then
-    (( RAM_MB < 16384 )) && SWAP_POLICY=zram+disk || SWAP_POLICY=zram-only
-  fi
-  DISK_SWAPS=$(swapon --show=NAME,TYPE --noheadings 2>/dev/null | awk '$1 !~ /zram/ {print $1}')
-  if [[ "$SWAP_POLICY" == zram-only ]]; then
-    if [[ -z "$DISK_SWAPS" ]] && ! grep -qE '^[^#].*\sswap\s' /etc/fstab; then
-      ok "swap policy zram-only: no disk swap ✓"
-    else
-      warn "swap policy zram-only but disk swap present: ${DISK_SWAPS:-fstab entry}"
-      if (( INSTALL )); then
-        for s in $DISK_SWAPS; do
-          sudo swapoff "$s" && log "swapoff: $s"
-          case "$s" in /swap.img|/swapfile) sudo rm -f "$s" && log "removed $s" ;; esac
-        done
-        sudo sed -i.setup-kit.bak -E 's@^([^#].*\sswap\s.*)@# \1   # disabled by setup-kit (zram-only policy)@' /etc/fstab
-        log "fstab swap entries commented (backup: /etc/fstab.setup-kit.bak)"
-      fi
-    fi
-  else  # zram+disk
-    if [[ -n "$DISK_SWAPS" ]]; then
-      ok "swap policy zram+disk: overflow present (${DISK_SWAPS}, zram wins at prio 100)"
-    else
-      warn "swap policy zram+disk: no disk overflow tier (RAM ${RAM_MB}MB)"
-      if (( INSTALL )); then
-        sudo fallocate -l 4G /swap.img \
-          && sudo chmod 600 /swap.img \
-          && sudo mkswap /swap.img >/dev/null \
-          && sudo swapon --priority -2 /swap.img \
-          && log "created /swap.img 4G at prio -2 (emergency overflow)"
-        grep -qE '^/swap\.img\s' /etc/fstab \
-          || echo '/swap.img none swap sw,pri=-2 0 0' | sudo tee -a /etc/fstab >/dev/null
-      fi
-    fi
-  fi
-
-  # dbus shield is user-level config — belongs to .configs; doctor-check only
-  if [[ -f "$HOME/.config/systemd/user/dbus.service.d/oomd-avoid.conf" ]]; then
-    ok "dbus oomd shield present"
-  else
-    warn "dbus oomd shield missing (ManagedOOMPreference=avoid)"
-    hint "belongs in .configs (user-level); without it oomd can kill dbus → force logout"
-    if (( INSTALL )); then
-      mkdir -p "$HOME/.config/systemd/user/dbus.service.d"
-      printf '[Service]\nManagedOOMPreference=avoid\n' \
-        > "$HOME/.config/systemd/user/dbus.service.d/oomd-avoid.conf"
-      systemctl --user daemon-reload 2>/dev/null || true
-    fi
-  fi
+  source "$KIT_DIR/components/oom-zram.sh"
 fi
+
+source "$KIT_DIR/components/resource-guards.sh"
 
 # ------------------------------------------------------------- docker-rootless
 # Rootless docker: rootful daemon disabled, user-level dockerd; .bashrc
@@ -300,6 +185,11 @@ if [[ "$T3_WANT" == yes ]]; then
   export PATH="$HOME/.local/bin:$PATH"
   T3_HOST="$(conf_get t3code_host 127.0.0.1)"
   T3_PORT="$(conf_get t3code_port 3773)"
+  # t3code_tailscale_serve=yes: T3 runs `tailscale serve` itself at start
+  # (T3CODE_TAILSCALE_SERVE) — HTTPS on the tailnet name, proxied to the
+  # loopback bind, so other devices and the phone reach it with no LAN
+  # listener, and the browser gets a secure context (clipboard copy/paste).
+  T3_TS="$(conf_get t3code_tailscale_serve no)"
   T3_UNIT="$HOME/.config/systemd/user/t3code.service"
   T3_DROPIN="$HOME/.config/systemd/user/t3code.service.d/setup-kit.conf"
   T3_RELOAD=0
@@ -317,6 +207,7 @@ if [[ "$T3_WANT" == yes ]]; then
   fi
   # bind address + port, by content
   T3_DROPIN_WANT=$(printf '# written by setup-kit (07-components) — edit hosts/%s.conf, not this file\n[Service]\nEnvironment=T3CODE_HOST=%s\nEnvironment=T3CODE_PORT=%s\n' "$(hostname)" "$T3_HOST" "$T3_PORT")
+  [[ "$T3_TS" == yes ]] && T3_DROPIN_WANT+=$'\nEnvironment=T3CODE_TAILSCALE_SERVE=true'
   if [[ -f "$T3_DROPIN" && "$(cat "$T3_DROPIN")" == "$T3_DROPIN_WANT" ]]; then
     ok "t3code bind ${T3_HOST}:${T3_PORT} (drop-in matches)"
   else
@@ -329,6 +220,35 @@ if [[ "$T3_WANT" == yes ]]; then
       T3_RELOAD=1
     else
       echo "  [would] write $T3_DROPIN"
+    fi
+  fi
+  # Tailscale Serve needs the tailnet's HTTPS certificates (an admin-console
+  # switch) and, from a user service, the operator (`tailscale serve` is
+  # state-changing). Both are the human's to set; the doctor names them.
+  T3_URL="http://${T3_HOST}:${T3_PORT}"
+  if [[ "$T3_TS" == yes ]]; then
+    if ! command -v tailscale >/dev/null 2>&1; then
+      warn "t3code_tailscale_serve=yes but tailscale missing"
+    else
+      TS_OP="$(tailscale debug prefs 2>/dev/null | grep -o '"OperatorUser"[^,}]*' | cut -d'"' -f4)"
+      if [[ -n "$TS_OP" ]]; then
+        ok "tailscale operator: $TS_OP (T3 may run \`tailscale serve\`)"
+      else
+        warn "tailscale operator not set — T3 can't publish over Tailscale Serve"
+        hint "sudo tailscale set --operator=$USER"
+      fi
+      TS_JSON="$(tailscale status --json 2>/dev/null)"
+      TS_NAME="$(printf '%s' "$TS_JSON" | grep -o '"DNSName"[^,}]*' | head -1 | cut -d'"' -f4)"
+      # a string match, not `| grep -q`: under pipefail an early-exiting grep
+      # SIGPIPEs the writer and a match on a big status reads as a miss
+      TS_FLAT="$(printf '%s' "$TS_JSON" | tr -d ' \n')"
+      if [[ "$TS_FLAT" == *'"CertDomains":["'* ]]; then
+        T3_URL="https://${TS_NAME%.}"
+        ok "tailnet HTTPS certificates on ($T3_URL)"
+      else
+        warn "tailnet HTTPS certificates off — Tailscale Serve can't get a certificate"
+        hint "tailnet admin console → DNS → enable MagicDNS and HTTPS Certificates"
+      fi
     fi
   fi
   # the user unit — t3 writes, enables and starts it; linger is its business
@@ -348,7 +268,7 @@ if [[ "$T3_WANT" == yes ]]; then
     fi
   fi
   if systemctl --user is-active -q t3code.service 2>/dev/null; then
-    ok "t3code.service active — http://${T3_HOST}:${T3_PORT} (pair another device: t3 pair)"
+    ok "t3code.service active — $T3_URL (pair another device: t3 pair$([[ "$T3_TS" == yes ]] && echo ' --tailscale'))"
   elif [[ -f "$T3_UNIT" ]]; then
     warn "t3code.service not running (t3 service status; log path is in its output)"
     do_or_say systemctl --user restart t3code.service || miss "t3code: service would not start (t3 service status)"
@@ -656,12 +576,17 @@ if group_on games; then
   fi
 fi
 
+# Dictation, OCR and TTS default on because .configs ships the tools they
+# serve (the Alt+s wrapper, ocrscr, the clipboard TTS client). On a box
+# without .configs (configs=no) nothing would call them: default off there.
+CFG_DEF=yes; [[ "$(conf_get configs yes)" == no ]] && CFG_DEF=no
+
 # ------------------------------------------------------------- dictation
 # Speech-to-text chain (CPU-only — vosk lgraph model; NOT GPU-gated like
 # TTS). .configs ships hotkeys + wrapper; this provisions what they call:
 # the nerd-dictation repo, vosk in the pyenv python, and the model.
 # Without it: the .configs Alt+s hotkey fires but the wrapper can't find vosk.
-if [[ "$(conf_get component_dictation yes)" == yes ]]; then
+if [[ "$(conf_get component_dictation "$CFG_DEF")" == yes ]]; then
   section "dictation ($MODE) — nerd-dictation + vosk"
   ND="$HOME/git/nerd-dictation"          # wrapper's portable fallback path
   if [[ -x "$ND/nerd-dictation" ]]; then
@@ -764,7 +689,7 @@ fi
 # is often driven from a different session than the one ocrscr runs in, and
 # a box may offer both at the login screen; ocrscr picks the right pair at
 # click-time. All small CLIs.
-if [[ "$(conf_get component_ocr yes)" == yes ]]; then
+if [[ "$(conf_get component_ocr "$CFG_DEF")" == yes ]]; then
   section "ocr (screen) ($MODE)"
   # tesseract+imagemagick always; gnome-screenshot for GNOME (Wayland or X11
   # — Mutter can't do grim/slurp); maim/xsel for plain X11; grim/slurp/
@@ -790,7 +715,7 @@ fi
 # .configs shebangs (#!~/.pyenv/versions/kokoro-tts/bin/python) resolve regardless
 # of global (which stays system for a clean prompt), the deps don't pollute
 # the bare 3.12, and the path is stable across machines (name, not patch).
-if [[ "$(conf_get component_tts yes)" == yes ]]; then
+if [[ "$(conf_get component_tts "$CFG_DEF")" == yes ]]; then
 section "tts (kokoro) ($MODE)"
 for d in libsndfile1 libportaudio2 espeak-ng; do
   pkg_installed "$d" && ok "tts dep $d" || { warn "tts dep $d missing"; apt_install "$d"; }
@@ -914,6 +839,45 @@ else
   ok "tts (kokoro): disabled (component_tts=no)"
 fi
 
+# ------------------------------------------------------------- clipboard
+# Copy/paste that behaves in GNOME Terminal on 26.04 (components/clipboard.md):
+# middle-click PRIMARY paste back on, and pbcopy/pbpaste/copy in every bash.
+if [[ "$(conf_get component_clipboard yes)" == yes ]]; then
+  section "clipboard ($MODE) — components/clipboard.md"
+  if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]] || ! command -v gsettings >/dev/null 2>&1; then
+    warn "no DBus session — middle-click primary paste not checked (run while logged in at the desktop)"
+  elif [[ "$(gsettings get org.gnome.desktop.interface gtk-enable-primary-paste 2>/dev/null)" == true ]]; then
+    ok "middle-click primary paste on"
+  else
+    warn "middle-click primary paste off (26.04's default)"
+    do_or_say gsettings set org.gnome.desktop.interface gtk-enable-primary-paste true
+  fi
+  CB_SRC="$KIT_DIR/components/clipboard.bash"
+  CB_LINK="$HOME/.local/share/setup-kit/clipboard.bash"
+  if [[ -L "$CB_LINK" && "$(readlink -f "$CB_LINK")" == "$(readlink -f "$CB_SRC")" ]]; then
+    ok "clipboard.bash linked"
+  else
+    warn "clipboard.bash not linked at ${CB_LINK/#$HOME/\~}"
+    do_or_say mkdir -p "$(dirname "$CB_LINK")"
+    do_or_say ln -sfnT "$CB_SRC" "$CB_LINK"
+  fi
+  # A symlinked ~/.bashrc is someone else's file (the owner's .configs): check
+  # it, never write through it.
+  # Match a source command at the start of a line or after a shell separator;
+  # comments and a bare filename mention do not load the clipboard functions.
+  if grep -Eq "^[[:space:]]*([^#]*(&&|\\|\\||;)[[:space:]]*)?(source|\\.)[[:space:]]+[^#;]*clipboard\\.bash([[:space:]\"';]|$)" "$HOME/.bashrc" 2>/dev/null; then
+    ok "~/.bashrc sources clipboard.bash"
+  elif [[ -L "$HOME/.bashrc" ]]; then
+    warn "~/.bashrc is managed elsewhere ($(readlink -f "$HOME/.bashrc")) and doesn't source clipboard.bash — add it there"
+  else
+    warn "~/.bashrc doesn't source clipboard.bash"
+    if (( INSTALL )); then
+      printf '\n# setup-kit: pbcopy/pbpaste/copy (components/clipboard.md)\n[ -f ~/.local/share/setup-kit/clipboard.bash ] && . ~/.local/share/setup-kit/clipboard.bash\n' >> "$HOME/.bashrc"
+      log "appended the clipboard.bash source line to ~/.bashrc"
+    fi
+  fi
+fi
+
 # ------------------------------------------------------------- lid-ignore
 # A laptop serving as a node (lid shut, reached over ssh) must not suspend
 # when the lid closes. Role choice, not a hardware fact — opt-in per host —
@@ -957,6 +921,8 @@ TTS_FL_SRC="$HOME/git/.configs/tts-flutter"
 TTS_FL_BIN="$TTS_FL_SRC/build/linux/x64/release/bundle/tts_client"
 if [[ "$(conf_get headless no)" == yes ]]; then
   ok "tts flutter client: desktop-side, skipped on a headless host"
+elif [[ "$(conf_get component_tts "$CFG_DEF")" != yes ]]; then
+  ok "tts flutter client: not wanted (component_tts=no)"
 elif [[ ! -d "$TTS_FL_SRC" ]]; then
   warn "tts flutter client: source missing ($TTS_FL_SRC) — run 06-configs"
 elif [[ ! -x "$FLUTTER_BIN" ]]; then

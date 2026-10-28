@@ -43,6 +43,22 @@ prerequisite and nothing key-shaped is stored for it.
 - `t3code_port=` default `3773` (T3's `DEFAULT_PORT`). Pinned on purpose: with
   no port set, T3 picks the next free one, and a doctor cannot probe "next free".
 
+## Tailscale Serve (HTTPS on the tailnet)
+
+`t3code_tailscale_serve=yes` adds `Environment=T3CODE_TAILSCALE_SERVE=true` to
+the drop-in. T3 then runs `tailscale serve` itself at start (and removes it at
+stop): `https://<box>.<tailnet>.ts.net` → the loopback bind, so keep
+`t3code_host=127.0.0.1`. Other devices, the phone app and a second T3 reach it
+with no LAN listener, and the page is a **secure context**, which is what the
+browser's clipboard API needs (copy buttons, paste into T3's terminal; over plain
+`http://<ip>` they fail). Pair with `t3 pair --tailscale`.
+
+Two switches are the human's, and the doctor names each when it is off:
+`sudo tailscale set --operator=$USER` (a user service may not change Serve
+otherwise) and **HTTPS Certificates** in the tailnet's admin console (DNS page;
+MagicDNS on). A box shared into another tailnet keeps its own name and
+certificate, so the other tailnet's devices use the same URL.
+
 ## Doctor / verify
 
 - `check`: `t3` on PATH + version; `claude` on PATH (warns, does not install —

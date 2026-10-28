@@ -16,6 +16,10 @@
 #   D. yes, everything present, drop-in matches: all OK, nothing proposed
 #   D2. drop-in drifted (host changed in the conf): warns; install mode
 #      rewrites it and restarts the unit
+#   F. t3code_tailscale_serve=yes: the drop-in turns on T3's own Tailscale Serve
+#      (HTTPS on the tailnet, a secure context for the clipboard); the doctor
+#      names an unset operator and a tailnet without HTTPS certificates, and
+#      says the https URL when both are there. Unset: no Serve line.
 #   E. verify.sh: yes + no t3 fails by name; yes + service active passes;
 #      no → "not wanted"; unset → not wanted
 set -uo pipefail
@@ -93,6 +97,28 @@ assert "D2b. install: drop-in rewritten, daemon-reload + restart" \
 rm -f "$STATE/active"; run07
 assert "D3. unit enabled but not running: warns, would restart" \
   'grep -q "WARN.*t3code.service not running" "$TMP/out" && grep -q "\[would\].*restart t3code.service" "$TMP/out"'
+
+# tailscale stub: prefs and status from files in $STATE
+cat > "$BIN/tailscale" <<'S'
+#!/bin/bash
+case "$*" in
+  "debug prefs") cat "$STATE/ts-prefs" ;;
+  "status --json") cat "$STATE/ts-status" ;;
+esac
+S
+chmod +x "$BIN/tailscale"
+ts() { printf '{"OperatorUser": "%s"}\n' "$1" > "$STATE/ts-prefs"
+       printf '{"BackendState": "Running", "Self": {"DNSName": "box.tail1234.ts.net."}, "CertDomains": %s}\n' "$2" > "$STATE/ts-status"; }
+reset; have_t3; have_claude; ts "" null; conf component_t3code=yes t3code_tailscale_serve=yes; MODE=install run07
+assert "F1. serve=yes: drop-in turns on T3CODE_TAILSCALE_SERVE" 'grep -qx "Environment=T3CODE_TAILSCALE_SERVE=true" "$DROPIN"'
+assert "F2. operator unset: warns and names the command" \
+  'grep -q "WARN.*tailscale operator not set" "$TMP/out" && grep -q "sudo tailscale set --operator=" "$TMP/out"'
+assert "F3. no HTTPS certificates on the tailnet: warns by name" 'grep -q "WARN.*HTTPS certificates" "$TMP/out"'
+ts me '["box.tail1234.ts.net"]'; run07
+assert "F4. operator + certs: OK, says the https URL, no tailscale warnings" \
+  'grep -q "OK.*tailscale operator: me" "$TMP/out" && grep -q "https://box.tail1234.ts.net" "$TMP/out" && ! grep -qi "WARN.*tailscale" "$TMP/out"'
+conf component_t3code=yes; MODE=install run07
+assert "F5. unset: no Serve line in the drop-in" '! grep -q TAILSCALE "$DROPIN"'
 
 echo "verifier (verify.sh)"
 reset; conf component_t3code=yes; runv

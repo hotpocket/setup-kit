@@ -215,17 +215,75 @@ comp component_ollama    no  "ollama: runtime + $(conf_get ollama_model qwen3-co
                              cmd:ollama /usr/local/bin/ollama
 comp component_whisper   no  "whisper: venv + $(conf_get whisper_model large-v3) weights" \
                              "$HOME/.local/share/pipx/venvs/whisper-ctranslate2"
-comp component_dictation yes "dictation: nerd-dictation + vosk model" "$HOME/.pyenv/versions/vosk"
-comp component_ocr       yes "ocr: tesseract + language data"         cmd:tesseract
-comp component_tts       yes "tts: kokoro venv + voices"              "$HOME/.pyenv/versions/kokoro-tts"
+CFG_DEF=yes; [[ "$(conf_get configs yes)" == no ]] && CFG_DEF=no
+comp component_dictation "$CFG_DEF" "dictation: nerd-dictation + vosk model" "$HOME/.pyenv/versions/vosk"
+comp component_ocr       "$CFG_DEF" "ocr: tesseract + language data"         cmd:tesseract
+comp component_tts       "$CFG_DEF" "tts: kokoro venv + voices"              "$HOME/.pyenv/versions/kokoro-tts"
 comp component_mtga      no  "mtga: Arena client (Arena's own installer downloads it)" \
                              "$HOME/.wine/drive_c/Program Files/Wizards of the Coast/MTGA"
 comp component_herdr     no  "herdr: agent multiplexer"  cmd:herdr "$HOME/.local/bin/herdr"
 comp component_t3code    no  "t3code: CLI runtime under ~/.t3" cmd:t3 "$HOME/.t3/runtime"
 comp component_codex     no  "codex: CLI release under ~/.codex" cmd:codex "$HOME/.codex/packages"
 comp component_claude_skills yes "claude skills: repo clones" "$HOME/.claude/skills"
-[[ -d "$HOME/git/.configs" ]] ||
+[[ "$(conf_get configs yes)" == no || -d "$HOME/git/.configs" ]] ||
   add_need "dotfiles: .configs clone + its setup" "$(declared_kb configs_repo)" "$(declared_tgt configs_repo)" declared
+
+# ---- memory storage (phase 07) --------------------------------------------
+# Read the same rounded RAM class as the memory components. Sourcing this
+# helper only defines functions and reads meminfo; it changes no machine state.
+source "$KIT_DIR/components/memory-common.sh"
+if [[ "$(conf_get component_oom_zram yes)" == yes ]]; then
+  SWAP_POLICY=$(conf_get swap_policy auto)
+  if [[ "$SWAP_POLICY" == auto ]]; then
+    (( RAM_CLASS_MB < 16384 )) && SWAP_POLICY=zram+disk || SWAP_POLICY=zram-only
+  fi
+  if [[ "$SWAP_POLICY" == zram+disk ]]; then
+    # Large boxes retain the explicit disk policy's 4 GiB target. Small ones
+    # need rounded RAM capacity. Existing files/partitions already occupy disk.
+    SWAP_TARGET_BYTES=$(( $(declared_kb swap_overflow_large) * 1024 ))
+    (( RAM_CLASS_MB < 16384 )) && SWAP_TARGET_BYTES=$(( RAM_CLASS_MB * 1048576 ))
+    SWAP_ROWS=$(swapon --show=NAME,TYPE,SIZE,USED,PRIO --bytes --noheadings 2>/dev/null)
+    DISK_SWAP_BYTES=$(awk '$1 !~ /zram/ {s+=$3} END {printf "%.0f",s}' <<< "$SWAP_ROWS")
+    if (( DISK_SWAP_BYTES + 1048576 < SWAP_TARGET_BYTES )); then
+      SWAP_DEFICIT=$(( SWAP_TARGET_BYTES - DISK_SWAP_BYTES ))
+      SWAP_PATH=''; SWAP_OLD_BYTES=0; SWAP_USABLE_BYTES=0
+      while read -r name type size _rest; do
+        [[ "$type" == file ]] || continue
+        case "$name" in "$MEM_ROOT/swap.img"|"$MEM_ROOT/swapfile"|"$MEM_ROOT/swap.setup-kit")
+          if [[ -f "$name" && ! -L "$name" ]]; then
+            SWAP_PATH="$name"; SWAP_OLD_BYTES=$(stat -c %s "$name"); SWAP_USABLE_BYTES="$size"
+            break
+          fi ;;
+        esac
+      done <<< "$SWAP_ROWS"
+      if [[ -z "$SWAP_PATH" ]]; then
+        SWAP_PATH="$MEM_ROOT/swap.img"
+        [[ -e "$SWAP_PATH" || -L "$SWAP_PATH" ]] && SWAP_PATH="$MEM_ROOT/swap.setup-kit"
+      fi
+      # Match the component's growth calculation, including its header page.
+      # An allocated tail isn't free disk, but needs no further allocation.
+      SWAP_GROWTH=$(( SWAP_USABLE_BYTES + SWAP_DEFICIT + $(declared_kb swap_header) * 1024 - SWAP_OLD_BYTES ))
+      (( SWAP_GROWTH < 0 )) && SWAP_GROWTH=0
+      add_need "memory: disk swap overflow (additional allocation)" \
+        "$(( (SWAP_GROWTH + 1023) / 1024 ))" "$SWAP_PATH" declared
+    fi
+  fi
+fi
+if [[ "$(conf_get tmp_on_disk yes)" == yes ]]; then
+  TMP_FSTAB_TYPE=$(awk '$1 !~ /^#/ && $2 == "/tmp" {print $3}' "$MEM_ROOT/etc/fstab")
+  # The component preserves explicit RAM-backed fstab mounts, so they don't
+  # create a disk scratch requirement. Otherwise reserve space on its disk.
+  if [[ "$TMP_FSTAB_TYPE" != *tmpfs* && "$TMP_FSTAB_TYPE" != *ramfs* ]]; then
+    TMP_PATH="$MEM_ROOT/tmp"
+    TMP_TYPE=$(findmnt -rn -o FSTYPE --target "$TMP_PATH" 2>/dev/null)
+    if [[ "$TMP_TYPE" == tmpfs || "$TMP_TYPE" == ramfs ]]; then
+      # df /tmp would count today's RAM mount; after reboot the parent disk
+      # holds scratch instead. Preserve a symlinked /tmp's real location too.
+      TMP_PATH=$(dirname "$(readlink -f "$TMP_PATH")")
+    fi
+    add_need "tmp: disk scratch allowance" "$(declared_kb tmp_disk_scratch)" "$TMP_PATH" declared
+  fi
+fi
 
 # ---- report ---------------------------------------------------------------
 if (( ${#ROWS[@]} == 0 )); then
