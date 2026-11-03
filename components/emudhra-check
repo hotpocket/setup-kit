@@ -9,8 +9,10 @@ import argparse
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -59,6 +61,15 @@ def inventory():
             if p.is_file() and os.access(p, os.X_OK):
                 dest.add(p)
     def walk_error(exc):
+        if isinstance(exc, PermissionError) and exc.filename:
+            try:
+                st = os.stat(exc.filename)
+                if st.st_uid == 0 and stat.S_ISDIR(st.st_mode) and not os.access(exc.filename, os.R_OK):
+                    user = pwd.getpwuid(os.geteuid()).pw_name
+                    record('SKIPPED', 'inventory', exc.filename, f'root-only, not listable by {user}')
+                    return
+            except OSError:
+                pass
         record('UNTESTED', 'inventory', exc.filename, str(exc))
     # Follow each directory only once by inode: venv python symlinks still
     # retain their invocation path (resolving them would lose the venv).
@@ -151,9 +162,18 @@ for go in gos:
     value = value.group(1) if value else ''
     branch = version(value)[:2]
     floor('go', go, value, {(1, 26): '1.26.10', (1, 27): '1.27.3'}.get(branch, 'unsupported branch'))
+def probe_result(kind, executable, good, trusted, unknown):
+    # A rejected good-site certificate alone does not prove an empty store.
+    # Keep testing bad chains, and never let this status conceal trust/errors.
+    no_store = good == 'rejected' and trusted == 0 and unknown == 0
+    record('FAIL' if trusted else 'UNTESTED' if unknown else 'NO-STORE' if no_store else 'OK',
+           kind, executable,
+           ('known-good certificate rejected; trusts no chain in this probe; ' if no_store else '') +
+           f'trusts {trusted}/12 compromised chains; {unknown} untested')
+
 def probe_command(kind, executable, make_args, classify):
-    good = run(make_args('example.com'))
-    if classify(good) != 'trusted':
+    good = classify(run(make_args('example.com')))
+    if good not in ('trusted', 'rejected'):
         record('UNTESTED', kind, executable, 'known-good site unreachable; restore network and rerun')
         return
     trusted = 0
@@ -162,8 +182,7 @@ def probe_command(kind, executable, make_args, classify):
         answer = classify(run(make_args(host)))
         trusted += answer == 'trusted'
         unknown += answer == 'unknown'
-    record('FAIL' if trusted else 'UNTESTED' if unknown else 'OK', kind, executable,
-           f'trusts {trusted}/12 compromised chains; {unknown} untested')
+    probe_result(kind, executable, good, trusted, unknown)
 
 curl = shutil.which('curl', path=scan_path)
 if curl:
@@ -176,7 +195,7 @@ if git:
     def git_result(r):
         if r.returncode == 0 or 'repository not found' in r.stderr or 'The requested URL returned error: 404' in r.stderr:
             return 'trusted'
-        if re.search(r'certificate|SSL peer', r.stderr, re.I):
+        if re.search(r'SSL (?:peer )?certificate problem|(?:server )?certificate verif(?:y|ication) failed|SSL peer certificate or SSH remote key was not OK', r.stderr, re.I):
             return 'rejected'
         return 'unknown'
     probe_command('git', git, lambda h: [git, '-c', 'credential.helper=', '-c', 'core.askPass=',
@@ -193,7 +212,7 @@ def probe(open_url,h):
  except Exception: return "unknown"
 def report(kind,opener):
  good=probe(opener,hosts[0]); bad=[probe(opener,h) for h in hosts[1:]]
- print(kind,"ok" if good=="trusted" else "no",bad.count("trusted"),bad.count("unknown"))
+ print(kind,"ok" if good=="trusted" else good,bad.count("trusted"),bad.count("unknown"))
 report("python",urllib.request.urlopen)
 try:
  import certifi
@@ -207,7 +226,7 @@ const t=h=>new Promise(r=>{const q=https.get("https://"+h,{timeout:8000},s=>{s.r
 q.on("error",e=>r(["UNABLE_TO_GET_ISSUER_CERT_LOCALLY","CERT_HAS_EXPIRED","CERT_REVOKED","UNABLE_TO_VERIFY_LEAF_SIGNATURE","SELF_SIGNED_CERT_IN_CHAIN","CERT_SIGNATURE_FAILURE"].includes(e.code)?"rejected":"unknown"));
 q.on("timeout",()=>{q.destroy();r("unknown")})});
 (async()=>{const good=await t(g); const bad=await Promise.all(hs.map(t));
-console.log("node",good==="trusted"?"ok":"no",bad.filter(x=>x==="trusted").length,bad.filter(x=>x==="unknown").length)})().catch(()=>process.exit(1));
+console.log("node",good==="trusted"?"ok":good,bad.filter(x=>x==="trusted").length,bad.filter(x=>x==="unknown").length)})().catch(()=>process.exit(1));
 '''
 for kind, binaries, code, args in [('python', tls_pythons, python_probe, ['-I', '-B', '-c']), ('node', nodes, node_probe, ['-e'])]:
     for binary in binaries:
@@ -219,11 +238,14 @@ for kind, binaries, code, args in [('python', tls_pythons, python_probe, ['-I', 
             fields = line.split()
             # Keep compatibility with the original checker's three columns.
             if len(fields) == 2 and kind == 'node': fields.insert(0, 'node')
-            if len(fields) < 3 or fields[1] != 'ok' or not fields[2].isdigit():
-                record('UNTESTED', kind, binary, 'known-good site unreachable or probe unreadable'); continue
+            row_kind = fields[0] if fields and fields[0] in (('python', 'certifi') if kind == 'python' else ('node',)) else kind
+            if (len(fields) not in (3, 4) or fields[0] != row_kind or
+                fields[1] not in ('ok', 'rejected') or not fields[2].isdigit() or
+                (len(fields) == 4 and not fields[3].isdigit()) or
+                (fields[1] == 'rejected' and len(fields) != 4)):
+                record('UNTESTED', row_kind, binary, 'known-good site unreachable or probe unreadable'); continue
             count = int(fields[2]); unknown = int(fields[3]) if len(fields) > 3 and fields[3].isdigit() else 0
-            record('FAIL' if count else 'UNTESTED' if unknown else 'OK', fields[0], binary,
-                   f'trusts {count}/12 compromised chains; {unknown} untested')
+            probe_result(row_kind, binary, 'trusted' if fields[1] == 'ok' else 'rejected', count, unknown)
 print('RESULT: all clear' if not any(s in ('FAIL', 'UNTESTED') for s in results)
       else 'RESULT: admission failed; patch or rebuild the listed consumers, then rerun --check')
 sys.exit(1 if any(s in ('FAIL', 'UNTESTED') for s in results) else 0)

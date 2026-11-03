@@ -8,8 +8,11 @@ patches CAs, installs packages, removes Node versions or relinks runtimes.
 `emudhra-check` promotes the read-only part of Beast's untracked `emudhra-fix`.
 The source was inspected: no credentials are included. Its good-site
 calibration and compromised-chain endpoints are retained; patch/relink code
-is omitted. A reachable compromised chain fails; unreachable good sites or
-unreadable probes are UNTESTED and fail admission.
+is omitted. A trusted compromised chain fails. Network errors and unreadable
+probes are UNTESTED and fail admission. If certificate verification rejects
+the good site and every compromised chain, the consumer reports NO-STORE,
+with no chain trusted in the probe. NO-STORE passes admission. Unknown
+bad-chain results still fail closed, even when the good certificate is rejected.
 
 Explicit floors:
 
@@ -25,8 +28,10 @@ Explicit floors:
 An absent pip is reported ABSENT, rather than counted as patched. An absent
 certifi in a venv fails. Discovery traverses the user's HOME, `/usr/local`,
 `/opt`, and interpreters on PATH, without a depth or cache exclusion. Symlink
-cycles are bounded. Unreadable directories and broken environments fail
-closed. The inventory prints versions and paths, never credential contents.
+cycles are bounded. A root-owned directory the scanning user cannot list is
+named as SKIPPED with the reason `root-only, not listable by <user>`. Other
+unreadable paths and broken environments fail closed. The inventory prints
+versions and paths, never credential contents.
 
 Python package floors come from `manifests/tool-versions.conf`. Distro
 certifi resolving to `/etc/ssl/certs/ca-certificates.crt` uses the system CA
