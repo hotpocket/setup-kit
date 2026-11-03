@@ -389,3 +389,26 @@ else
   warn "vault-digest template missing (claude-conduct subtree not present?)"
 fi
 
+
+# Codex (Sol) parity: .configs/setup.sh codex derives Codex's skills, MCP
+# servers and hooks from what Claude has installed. Phase 06 runs .configs'
+# install BEFORE this phase links Claude's skills, so it must run again here,
+# after them, or a fresh box's Sol misses every skill linked above
+# (ai-3090 2026-11-03). Path derived from the one .configs location above.
+CONFIGS_SETUP="${CONDUCT_SKILLS_SRC%/claude-conduct/skills}/setup.sh"
+if (( CONFIGS )) && [[ -x "$CONFIGS_SETUP" ]]; then
+  section "codex parity ($MODE)"
+  if (( INSTALL )); then
+    # Output, not an action: it is idempotent, and do_or_say would mark every
+    # pass as a change so bootstrap could never converge.
+    log "running .configs/setup.sh codex..."
+    "$CONFIGS_SETUP" codex 2>&1 | extout
+    if (( PIPESTATUS[0] != 0 )); then
+      fail ".configs/setup.sh codex failed — Sol lacks Claude's skills/hooks"
+      miss "claude-skills: .configs/setup.sh codex failed — rerun it"
+      exit 1
+    fi
+  else
+    do_or_say "$CONFIGS_SETUP" codex
+  fi
+fi
