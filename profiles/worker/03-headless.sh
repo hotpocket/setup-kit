@@ -16,6 +16,17 @@ source "$(dirname "$0")/lib-aws-creds.sh"
 require_user
 init_mode "${1:-}"
 
+# Opt-in networking repair, owned only by the worker profile. Unset preserves
+# the existing path without even invoking netplan or a privileged reader.
+case "$(conf_get net_dhcp_identifier '')" in
+  '') ;;
+  mac)
+    source "$KIT_DIR/profiles/worker/lib-dhcp-identifier.sh"
+    # A failure still lets the rest of this phase (hub alias, credentials) run; the phase exits 1 at the end.
+    worker_dhcp_identifier || DHCP_FAILED=1 ;;
+  *) fail "net_dhcp_identifier must be mac or unset; correct the host conf"; exit 1 ;;
+esac
+
 section "headless boot ($MODE)"
 
 # ---- 1. default target: boot_target in the host conf (multi-user default) ---
@@ -241,4 +252,4 @@ else
   hub_each hub_remote_ensure
 fi
 
-exit 0
+exit $(( ${DHCP_FAILED:-0} ))
