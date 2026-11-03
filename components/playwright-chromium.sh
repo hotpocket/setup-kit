@@ -4,8 +4,24 @@ source "$KIT_DIR/components/tool-common.sh"
 section "Playwright Chromium ($MODE) — components/playwright-chromium.md"
 GSTACK_DIR="${gsdir:-${GIT_HOME:-$(dirname "$KIT_DIR")}/gstack}"
 PW_CLI="$GSTACK_DIR/node_modules/playwright/cli.js"
+pw_archive_install() (
+  local name="$1" url="$2" sha="$3" dest="$4" exe="$5" stage owner
+  tool_x64 Playwright || exit 1
+  mkdir -p "${dest%/*}" || exit 1
+  owner=$BASHPID
+  stage=$(tool_stage "${dest%/*}" "$name" "$owner") || exit 1
+  trap 'rm -rf "$stage"' EXIT
+  tool_fetch "$url" "$sha" "$stage/$name.zip" \
+    && mkdir "$stage/payload" && unzip -q "$stage/$name.zip" -d "$stage/payload" \
+    && [[ -f "$stage/payload/$exe" ]] \
+    && chmod +x "$stage/payload/$exe" \
+    && printf '%s\n' "$sha" > "$stage/payload/.setup-kit-sha256" \
+    && tool_content_receipt "$stage/payload" "$exe" \
+    && touch "$stage/payload/INSTALLATION_COMPLETE" \
+    && tool_publish_dir "$stage/payload" "$dest" "$stage"
+)
 pw_chromium() {
-  local pin installed os paths path missing=0 dry runner
+  local pin installed os paths path expected dry runner
   pin=$(python3 -I - "$GSTACK_DIR/package.json" <<'PY'
 import json,sys
 try: print(json.load(open(sys.argv[1]))['dependencies']['playwright'])
@@ -31,19 +47,30 @@ PY
   fi
   [[ -x "$runner" ]] || { miss "Playwright: Node missing; complete language phase first"; return 1; }
   [[ -f "$PW_CLI" ]] || { miss "Playwright: project CLI missing"; return 1; }
-  # The vendor's dry-run knows the platform-specific revisions and paths.
-  # It neither downloads nor garbage-collects, and avoids a copied cache layout.
+  # Read-only registry calibration; refuse a changed layout before downloading.
   dry=$(PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" "$runner" "$PW_CLI" install --dry-run chromium) \
     || { miss "Playwright: browser registry dry-run failed"; return 1; }
-  paths=$(sed -n 's/^[[:space:]]*Install location:[[:space:]]*//p' <<< "$dry")
-  [[ "$dry" == *chromium* && "$dry" == *headless* && -n "$paths" ]] || { miss "Playwright: registry did not enumerate Chromium and headless shell"; return 1; }
-  while IFS= read -r path; do
-    [[ "$path" == "$HOME/.cache/ms-playwright/"* ]] || { miss "Playwright: unexpected cache path $path"; return 1; }
-    [[ -f "$path/INSTALLATION_COMPLETE" ]] || { warn "Chromium runtime missing: $path"; missing=1; }
-  done <<< "$paths"
-  if (( missing )); then
-    do_or_say env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" "$runner" "$PW_CLI" install chromium \
-      || { miss "Playwright: Chromium install failed"; return 1; }
-  else ok "Playwright Chromium and headless shell match gstack $installed"; fi
+  paths=$(sed -n 's/^[[:space:]]*Install location:[[:space:]]*//p' <<< "$dry" | sort)
+  expected=$(printf '%s\n' "$HOME/.cache/ms-playwright/chromium-$PLAYWRIGHT_CHROMIUM_REVISION" \
+    "$HOME/.cache/ms-playwright/chromium_headless_shell-$PLAYWRIGHT_CHROMIUM_REVISION" \
+    "$HOME/.cache/ms-playwright/ffmpeg-$PLAYWRIGHT_FFMPEG_REVISION" | sort)
+  [[ "$paths" == "$expected" ]] || { miss "Playwright: registry layout differs from archive pins; review vendor metadata"; return 1; }
+  local name dir sha url exe
+  for name in chromium headless ffmpeg; do
+    case "$name" in
+      chromium) dir="chromium-$PLAYWRIGHT_CHROMIUM_REVISION"; sha="$PLAYWRIGHT_CHROMIUM_SHA256"; url="$PLAYWRIGHT_CHROMIUM_URL"; exe=chrome-linux64/chrome ;;
+      headless) dir="chromium_headless_shell-$PLAYWRIGHT_CHROMIUM_REVISION"; sha="$PLAYWRIGHT_HEADLESS_SHA256"; url="$PLAYWRIGHT_HEADLESS_URL"; exe=chrome-headless-shell-linux64/chrome-headless-shell ;;
+      ffmpeg) dir="ffmpeg-$PLAYWRIGHT_FFMPEG_REVISION"; sha="$PLAYWRIGHT_FFMPEG_SHA256"; url="$PLAYWRIGHT_FFMPEG_URL"; exe=ffmpeg-linux ;;
+    esac
+    path="$HOME/.cache/ms-playwright/$dir"
+    if [[ -f "$path/INSTALLATION_COMPLETE" && -x "$path/$exe" \
+        && "$(cat "$path/.setup-kit-sha256" 2>/dev/null)" == "$sha" ]] && tool_content_valid "$path" "$exe"; then
+      ok "Playwright $name matches pinned archive"
+    else
+      warn "Chromium runtime missing or unverified: $path"
+      do_or_say pw_archive_install "$name" "$url" "$sha" "$path" "$exe" \
+        || { miss "Playwright: $name archive verification/install failed"; return 1; }
+    fi
+  done
 }
-pw_chromium || true
+pw_chromium

@@ -367,7 +367,7 @@ fi
 
 # Browser downloads belong after the gstack build and existing AppArmor path.
 if [[ "$(conf_get component_playwright_chromium no)" == yes ]]; then
-  source "$KIT_DIR/components/playwright-chromium.sh"
+  source "$KIT_DIR/components/playwright-chromium.sh" || exit 1
 fi
 
 # Shared vault-digest in ~/bin: the file-based vault reader used by the global

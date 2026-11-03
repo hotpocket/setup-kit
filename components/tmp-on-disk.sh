@@ -30,7 +30,9 @@ if [[ "$(conf_get tmp_on_disk yes)" == yes ]]; then
   # No --clean now: ongoing agent/test scratch must not disappear mid-run.
   if [[ "$(conf_get tmp_age_rule no)" == yes ]]; then
     TMP_RULE="$MEM_ROOT/etc/tmpfiles.d/tmp.conf"
-    TMP_WANT='D /tmp 1777 root root mM:10d'
+    source "$KIT_DIR/manifests/tmpfiles.conf"
+    TMP_AGE="$(conf_get tmp_age "$TMP_AGE_DEFAULT")"
+    TMP_WANT="D /tmp 1777 root root $TMP_AGE"
     if [[ -f "$TMP_RULE" && ! -L "$TMP_RULE" && "$(stat -c %a "$TMP_RULE")" == 644 ]] \
         && cmp -s <(printf '%s\n' "$TMP_WANT") "$TMP_RULE"; then
       ok "tmp: age rule matches"

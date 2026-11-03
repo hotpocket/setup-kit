@@ -26,6 +26,11 @@ mv "$FIXTURE/.local/share/icons/test.svg" "$FIXTURE/.local/share/icons/agent-fix
 cat > "$FIXTURE/setup.sh" <<'S'
 #!/bin/bash
 echo "configs $*" >> "$CALLS"
+if [[ "${1:-}" == role-capabilities ]]; then
+  echo full
+  [[ "${CAPABILITY:-agent}" != agent ]] || echo agent
+  exit "${CAPABILITY_RC:-0}"
+fi
 echo "PATH=$PATH" >> "$CALLS.path"
 exit "${DOCTOR_RC:-0}"
 S
@@ -73,6 +78,33 @@ finally: os.close(m); os.close(s)
 PY
   rc=$?
 }
+if [[ "${CASE:-all}" == all || "${CASE:-}" == capability ]]; then
+  reset_home; present; conf
+  # A legacy dispatcher rejects unknown first-position actions, but ignores
+  # --role after install/check. The sentinel must never be called.
+  cat > "$H/repos/.configs/setup.sh" <<'S'
+#!/bin/bash
+case "${1:-check}" in
+  install|check) echo "PERSONAL $*" >> "$CALLS"; exit 0 ;;
+  *) echo 'usage: setup.sh install|check'; exit 1 ;;
+esac
+S
+  for mode in install check; do
+    run profiles/workstation/06-configs.sh "$mode"
+    assert "CAP1 $mode refuses the historical dispatcher" '[[ $rc != 0 ]] && ! grep -q "^PERSONAL " "$CALLS" && grep -q "agent.*capability" "$TMP/out"'
+  done
+  run verify.sh
+  assert 'CAP2 independent verifier refuses legacy doctor' '! grep -q "^PERSONAL " "$CALLS" && grep -q "FAIL.*agent.*capability" "$TMP/out"'
+  cp "$FIXTURE/setup.sh" "$H/repos/.configs/setup.sh"
+  for cap in agentish full; do
+    CAPABILITY="$cap" run profiles/workstation/06-configs.sh
+    assert "CAP3 exact capability required ($cap)" '[[ $rc != 0 ]] && ! grep -qx "configs install --role agent" "$CALLS"'
+  done
+  CAPABILITY_RC=1 run profiles/workstation/06-configs.sh
+  assert 'CAP4 nonzero capability response refuses even when agent was printed' '[[ $rc != 0 ]] && ! grep -qx "configs install --role agent" "$CALLS"'
+  run profiles/workstation/06-configs.sh
+  assert 'CAP5 supported checkout installs after capability discovery' '[[ $rc == 0 ]] && grep -qx "configs role-capabilities" "$CALLS" && grep -qx "configs install --role agent" "$CALLS"'
+fi
 if [[ "${CASE:-all}" == all || "${CASE:-}" == role ]]; then
   reset_home; present; conf configs_run_setup=no
   run profiles/worker/06-configs.sh
@@ -105,6 +137,15 @@ if [[ "${CASE:-all}" == all || "${CASE:-}" == role ]]; then
   rm -rf "$H/.config/autostart" "$H/.local/share/applications" "$H/.local/share/icons" "$H/bin/personal-tool"
   run verify.sh
   assert 'R12 verifier also omits launcher and autostart checks for the agent role' '! grep -qE "FAIL.*(dotfile:|bin:|launcher|autostart)" "$TMP/out"'
+fi
+if [[ "${CASE:-all}" == all || "${CASE:-}" == workstation-auth ]]; then
+  reset_home; conf profile=workstation headless=no configs_repo=git@github.com:example/configs.git
+  run profiles/workstation/preamble-github-auth.sh
+  assert 'W1 workstation none skips credential setup, hosts and agent masking' '[[ $rc == 0 ]] && ! grep -qE "^(gh |ssh|git config|systemctl )" "$CALLS" && [[ ! -e "$H/.ssh/known_hosts" && ! -e "$H/.ssh/config" ]]'
+  assert 'W2 workstation none uses phase 06 source and sibling destination' 'grep -qx "git clone git@github.com:example/configs.git $H/repos/.configs" "$CALLS" && [[ -d "$H/repos/.configs/.git" ]]'
+  reset_home; conf profile=workstation configs_repo=missing-local-source
+  CLONE_FAIL=1 run profiles/workstation/preamble-github-auth.sh
+  assert 'W3 failed noninteractive source defers to phase 06 without auth recovery' '[[ $rc == 0 ]] && grep -q "WARN.*phase 06" "$TMP/out" && ! grep -qE "^(gh |ssh|systemctl )" "$CALLS"'
 fi
 if [[ "${CASE:-all}" == all || "${CASE:-}" == auth ]]; then
   reset_home; conf configs_repo=git-hub:.configs.git

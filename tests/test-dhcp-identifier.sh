@@ -39,13 +39,18 @@ with open(os.environ['CALLS'], 'a') as log:
 if args[0] == 'get':
     if (root / 'get-fail').exists():
         sys.exit(2)
-    # The CLI gives a merged view; this independent fixture can differ from
-    # the disk YAML to prove the installer prefers netplan get.
-    p = root / 'get.yaml'
-    if not p.exists():
-        p = root / 'etc/netplan/50-cloud-init.yaml'
-    data = yaml.safe_load(p.read_text())
-    print(yaml.safe_dump(data['network']['ethernets'], sort_keys=False), end='')
+    # Merge the same hierarchy as netplan. get.yaml models additional runtime
+    # devices, then the real drop-in and late override still apply.
+    files = {}
+    for directory in ('lib','etc','run'):
+        files.update({p.name:p for p in (root/directory/'netplan').glob('*.yaml')})
+    if (root/'get.yaml').exists(): files['50-cloud-init.yaml'] = root/'get.yaml'
+    devices = {}
+    for name in sorted(files):
+        data = yaml.safe_load(files[name].read_text()) or {}
+        for ident,settings in data.get('network',{}).get('ethernets',{}).items():
+            devices.setdefault(ident,{}).update(settings)
+    print(yaml.safe_dump(devices, sort_keys=False), end='')
 elif args[0] == 'generate':
     f = root / 'etc/netplan/90-dhcp-mac.yaml'
     if not f.exists() or f.read_text() != (root / 'expected').read_text():
@@ -203,8 +208,27 @@ case_verify_unset() {
   verify
   assert 'verify unset: no DHCP checks or netplan calls' '! grep -q "DHCP identifier" "$TMP/out" && ! grep -q "netplan" "$CALLS"'
 }
+case_verify_override() {
+  enabled; handmade
+  printf '%s\n' 'network: {ethernets: {eth0: {dhcp-identifier: duid}}}' > "$KIT_NETPLAN_ROOT/etc/netplan/99-local.yaml"
+  verify
+  assert 'verify: late duid override fails with interface and source' 'grep -q "FAIL.*DHCP identifier" "$TMP/out" && grep -q "eth0.*99-local.yaml" "$TMP/out" && no_mutations'
+}
+case_install_override() {
+  enabled; handmade
+  printf '%s\n' 'network: {ethernets: {eth0: {dhcp-identifier: duid}}}' > "$KIT_NETPLAN_ROOT/etc/netplan/99-local.yaml"
+  snapshot; phase install
+  assert 'install: matching owned file cannot hide an ineffective merged policy' '(( RC != 0 )) && grep -q "FAIL.*DHCP identifier" "$TMP/out" && grep -q "99-local.yaml" "$TMP/out" && unchanged && no_mutations'
+}
+case_verify_runtime_override() {
+  enabled; handmade; touch "$KIT_NETPLAN_ROOT/get-fail"
+  mkdir -p "$KIT_NETPLAN_ROOT/run/netplan"
+  printf '%s\n' 'network: {ethernets: {eth0: {dhcp-identifier: duid}}}' > "$KIT_NETPLAN_ROOT/run/netplan/90-dhcp-mac.yaml"
+  verify
+  assert 'fallback: runtime basename shadowing also fails the effective policy' 'grep -q "FAIL.*DHCP identifier" "$TMP/out" && grep -q "run/netplan/90-dhcp-mac.yaml" "$TMP/out" && no_mutations'
+}
 pass=0; fail=0
-for name in unset check content mode rerun handmade rollback rollback_absent multiple fallback read_error next_boot verify_missing verify_handmade verify_mode verify_owner verify_multiple verify_unset; do
+for name in verify_override install_override verify_runtime_override unset check content mode rerun handmade rollback rollback_absent multiple fallback read_error next_boot verify_missing verify_handmade verify_mode verify_owner verify_multiple verify_unset; do
   [[ -z "${1:-}" || "$name" == "$1" ]] || continue
   reset
   if "case_$name"; then ((pass++)); else ((fail++)); fi

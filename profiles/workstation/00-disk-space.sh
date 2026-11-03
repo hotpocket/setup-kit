@@ -226,8 +226,12 @@ if [[ "$(conf_get component_blender no)" == yes ]] && ! {
 }; then
   comp component_blender no "blender: batch renderer"
 fi
-comp component_flutter_headless no "flutter: headless SDK + Android tools/NDK"
-comp component_playwright_chromium no "Playwright: Chromium + headless shell"
+if [[ "$(conf_get component_flutter_headless no)" == yes ]] && ! tool_flutter_installed; then
+  comp component_flutter_headless no "flutter: headless SDK + Android tools/NDK"
+fi
+if [[ "$(conf_get component_playwright_chromium no)" == yes ]] && ! tool_playwright_installed; then
+  comp component_playwright_chromium no "Playwright: Chromium + headless shell"
+fi
 comp component_emudhra no "eMudhra: admission inventory"
 if [[ "$(conf_get component_flutter_headless no)" == yes ]] && ! pkg_installed openjdk-21-jdk-headless; then
   add_need "JDK 21: headless (phase 07 apt)" "$(declared_kb component_flutter_headless_jdk)" /usr declared

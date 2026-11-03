@@ -251,7 +251,21 @@ manifest_missing() {
 # own configs explicitly, not by answering dpkg prompts.
 APT_NI=(DEBIAN_FRONTEND=noninteractive apt-get
         -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
-apt_install() { do_or_say sudo "${APT_NI[@]}" install -y "$@"; }
+apt_install() {
+  local simulation removals
+  if (( ${INSTALL:-0} )); then
+    if ! simulation=$(sudo apt-get install -s "$@" 2>&1); then
+      fail "apt dry-run failed; refusing component install; repair apt and retry"
+      miss "apt: dry-run failed ($*)"; return 1
+    fi
+    removals=$(awk '/^Remv /{print $2}' <<< "$simulation")
+    if [[ -n "$removals" ]]; then
+      fail "apt component transaction would remove: ${removals//$'\n'/ }; resolve the conflict and retry"
+      miss "apt: refused component transaction ($*)"; return 1
+    fi
+  fi
+  do_or_say sudo "${APT_NI[@]}" install --no-remove -y "$@"
+}
 
 apt_install_one() {
   local pkg="$1"
