@@ -16,12 +16,19 @@ fi
 exec "$FIXTURE/bin/curl-ready" "$@"
 SH2
 chmod +x "$TMP/bin/curl"
-for runtime in dart chromium; do
+for runtime in dart chromium engine; do
+  label=$runtime
   rm -f "$STATE/download-started" "$STATE/stage-path"
   if [[ "$runtime" == dart ]]; then
     conf_tools component_flutter_headless=yes
     phase=07-components; export PAUSE_URL=dart-sdk-linux-x64.zip
     target="$HOME/development/flutter/bin/cache/dart-sdk/bin/dart"
+  elif [[ "$runtime" == engine ]]; then
+    conf_tools component_flutter_headless=yes
+    phase=07-components; export PAUSE_URL=/linux-x64/artifacts.zip
+    target="$HOME/development/flutter/bin/cache/artifacts/engine/linux-x64/flutter_tester"
+    label=precache
+    rm -rf "$HOME/development/flutter/bin/cache/artifacts" "$HOME/development/flutter/bin/cache/setup-kit-cache.json"
   else
     conf_tools component_claude_skills=yes claude_skills=gstack component_playwright_chromium=yes
     phase=08-claude-skills; export PAUSE_URL=chrome-linux64.zip
@@ -31,7 +38,7 @@ for runtime in dart chromium; do
   setsid bash "$KIT_DIR/profiles/workstation/$phase.sh" install > "$TMP/out" 2>&1 & job=$!
   for ((i=0;i<400;i++)); do [[ -e "$STATE/download-started" ]] && break; sleep .025; done
   stage=$(cat "$STATE/stage-path" 2>/dev/null || true)
-  owner=${stage##*/.$runtime.}; owner=${owner%%.*}
+  owner=${stage##*/.$label.}; owner=${owner%%.*}
   assert "$runtime active staging records a live owner" '[[ -d "$stage" && "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null'
   kill -KILL -- "-$job" 2>/dev/null || true; wait "$job" 2>/dev/null || true
   assert "$runtime killed download publishes no executable" '[[ -e "$STATE/download-started" && ! -e "$target" ]]'

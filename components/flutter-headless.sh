@@ -1,5 +1,6 @@
 #!/bin/bash
 source "$KIT_DIR/components/tool-common.sh"
+source "$KIT_DIR/components/flutter-cache.sh"
 section "flutter headless ($MODE) — components/flutter-headless.md"
 FLUTTER_DIR="$HOME/development/flutter"
 SDK_DIR="$HOME/Android/Sdk"
@@ -63,11 +64,12 @@ elif [[ "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" != "$FLUTTER_REVIS
 else ok "flutter revision $FLUTTER_VERSION"; fi
 if ! flutter_dart_ready; then
   warn "pinned Dart SDK missing or unverified"
+  (( ! INSTALL )) || rm -f "$FLUTTER_DIR/bin/cache/setup-kit-android.complete"
   if (( INSTALL )) && [[ -x "$FLUTTER_DIR/bin/flutter" && "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]]; then
     flutter_dart_install || miss "flutter: Dart archive verification failed"
   fi
 fi
-if flutter_dart_ready && [[ "$(cat "$FLUTTER_DIR/bin/cache/setup-kit-android.complete" 2>/dev/null)" == "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" && -f "$FLUTTER_DIR/bin/cache/flutter.version.json" ]] && python3 -I - "$FLUTTER_DIR/bin/cache/flutter.version.json" "$FLUTTER_VERSION" "$FLUTTER_DART_VERSION" <<'PY'
+if flutter_dart_ready && tool_flutter_cache_ready && [[ "$(cat "$FLUTTER_DIR/bin/cache/setup-kit-android.complete" 2>/dev/null)" == "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" && -f "$FLUTTER_DIR/bin/cache/flutter.version.json" ]] && python3 -I - "$FLUTTER_DIR/bin/cache/flutter.version.json" "$FLUTTER_VERSION" "$FLUTTER_DART_VERSION" <<'PY'
 import json,sys
 try:
  d=json.load(open(sys.argv[1])); sys.exit(0 if d['frameworkVersion']==sys.argv[2] and d['dartSdkVersion']==sys.argv[3] else 1)
@@ -79,7 +81,11 @@ else
   if flutter_dart_ready && [[ -x "$FLUTTER_DIR/bin/flutter" && "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]]; then
     flutter_precache() {
       rm -f "$FLUTTER_DIR/bin/cache/setup-kit-android.complete" || return 1
-      env FLUTTER_PREBUILT_ENGINE_VERSION="$FLUTTER_ENGINE_REVISION" "$FLUTTER_DIR/bin/flutter" precache --android \
+      tool_flutter_cache_ready || flutter_cache_install || return 1
+      # An unsupported scheme makes any unexpected upstream HTTP fetch fail
+      # before extraction. No network service or free local port is trusted.
+      env FLUTTER_STORAGE_BASE_URL=setup-kit-verified://offline FLUTTER_PREBUILT_ENGINE_VERSION="$FLUTTER_ENGINE_REVISION" "$FLUTTER_DIR/bin/flutter" precache --android \
+        && tool_flutter_cache_ready \
         && tool_write "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" "$FLUTTER_DIR/bin/cache/setup-kit-android.complete"
     }
     do_or_say flutter_precache || miss "flutter: Android precache failed"
@@ -108,12 +114,32 @@ for package in platform-tools "platforms;$ANDROID_PLATFORM" "build-tools;$ANDROI
     platforms\;*) value=$(tool_property "$props" AndroidVersion.ApiLevel); pattern="^${ANDROID_PLATFORM#android-}$" ;;
     *) value=$(tool_property "$props" Pkg.Revision); pattern="^${expected//./\\.}$" ;;
   esac
-  if [[ -s "$props" && "$value" =~ $pattern ]]; then ok "Android $package"
+  if [[ -s "$props" && "$value" =~ $pattern ]] && tool_android_payload "$SDK_DIR" "$package"; then ok "Android $package"
   else warn "Android $package missing or revision drifted"; ANDROID_MISSING+=("$package"); fi
 done
+# sdkmanager may skip a package whose metadata survived payload loss. Install
+# missing packages into a private SDK root and publish only complete packages.
+android_packages_install() (
+  owner=$BASHPID
+  stage=$(tool_stage "$SDK_DIR" android-packages "$owner") || exit 1
+  trap 'rm -rf "$stage"' EXIT
+  mkdir -p "$stage/sdk/licenses" || exit 1
+  cp -a "$SDK_DIR/licenses/." "$stage/sdk/licenses/" || exit 1
+  "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$stage/sdk" --install "${ANDROID_MISSING[@]}" || exit 1
+  for package in "${ANDROID_MISSING[@]}"; do
+    directory=${package//;/\/}
+    tool_android_payload "$stage/sdk" "$package" && [[ -s "$stage/sdk/$directory/source.properties" ]] || exit 1
+  done
+  for package in "${ANDROID_MISSING[@]}"; do
+    directory=${package//;/\/}
+    previous="$stage/previous-${package//;/-}"
+    mkdir -p "$(dirname "$SDK_DIR/$directory")" "$previous" || exit 1
+    tool_publish_dir "$stage/sdk/$directory" "$SDK_DIR/$directory" "$previous" || exit 1
+  done
+)
 if (( ${#ANDROID_MISSING[@]} )); then
   if (( ! INSTALL )) || [[ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" && -x "$JAVA_DIR/bin/java" ]]; then
-    do_or_say "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --install "${ANDROID_MISSING[@]}" || miss "flutter: SDK packages failed"
+    do_or_say android_packages_install || miss "flutter: SDK packages failed"
   else miss "flutter: SDK packages deferred until JDK/tools are available"; fi
 fi
 source "$KIT_DIR/components/bundled-python.sh"

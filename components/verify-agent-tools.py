@@ -20,7 +20,7 @@ def require(condition, message):
 
 
 def executable(path):
-    require(path.is_file() and os.access(path, os.X_OK), f"missing executable {path}")
+    require(path.is_file() and path.stat().st_size > 0 and os.access(path, os.X_OK), f"missing executable {path}")
 
 
 def text_is(path, expected):
@@ -85,6 +85,31 @@ def main():
         require(metadata.get('frameworkVersion') == pins['FLUTTER_VERSION'] and
                 metadata.get('dartSdkVersion') == pins['FLUTTER_DART_VERSION'], "Flutter/Dart metadata drift")
         text_is(cache / "setup-kit-android.complete", pins['FLUTTER_REVISION'] + ':' + pins['FLUTTER_DART_SHA256'])
+        # Independent of the installer's cache probe: validate pinned archive
+        # identity, required entries, stamps, and all sealed payload bytes.
+        receipt = json.loads((cache / 'setup-kit-cache.json').read_text())
+        require(receipt['pins'] == {k: v for k, v in pins.items() if k.startswith('FLUTTER_')}, 'Flutter archive pins drift')
+        require(bool(receipt['files']), 'empty Flutter cache receipt')
+        for key, row in pins.items():
+            if key.startswith('FLUTTER_CACHE_'):
+                _, _, destination, entry, _ = row.split('|')
+                require((Path(destination) / entry).as_posix().removeprefix('./') in receipt['files'], 'missing Flutter artifact receipt')
+        for name, value in receipt['files'].items():
+            path = cache / name
+            with path.open('rb') as stream:
+                actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+            require(actual == value['sha256'], f'corrupt Flutter artifact {path}')
+            if value['executable']:
+                executable(path)
+        for stamp in ('android-sdk', 'android-internal-build-artifacts', 'flutter_sdk', 'font-subset', 'engine_stamp'):
+            text_is(cache / (stamp + '.stamp'), pins['FLUTTER_ENGINE_REVISION'])
+        text_is(cache / 'material_fonts.stamp', pins['FLUTTER_FONTS_VERSION'])
+        text_is(cache / 'gradle_wrapper.stamp', pins['FLUTTER_GRADLE_VERSION'])
+        executable(sdk / 'platform-tools/adb')
+        executable(sdk / f"build-tools/{pins['ANDROID_BUILD_TOOLS']}/aapt2")
+        android_jar = sdk / f"platforms/{pins['ANDROID_PLATFORM']}/android.jar"
+        require(android_jar.is_file() and android_jar.stat().st_size > 0, 'missing Android platform payload')
+        executable(sdk / f"ndk/{pins['ANDROID_NDK']}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang")
         executable(root / "usr/lib/jvm/java-21-openjdk-amd64/bin/java")
         executable(sdk / "cmdline-tools/latest/bin/sdkmanager")
         require((sdk / "cmdline-tools/latest").resolve() == (sdk / ('cmdline-tools/' + pins['ANDROID_TOOLS_VERSION'])).resolve(), "Android stable link drift")
@@ -123,6 +148,6 @@ if __name__ == '__main__':
     except Drift as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
-    except (OSError, ValueError, KeyError, IndexError, subprocess.SubprocessError):
+    except (OSError, ValueError, KeyError, IndexError, TypeError, subprocess.SubprocessError):
         print('Missing or unreadable pinned tool state; rerun its component install.', file=sys.stderr)
         sys.exit(1)

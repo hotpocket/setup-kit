@@ -4,6 +4,19 @@
 source "$KIT_DIR/components/memory-common.sh"
 if [[ "$(conf_get tmp_on_disk yes)" == yes ]]; then
   section "tmp on disk ($MODE) — components/oom-zram.md"
+  # The age is one tmpfiles field, never text that can add fields or rules.
+  # systemd-analyze uses the same duration parser as systemd-tmpfiles.
+  if [[ "$(conf_get tmp_age_rule no)" == yes ]]; then
+    source "$KIT_DIR/manifests/tmpfiles.conf"
+    TMP_AGE="$(conf_get tmp_age "$TMP_AGE_DEFAULT")"
+    TMP_DURATION=${TMP_AGE#\~}; TMP_DURATION=${TMP_DURATION##*:}
+    if [[ ! "$TMP_AGE" =~ ^~?([abcmABCM]+:)?[^:[:space:]\\\"\']+$ ]] \
+        || ! systemd-analyze timespan -- "$TMP_DURATION" >/dev/null 2>&1; then
+      fail 'tmp: invalid tmp_age; use age-by letters and a systemd duration'
+      miss 'tmp: invalid age; previous rule preserved'
+      exit 1
+    fi
+  fi
   TMP_TYPE=$(findmnt -rn -o FSTYPE --target "$MEM_ROOT/tmp" 2>/dev/null)
   log "tmp: live fstype ${TMP_TYPE:-unknown}"
   TMP_FSTAB=$(awk '$1 !~ /^#/ && $2 == "/tmp" {print $3}' "$MEM_ROOT/etc/fstab")
@@ -30,8 +43,6 @@ if [[ "$(conf_get tmp_on_disk yes)" == yes ]]; then
   # No --clean now: ongoing agent/test scratch must not disappear mid-run.
   if [[ "$(conf_get tmp_age_rule no)" == yes ]]; then
     TMP_RULE="$MEM_ROOT/etc/tmpfiles.d/tmp.conf"
-    source "$KIT_DIR/manifests/tmpfiles.conf"
-    TMP_AGE="$(conf_get tmp_age "$TMP_AGE_DEFAULT")"
     TMP_WANT="D /tmp 1777 root root $TMP_AGE"
     if [[ -f "$TMP_RULE" && ! -L "$TMP_RULE" && "$(stat -c %a "$TMP_RULE")" == 644 ]] \
         && cmp -s <(printf '%s\n' "$TMP_WANT") "$TMP_RULE"; then

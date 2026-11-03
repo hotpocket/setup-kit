@@ -7,7 +7,7 @@ chmod +x "$ROOT/usr/lib/jvm/java-21-openjdk-amd64/bin/java"
 for c in curl git sdkmanager apt-get dpkg-query sha256sum; do
   cat > "$TMP/bin/$c" <<'PY'
 #!/usr/bin/python3
-import os,sys,pathlib,shutil,subprocess
+import os,sys,pathlib,shutil,subprocess,json
 p=pathlib.Path; args=sys.argv[1:]; name=p(sys.argv[0]).name
 with open(os.environ['CALLS'],'a') as f: f.write(name+' '+' '.join(args)+'\n')
 s=p(os.environ['STATE']); home=p(os.environ['HOME'])
@@ -15,6 +15,8 @@ if name=='curl':
  if (s/'curl-fail').exists(): sys.exit(22)
  url=next(a for a in args if a.startswith('https:')); dest=args[args.index('-o')+1]
  src='pip-26.2.2-py3-none-any.whl' if '/pip-' in url else 'certifi-2026.10.19-py3-none-any.whl' if '/certifi-' in url else 'uv.tar.gz' if 'uv-' in url else 'blender.tar.xz' if 'blender-' in url else 'dart.zip' if 'dart-sdk-linux' in url else 'chromium.zip' if 'chrome-linux64.zip' in url else 'headless.zip' if 'chrome-headless-shell-linux64.zip' in url else 'ffmpeg.zip' if 'ffmpeg-linux.zip' in url else 'android.zip'
+ cache=json.loads((p(os.environ['FIXTURE'])/'cache-fixtures.json').read_text())
+ src=cache.get(url.removeprefix('https://storage.googleapis.com/'),src)
  shutil.copyfile(p(os.environ['FIXTURE'])/src,dest)
 elif name=='sha256sum':
  line=sys.stdin.read()
@@ -24,20 +26,26 @@ elif name=='git':
  if 'clone' in args:
   d=p(args[-1]); (d/'.git').mkdir(parents=True); (d/'bin/cache').mkdir(parents=True)
   (d/'bin/flutter').write_text('#!/bin/sh\necho "flutter $*" >> "$CALLS"\nmkdir -p "$HOME/development/flutter/bin/cache"\nprintf \'{"frameworkVersion":"3.47.2","dartSdkVersion":"3.13.2"}\\n\' > "$HOME/development/flutter/bin/cache/flutter.version.json"\n')
-  (d/'bin/flutter').write_text((d/'bin/flutter').read_text()+   'if [ -f "$STATE/precache-fail" ]; then exit 42; fi\nif [ -f "$STATE/precache-pause" ]; then touch "$STATE/precache-started"; sleep 120; fi\nprintf "android artifacts complete\\n" > "$HOME/development/flutter/bin/cache/android-sdk.stamp"\n')
+  (d/'bin/flutter').write_text((d/'bin/flutter').read_text()+   'if [ -f "$STATE/precache-fail" ]; then exit 42; fi\nif [ -f "$STATE/precache-pause" ]; then touch "$STATE/precache-started"; sleep 120; fi\nprintf "a804b261645ef8c13eb3d5c44a5c2fb0340c5539\\n" > "$HOME/development/flutter/bin/cache/android-sdk.stamp"\n')
   (d/'bin/flutter').chmod(0o755); (d/'HEAD').write_text('d3b14c876900e553bc736ca19295fc09e3853e8e')
  elif 'rev-parse' in args:
   d=p(args[args.index('-C')+1]); print((d/'HEAD').read_text() if (d/'HEAD').exists() else 'abc123')
  elif 'status' in args: pass
 elif name=='sdkmanager':
+ sdk=p(next((a.split('=',1)[1] for a in args if a.startswith('--sdk_root=')),str(home/'Android/Sdk')))
  if '--licenses' in args:
-  (home/'Android/Sdk/licenses').mkdir(parents=True,exist_ok=True)
-  (home/'Android/Sdk/licenses/android-sdk-license').write_text('accepted\n')
+  (sdk/'licenses').mkdir(parents=True,exist_ok=True)
+  (sdk/'licenses/android-sdk-license').write_text('accepted\n')
  else:
   for a in args:
    if a.startswith('-'): continue
-   d=home/'Android/Sdk'/a.replace(';','/'); d.mkdir(parents=True,exist_ok=True)
+   d=sdk/a.replace(';','/'); d.mkdir(parents=True,exist_ok=True)
    (d/'source.properties').write_text(('AndroidVersion.ApiLevel=36' if a=='platforms;android-36' else 'Pkg.Revision = '+a.split(';')[-1] if a.startswith('ndk;') else 'Pkg.Revision='+('37.0.1' if a=='platform-tools' else a.split(';')[-1]))+'\n')
+   if a=='platform-tools' and (s/'pause-sdk').exists():
+    import time
+    (s/'sdk-started').touch(); time.sleep(120)
+   payload=('adb' if a=='platform-tools' else 'aapt2' if a.startswith('build-tools;') else 'android.jar' if a.startswith('platforms;') else 'toolchains/llvm/prebuilt/linux-x86_64/bin/clang')
+   file=d/payload; file.parent.mkdir(parents=True,exist_ok=True); file.write_text('fixture Android payload\n'); file.chmod(0o644 if payload=='android.jar' else 0o755)
    if a.startswith('ndk;'):
     d=d/'toolchains/llvm/prebuilt/linux-x86_64/python3/bin'; d.mkdir(parents=True,exist_ok=True)
     shutil.copyfile(p(os.environ['FIXTURE'])/'bin/bundle-python',d/'python3.11'); (d/'python3.11').chmod(0o755)
@@ -132,3 +140,5 @@ echo "unzip $*" >> "$CALLS"
 exec /usr/bin/unzip "$@"
 SH2
 chmod +x "$TMP/bin/unzip"
+
+/usr/bin/python3 "$KIT_DIR/tests/flutter-cache-fixture.py" "$TMP"

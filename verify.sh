@@ -483,7 +483,10 @@ if [[ "$(cv tmp_on_disk)" != no ]]; then
        source "$PWD/manifests/tmpfiles.conf"
        TMP_AGE="$(cv tmp_age | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
        TMP_AGE="${TMP_AGE:-$TMP_AGE_DEFAULT}"
-       [[ ! -L "$VROOT/etc/tmpfiles.d/tmp.conf" \
+       TMP_DURATION=${TMP_AGE#\~}; TMP_DURATION=${TMP_DURATION##*:}
+       [[ "$TMP_AGE" =~ ^~?([abcmABCM]+:)?[^:[:space:]\\\"\']+$ ]] \
+         && systemd-analyze timespan -- "$TMP_DURATION" >/dev/null 2>&1 \
+         && [[ ! -L "$VROOT/etc/tmpfiles.d/tmp.conf" \
           && "$(stat -c %a "$VROOT/etc/tmpfiles.d/tmp.conf" 2>/dev/null)" == 644 ]] \
          && cmp -s <(printf 'D /tmp 1777 root root %s\n' "$TMP_AGE") "$VROOT/etc/tmpfiles.d/tmp.conf"
      else grep -qx 'q /tmp 1777 root root 10d' "$VROOT/etc/tmpfiles.d/tmp.conf" 2>/dev/null; fi; } \

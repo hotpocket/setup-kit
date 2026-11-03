@@ -65,9 +65,26 @@ tool_publish_dir() { # staged-directory destination scratch-directory
   mv -T "$src" "$dest"
 }
 
+# Package receipts can survive deletion of executable/data payloads.
+tool_android_payload() { # SDK directory, sdkmanager package token
+  local sdk="$1" package="$2" entry
+  case "$package" in
+    platform-tools) entry=platform-tools/adb ;;
+    platforms\;*) entry="${package//;/\/}/android.jar" ;;
+    build-tools\;*) entry="${package//;/\/}/aapt2" ;;
+    ndk\;*) entry="${package//;/\/}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ;;
+    *) return 1 ;;
+  esac
+  [[ -s "$sdk/$entry" ]] && { [[ "$package" == platforms\;* ]] || [[ -x "$sdk/$entry" ]]; }
+}
+
 # Read-only installed-state probes for space accounting. The independent
 # verifier deliberately implements its own checks.
+tool_flutter_cache_ready() {
+  python3 -I "$KIT_DIR/components/flutter-cache.py" check "$KIT_DIR" "$HOME/development/flutter/bin/cache"
+}
 tool_flutter_installed() {
+  tool_flutter_cache_ready || return 1
   local flutter="$HOME/development/flutter" sdk="$HOME/Android/Sdk" package props expected value
   [[ -x "$flutter/bin/flutter" && -x "$flutter/bin/cache/dart-sdk/bin/dart" \
     && "$(git -C "$flutter" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" \
@@ -86,6 +103,7 @@ try:
 except (OSError,ValueError): sys.exit(1)
 PY
   for package in platform-tools "platforms;$ANDROID_PLATFORM" "build-tools;$ANDROID_BUILD_TOOLS" "ndk;$ANDROID_NDK"; do
+    tool_android_payload "$sdk" "$package" || return 1
     props="$sdk/${package//;/\/}/source.properties"; expected="${package#*;}"
     case "$package" in
       platform-tools) value=$(tool_property "$props" Pkg.Revision); [[ "$value" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1 ;;
