@@ -16,7 +16,14 @@ assert 'GNOME and T3 oomd shields leave agent scopes eligible' 'grep -qx Managed
 assert 'SSH listener keeps native protection without a negative score inherited by login jobs' '! grep -q OOMScoreAdjust "$ROOT/etc/systemd/system/ssh.service.d/20-oom.conf" && grep -qx ManagedOOMPreference=avoid "$ROOT/etc/systemd/system/ssh.service.d/20-oom.conf"'
 assert 'tailscaled has next-start guard, no blanket user protection' 'grep -qx OOMScoreAdjust=-500 "$ROOT/etc/systemd/system/tailscaled.service.d/20-oom.conf" && [[ ! -d "$ROOT/etc/systemd/system/user@.service.d" ]]'
 run07 install
-assert 'second install performs no config rewrites or oomd restart' '! grep -qE "sudo tee|restart systemd-oomd" "$CALLS"'
+assert 'second install performs no config rewrites or oomd pressure repeat' '! grep -qE "sudo tee|restart systemd-oomd|set-property user@" "$CALLS"'
+runv
+assert 'verifier accepts actual systemd 259 pressure encoding' 'grep -q "PASS.*oomd live pressure limit 80%" "$TMP/out"'
+for pressure in 3435973835 8000; do
+ echo "$pressure" > "$STATE/user@$(id -u).service.ManagedOOMMemoryPressureLimit"; runv
+ assert "verifier rejects pressure encoding $pressure below 80 percent" 'grep -q "FAIL.*oomd live pressure limit" "$TMP/out"'
+done
+run07 install
 echo none > "$STATE/ssh.service.ManagedOOMPreference"; run07
 assert 'matching root drop-in cannot hide live oomd preference drift' 'grep -q "\[would\].*set-property ssh.service ManagedOOMPreference=avoid" "$TMP/out"'
 run07 install

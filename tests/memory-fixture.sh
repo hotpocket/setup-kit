@@ -69,10 +69,10 @@ case "$op" in
       a="${!i}"; case "$a" in --property=*|-p=*) prop="${a#*=}" ;; -p|--property) j=$((i+1)); prop="${!j}" ;; *.service|*.slice) unit="$a" ;; esac
     done
     if [[ -e "$STATE/$unit.$prop" ]]; then cat "$STATE/$unit.$prop"
-    else case "$prop" in LoadState) echo loaded ;; ManagedOOMMemoryPressureLimit) echo 5000 ;; ManagedOOMPreference) echo none ;; OOMScoreAdjust) echo 0 ;; OOMPolicy) echo stop ;; MainPID) echo 0 ;; esac; fi ;;
+    else case "$prop" in LoadState) echo loaded ;; ManagedOOMMemoryPressureLimit) echo 2147483647 ;; ManagedOOMPreference) echo none ;; OOMScoreAdjust) echo 0 ;; OOMPolicy) echo stop ;; MainPID) echo 0 ;; esac; fi ;;
   set-property)
     unit="$1"; shift
-    for p; do key="${p%%=*}"; val="${p#*=}"; [[ "$val" == 80% ]] && val=8000; echo "$val" > "$STATE/$unit.$key"; done ;;
+    for p; do key="${p%%=*}"; val="${p#*=}"; [[ "$val" == 80% ]] && val=3435973836; echo "$val" > "$STATE/$unit.$key"; done ;;
   list-unit-files) cat "$STATE/units" 2>/dev/null ;;
   --failed) cat "$STATE/calm-$scope-failed" 2>/dev/null ;;
   list-units) cat "$STATE/calm-$scope-activating" 2>/dev/null ;;
@@ -133,6 +133,7 @@ cat > "$TMP/bin/findmnt" <<'SH'
 case "$*" in *FSTYPE*) if [[ "${*: -1}" == "$ROOT/tmp" ]]; then cat "$STATE/fstype"; else echo ext4; fi ;; *AVAIL*) cat "$STATE/free" 2>/dev/null || echo 42949672960 ;; *OPTIONS*) echo rw,relatime ;; esac
 SH
 printf '#!/bin/sh\necho installed\nexit 0\n' > "$TMP/bin/dpkg"
+printf '#!/bin/sh\necho "install ok installed"\n' > "$TMP/bin/dpkg-query"
 printf '#!/bin/sh\n[ -e "$STATE/fail-uuid" ] && exit 1\necho swap-uuid\n' > "$TMP/bin/blkid"
 printf '#!/bin/sh\necho "mkswap $*" >> "$CALLS"\n' > "$TMP/bin/mkswap"
 printf '#!/bin/sh\ncase "$*" in *--grep*) cat "$STATE/oom-log" 2>/dev/null ;; esac\nexit 0\n' > "$TMP/bin/journalctl"

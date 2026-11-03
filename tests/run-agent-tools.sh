@@ -10,7 +10,7 @@ fi
 failed=0
 for name in uv blender flutter-headless dev-headless playwright-chromium emudhra \
             emudhra-wiring python-trust-floor tools-defaults tools-disk-space \
-            tools-interrupted tmp-on-disk; do
+            tools-interrupted tmp-on-disk oom-package cloud-skip; do
   bash "$KIT/tests/test-$name.sh" || failed=1
 done
 exit "$failed"

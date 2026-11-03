@@ -5,7 +5,8 @@ memory_write "$MEM_ROOT/etc/systemd/oomd.conf.d/20-longer-duration.conf" \
   $'[OOM]\nDefaultMemoryPressureDurationSec=60s' root 'oomd pressure duration (60s)'
 if (( MEM_CHANGED )); then do_or_say sudo systemctl restart systemd-oomd.service; fi
 OOM_LIMIT=$(systemctl show "user@$(id -u).service" -p ManagedOOMMemoryPressureLimit --value 2>/dev/null)
-if [[ "$OOM_LIMIT" == 8000 || "$OOM_LIMIT" == 80% ]]; then
+# systemd exposes percentages as fractions of UINT32_MAX: 0.8 * 4294967295.
+if [[ "$OOM_LIMIT" == 3435973836 || "$OOM_LIMIT" == 80% ]]; then
   ok 'oomd user pressure limit 80%'
 else
   warn "oomd user pressure limit ${OOM_LIMIT:-unknown} (50% is the Ubuntu default); want 80%"

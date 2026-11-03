@@ -23,6 +23,8 @@ scan_path = os.environ.get('EMUDHRA_PATH', os.environ.get('PATH', ''))
 BAD = [f'{b}{infix}-emudhra.we-have-a-problem.com' for b in
        ('dv-g3b', 'dv-g3c', 'ev-g3b', 'ev-g3c', 'ov-g3b', 'ov-g3c') for infix in ('', '-aaa')]
 results = []
+pins = dict(re.findall(r'^(PYTHON_(?:PIP|CERTIFI)_VERSION)=([0-9.]+)$',
+            (Path(__file__).resolve().parent.parent / 'manifests/tool-versions.conf').read_text(), re.M))
 
 def record(status, kind, path, detail):
     results.append(status)
@@ -90,12 +92,18 @@ def inventory():
                     gos.add(p)
                 elif base.name == 'bin' and re.fullmatch(r'python(?:\d+(?:\.\d+)?)?', name) and os.access(p, os.X_OK):
                     pythons.add(p)
-    return sorted(nodes), sorted(pythons), venvs, sorted(gos)
+    # Preserve venv invocation directories. Resolving only the executable
+    # would collapse distinct venvs onto their common system interpreter.
+    unique = {}
+    for p in sorted(pythons):
+        unique.setdefault((p.parent.resolve(), p.resolve()), p)
+    return sorted(nodes), sorted(unique.values()), venvs, sorted(gos)
 
 nodes, pythons, venvs, gos = inventory()
 ca = run(['dpkg-query', '-W', '-f=${Version}', 'ca-certificates'])
-floor('ca-certificates', 'system', ca.stdout.strip() if ca.returncode == 0 else None,
-      '20260816ubuntu0.26.04.1')
+ca_version = ca.stdout.strip() if ca.returncode == 0 else None
+ca_floor = '20260816ubuntu0.26.04.1'
+floor('ca-certificates', 'system', ca_version, ca_floor)
 for node in nodes:
     out = run([node, '--version'])
     value = out.stdout.strip().lstrip('v') if out.returncode == 0 else ''
@@ -108,9 +116,19 @@ out = {}
 for name in ("pip", "certifi"):
  try: out[name] = metadata.version(name)
  except metadata.PackageNotFoundError: out[name] = None
+if out["certifi"] is not None:
+ import certifi
+ out["certifi_path"] = certifi.where()
+try:
+ import ssl
+ out["ssl"] = True
+except ModuleNotFoundError as exc:
+ if exc.name not in ("ssl", "_ssl"): raise
+ out["ssl"] = False
 print(json.dumps(out))'''
+tls_pythons = []
 for python in pythons:
-    out = run([python, '-I', '-c', metadata_code])
+    out = run([python, '-I', '-B', '-c', metadata_code])
     try:
         if out.returncode:
             raise ValueError(out.stderr)
@@ -118,8 +136,16 @@ for python in pythons:
     except ValueError:
         record('UNTESTED', 'python', python, 'metadata unavailable; inspect or rebuild environment')
         continue
-    floor('pip', python, data.get('pip'), '26.2.2', required=False)
-    floor('certifi', python, data.get('certifi'), '2026.10.19', required=python.parent.parent in venvs)
+    floor('pip', python, data.get('pip'), pins['PYTHON_PIP_VERSION'], required=False)
+    cert_path = data.get('certifi_path')
+    if cert_path and Path(cert_path).resolve() == Path('/etc/ssl/certs/ca-certificates.crt').resolve():
+        floor('certifi', f'{python} (system store)', ca_version, ca_floor)
+    else:
+        floor('certifi', python, data.get('certifi'), pins['PYTHON_CERTIFI_VERSION'], required=python.parent.parent in venvs)
+    if data.get('ssl') is False:
+        record('ABSENT', 'python-tls', python, 'SSL module unavailable; no TLS consumer')
+    else:
+        tls_pythons.append(python)
 for go in gos:
     out = run([go, 'version']); value = re.search(r'go(\d+\.\d+\.\d+)', out.stdout)
     value = value.group(1) if value else ''
@@ -178,12 +204,12 @@ except ImportError: pass
 node_probe = '''
 const https=require("https"); const [g,...hs]=process.argv.slice(1);
 const t=h=>new Promise(r=>{const q=https.get("https://"+h,{timeout:8000},s=>{s.resume();r("trusted")});
-q.on("error",e=>r(["UNABLE_TO_GET_ISSUER_CERT_LOCALLY","CERT_HAS_EXPIRED","UNABLE_TO_VERIFY_LEAF_SIGNATURE","SELF_SIGNED_CERT_IN_CHAIN","CERT_SIGNATURE_FAILURE"].includes(e.code)?"rejected":"unknown"));
+q.on("error",e=>r(["UNABLE_TO_GET_ISSUER_CERT_LOCALLY","CERT_HAS_EXPIRED","CERT_REVOKED","UNABLE_TO_VERIFY_LEAF_SIGNATURE","SELF_SIGNED_CERT_IN_CHAIN","CERT_SIGNATURE_FAILURE"].includes(e.code)?"rejected":"unknown"));
 q.on("timeout",()=>{q.destroy();r("unknown")})});
 (async()=>{const good=await t(g); const bad=await Promise.all(hs.map(t));
 console.log("node",good==="trusted"?"ok":"no",bad.filter(x=>x==="trusted").length,bad.filter(x=>x==="unknown").length)})().catch(()=>process.exit(1));
 '''
-for kind, binaries, code, args in [('python', pythons, python_probe, ['-I', '-c']), ('node', nodes, node_probe, ['-e'])]:
+for kind, binaries, code, args in [('python', tls_pythons, python_probe, ['-I', '-B', '-c']), ('node', nodes, node_probe, ['-e'])]:
     for binary in binaries:
         out = run([binary, *args, code, 'example.com', *BAD], timeout=130)
         rows = out.stdout.splitlines()

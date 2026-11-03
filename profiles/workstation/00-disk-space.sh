@@ -211,13 +211,12 @@ comp() {   # conf-key  default  label  [probe ...]
   want_new "$key" "$def" "$@" || return 0
   add_need "$label" "$(declared_kb "$key")" "$(declared_tgt "$key")" declared
 }
-source "$KIT_DIR/manifests/tool-versions.conf"
+source "$KIT_DIR/components/tool-common.sh"
 # Opt-in agent tools. Charge complete pinned archives when a version/path may
 # need repair; an arbitrary PATH executable is not proof the pin is present.
 if [[ "$(conf_get component_uv no)" == yes ]] && ! {
-  [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" ]] \
-    && [[ "$("$HOME/.local/bin/uv" --version 2>/dev/null)" == "uv $UV_VERSION" \
-       && "$("$HOME/.local/bin/uvx" --version 2>/dev/null)" == "uvx $UV_VERSION" ]]
+  tool_version_is "$HOME/.local/bin/uv" uv "$UV_VERSION" \
+    && tool_version_is "$HOME/.local/bin/uvx" uvx "$UV_VERSION"
 }; then
   comp component_uv no "uv: standalone uv + uvx"
 fi

@@ -13,9 +13,8 @@ uv_install() (
     && mv -f "$stage/uv-x86_64-unknown-linux-gnu/uv" "$HOME/.local/bin/uv" \
     && mv -f "$stage/uv-x86_64-unknown-linux-gnu/uvx" "$HOME/.local/bin/uvx"
 )
-if [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" \
-      && "$("$HOME/.local/bin/uv" --version 2>/dev/null)" == "uv $UV_VERSION" \
-      && "$("$HOME/.local/bin/uvx" --version 2>/dev/null)" == "uvx $UV_VERSION" ]]; then
+if tool_version_is "$HOME/.local/bin/uv" uv "$UV_VERSION" \
+    && tool_version_is "$HOME/.local/bin/uvx" uvx "$UV_VERSION"; then
   ok "uv/uvx $UV_VERSION"
 else
   warn "uv/uvx $UV_VERSION missing or drifted"

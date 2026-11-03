@@ -54,7 +54,7 @@ else
   fi
 fi
 if [[ -x "$SDK_DIR/cmdline-tools/$ANDROID_TOOLS_VERSION/bin/sdkmanager" ]] \
-    && grep -Fqx "Pkg.Revision=$ANDROID_TOOLS_VERSION" "$SDK_DIR/cmdline-tools/$ANDROID_TOOLS_VERSION/source.properties" 2>/dev/null; then
+    && [[ "$(tool_property "$SDK_DIR/cmdline-tools/$ANDROID_TOOLS_VERSION/source.properties" Pkg.Revision)" == "$ANDROID_TOOLS_VERSION" ]]; then
   ok "Android command-line tools $ANDROID_TOOLS_VERSION"
 else warn "Android command-line tools $ANDROID_TOOLS_VERSION missing or drifted"; do_or_say android_tools_install || miss "flutter: Android tools archive failed"; fi
 if [[ "$(readlink "$SDK_DIR/cmdline-tools/latest" 2>/dev/null)" != "$ANDROID_TOOLS_VERSION" ]]; then
@@ -72,11 +72,11 @@ for package in platform-tools "platforms;$ANDROID_PLATFORM" "build-tools;$ANDROI
   props="$SDK_DIR/${package//;/\/}/source.properties"
   expected="${package#*;}"
   case "$package" in
-    platform-tools) pattern='^Pkg.Revision=[0-9]+' ;;
-    platforms\;*) pattern="^AndroidVersion.ApiLevel=${ANDROID_PLATFORM#android-}$" ;;
-    *) pattern="^Pkg.Revision=${expected//./\\.}$" ;;
+    platform-tools) value=$(tool_property "$props" Pkg.Revision); pattern='^[0-9]+(\.[0-9]+)*$' ;;
+    platforms\;*) value=$(tool_property "$props" AndroidVersion.ApiLevel); pattern="^${ANDROID_PLATFORM#android-}$" ;;
+    *) value=$(tool_property "$props" Pkg.Revision); pattern="^${expected//./\\.}$" ;;
   esac
-  if [[ -s "$props" ]] && grep -E "$pattern" "$props" >/dev/null; then ok "Android $package"
+  if [[ -s "$props" && "$value" =~ $pattern ]]; then ok "Android $package"
   else warn "Android $package missing or revision drifted"; ANDROID_MISSING+=("$package"); fi
 done
 if (( ${#ANDROID_MISSING[@]} )); then
@@ -84,6 +84,9 @@ if (( ${#ANDROID_MISSING[@]} )); then
     do_or_say "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --install "${ANDROID_MISSING[@]}" || miss "flutter: SDK packages failed"
   else miss "flutter: SDK packages deferred until JDK/tools are available"; fi
 fi
+source "$KIT_DIR/components/bundled-python.sh"
+bundle_python_floor 'NDK Python' \
+  "$SDK_DIR/ndk/$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/python3/bin/python3" no
 # SSH's bash reads .bashrc even for remote commands, before its interactive
 # early return. Never write through a dotfile symlink into another checkout.
 ENV_FILE="$HOME/.config/setup-kit/headless-env.sh"

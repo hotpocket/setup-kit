@@ -18,6 +18,12 @@ and command-tool version directories require inspection before replacement.
 SDKmanager verifies its repository-managed downloads; its packages are named
 explicitly, rather than downloading an unversioned Android installer.
 
+Receipt assignments accept spaces around `=`, including NDK's format.
+NDK's bundled Python has pip but no `_ssl` module. Its pip floor uses a
+hash-checked wheel downloaded through host curl, then installed offline by
+that interpreter. This preserves the NDK and adds no certifi package.
+Matching package floors require no download on subsequent passes.
+
 The environment file is `$HOME/.config/setup-kit/headless-env.sh`. A source
 line goes first in a **regular** `.bashrc`, before Ubuntu's noninteractive
 return, so SSH's bash receives PATH/ANDROID_HOME without .configs. The component

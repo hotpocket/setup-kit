@@ -11,7 +11,12 @@ assert 'Flutter checkout pinned and Android tools checksum enforced' '[[ -x "$HO
 assert 'headless SDK packages and JDK21 only' '[[ -f "$HOME/Android/Sdk/platforms/android-36/source.properties" && -f "$HOME/Android/Sdk/build-tools/36.0.0/source.properties" && -f "$HOME/Android/Sdk/ndk/28.2.13676358/source.properties" && -s "$HOME/Android/Sdk/licenses/android-sdk-license" ]] && grep -q "apt-get .*openjdk-21-jdk-headless" "$CALLS" && ! grep -qE "sdkmanager .*emulator|system-images|avdmanager|android-studio" "$CALLS"'
 assert 'noninteractive SSH and service get environment without configs' 'env -i HOME="$HOME" PATH=/usr/bin:/bin bash --noprofile -c '\''source "$HOME/.bashrc"; [[ "$ANDROID_HOME" == "$HOME/Android/Sdk" && "$PATH" == *"$HOME/development/flutter/bin"* ]]'\'' && [[ -s "$HOME/.config/systemd/user/t3code.service.d/60-headless.conf" ]]'
 run_tools install
-assert 'flutter second install has no mutation' '[[ -z "$(mutations)" ]]'
+assert 'flutter second install has no mutation with spaced NDK receipt' '[[ -z "$(mutations)" ]] && ! grep -q "bundle-python .*install" "$CALLS"'
+PY="$HOME/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/python3/bin/python3"
+assert 'NDK bundled pip floor repaired without adding certifi' 'grep -q "26.2.2" "${PY%/*}/packages.json" && grep -q '\''"certifi": null'\'' "${PY%/*}/packages.json"'
+for props in "$HOME/Android/Sdk/cmdline-tools/22.0/source.properties" "$HOME/Android/Sdk/platform-tools/source.properties" "$HOME/Android/Sdk/platforms/android-36/source.properties" "$HOME/Android/Sdk/build-tools/36.0.0/source.properties"; do sed -i 's/=/ = /' "$props"; done
+run_tools install
+assert 'all Android receipt checks accept whitespace around equals' '[[ -z "$(mutations)" ]] && ! grep -q "bundle-python .*install" "$CALLS"'
 printf 'Pkg.Revision=35.0.0\n' > "$HOME/Android/Sdk/build-tools/36.0.0/source.properties"; run_tools check
 assert 'Android build-tools revision drift is visible without SDK mutation' 'grep -q "WARN.*Android build-tools;36.0.0.*drift" "$TMP/out" && [[ -z "$(mutations)" ]]'
 run_tools install

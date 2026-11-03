@@ -3,6 +3,18 @@
 source "$KIT_DIR/manifests/tool-versions.conf"
 # shellcheck disable=SC2034 # consumed by flutter-headless.sh
 TOOL_ROOT="${KIT_TOOL_ROOT:-}"
+tool_version_is() { # executable tool-name version; vendor target metadata may follow
+  local name version _metadata
+  [[ -x "$1" ]] || return 1
+  read -r name version _metadata < <("$1" --version 2>/dev/null)
+  [[ "$name" == "$2" && "$version" == "$3" ]]
+}
+tool_property() { # Java .properties assignment; spaces around '=' are optional
+  awk -v key="$2" 'index($0,"=") {
+    k=substr($0,1,index($0,"=")-1); gsub(/^[ \t]+|[ \t\r]+$/,"",k)
+    if(k==key) {v=substr($0,index($0,"=")+1); gsub(/^[ \t]+|[ \t\r]+$/,"",v); print v; exit}
+  }' "$1" 2>/dev/null
+}
 tool_x64() { [[ "$(uname -m)" == x86_64 ]] || { miss "$1: only Linux x86_64 is pinned"; return 1; }; }
 # Staging names carry their owner's PID. Recover only dead owners; a live
 # concurrent provisioner keeps its scratch. Final artifacts are never swept.

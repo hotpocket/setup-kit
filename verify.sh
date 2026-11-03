@@ -60,7 +60,7 @@ echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 
 # -- 1. apt packages ----------------------------------------------------------
 # wanted = enabled groups' manifests, minus skip_pkgs, minus release-unknowns
-SKIPS=" $(cv skip_pkgs) "
+SKIPS=" $(cv skip_pkgs | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/') "
 declare -a FILES=()
 for f in manifests/apt/*.list; do
   g=$(basename "$f" .list)
@@ -310,7 +310,9 @@ elif command -v docker >/dev/null; then
       || failv "docker NOT rootless (host conf wants rootless)"
   fi
 else failv "docker missing"; fi
-gon dev_cloud && { command -v gcloud >/dev/null && pass "gcloud present" || failv "gcloud missing"; }
+if gon dev_cloud && [[ "$SKIPS" != *" google-cloud-cli "* ]]; then
+  command -v gcloud >/dev/null && pass "gcloud present" || failv "gcloud missing"
+fi
 # aws must be v2 from Amazon's bundle (components/aws-cli.md); apt's awscli is v1.
 # Only when the group is on: a worker (group off) gets apt's v1 from worker.list,
 # which section 1 already verifies.
@@ -496,7 +498,10 @@ if [[ "$(cv component_oom_zram)" != no ]]; then
   grep -qx DefaultMemoryPressureDurationSec=60s "$VROOT/etc/systemd/oomd.conf.d/20-longer-duration.conf" 2>/dev/null \
     && pass 'oomd duration 60s' || failv 'oomd duration config drifted'
   LIMIT=$(systemctl show "user@$(id -u).service" -p ManagedOOMMemoryPressureLimit --value 2>/dev/null)
-  [[ "$LIMIT" == 8000 || "$LIMIT" == 80% ]] && pass 'oomd live pressure limit 80%' || failv "oomd live pressure limit $LIMIT != 80%"
+  # Independent decoding of systemd's UINT32_MAX percentage representation.
+  [[ "$LIMIT" == 3435973836 || "$LIMIT" == 80% ]] && pass 'oomd live pressure limit 80%' || failv "oomd live pressure limit $LIMIT != 80%"
+  systemctl is-active --quiet systemd-oomd.service \
+    && pass 'systemd-oomd active' || failv 'systemd-oomd inactive: install/start the oom-zram component'
   for unit in dbus.service org.gnome.Shell@wayland.service org.gnome.Shell@x11.service; do
     [[ "$(systemctl --user show "$unit" -p LoadState --value 2>/dev/null)" == loaded ]] || continue
     [[ "$(systemctl --user show "$unit" -p ManagedOOMPreference --value 2>/dev/null)" == avoid ]] \

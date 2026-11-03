@@ -2,6 +2,8 @@
 # Machine memory policy; sourced by workstation/worker phase 07.
 source "$KIT_DIR/components/memory-common.sh"
 section "oom-zram ($MODE) — components/oom-zram.md"
+if pkg_installed systemd-oomd; then ok 'systemd-oomd installed'
+else warn 'systemd-oomd missing'; apt_install systemd-oomd || miss 'systemd-oomd package installation failed'; fi
 if (( RAM_CLASS_MB < 16384 )); then ZRAM_MB=$(( RAM_MB / 2 ))
 else ZRAM_MB=$(( RAM_MB / 4 < 8192 ? RAM_MB / 4 : 8192 )); fi
 if dpkg -s systemd-zram-generator >/dev/null 2>&1; then ok 'systemd-zram-generator installed'

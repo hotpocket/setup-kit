@@ -13,4 +13,7 @@ printf '#!/bin/sh\necho Blender 5.2.1 LTS\n' > "$HOME/.local/opt/blender-5.2.2-l
 chmod +x "$HOME/.local/bin/"{uv,uvx} "$HOME/.local/opt/blender-5.2.2-linux-x64/blender"
 bash "$KIT_DIR/profiles/workstation/00-disk-space.sh" check > "$TMP/out" 2>&1
 assert 'preflight charges drifted existing uv and Blender pins' 'grep -q "uv: standalone" "$TMP/out" && grep -q "blender: batch" "$TMP/out"'
+cp "$TMP/payload/uv-x86_64-unknown-linux-gnu/"{uv,uvx} "$HOME/.local/bin/"
+bash "$KIT_DIR/profiles/workstation/00-disk-space.sh" check > "$TMP/out" 2>&1
+assert 'preflight accepts uv target suffix without charging reinstall' '! grep -q "uv: standalone" "$TMP/out"'
 finish

@@ -32,3 +32,6 @@ for pair in opt bin; do
     do_or_say tool_link "$target" "$link" || miss "blender: cannot link $link"
   fi
 done
+source "$KIT_DIR/components/bundled-python.sh"
+bundle_python_floor 'Blender Python' \
+  "$BLENDER_DIR/${BLENDER_VERSION%.*}/python/bin/python$BLENDER_PYTHON_VERSION" yes

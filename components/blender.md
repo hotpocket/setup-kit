@@ -14,6 +14,12 @@ for inspection rather than overwritten. No launcher, desktop registration,
 GPU driver or session service is installed. `group_dev_headless=yes` supplies
 CPU GL/Xvfb dependencies for rendering; callers choose their rendering flags.
 
+The bundled Python also needs pip/certifi floors from the pin file. Check
+reports package drift. Install uses hash-checked wheels through host curl,
+then upgrades that Python offline. A failed download leaves the floor unmet
+for retry. Updating Python packages does not invalidate the renderer version
+check or cause the Blender archive to be extracted again.
+
 Pins live in `manifests/tool-versions.conf`. The SHA256 comes from Blender's
 [release checksum file](https://mirror.blender.org/release/Blender5.2/blender-5.2.2.sha256).
 Staging and the final directory share a filesystem; publication uses rename.
