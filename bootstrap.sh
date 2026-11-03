@@ -44,7 +44,7 @@ list_components() {
   local -A DESC=(); local line key
   while IFS= read -r line; do
     line="${line#\# }"
-    [[ "$line" =~ ^(group_|component_|lang_|cond_)[a-z0-9_]+= && "$line" == *"#"* ]] || continue
+    [[ "$line" =~ ^(group_|component_|lang_|cond_|configs_)[a-z0-9_]+= && "$line" == *"#"* ]] || continue
     key="${line%%=*}"; DESC["$key"]="${line#*#}"
   done < "$base"
   # Print one annotated row per template line whose key matches $1 (an
@@ -54,12 +54,12 @@ list_components() {
     local line key def cur desc
     while IFS= read -r line; do
       line="${line#\# }"                                      # uncomment cond_* defaults
-      [[ "$line" =~ ^($1)[a-z0-9_]+= ]] || continue
+      [[ "$line" =~ ^($1)[a-z0-9_]*= ]] || continue
       key="${line%%=*}"
       def="${line#*=}"; def="${def%%#*}"; def="${def//\"/}"; def="${def// /}"
       desc="${DESC[$key]:-}"; [[ "$line" == *"#"* ]] && desc="${line#*#}"
       cur="$(conf_get "$key" "$def")"
-      printf '  %s%-7s%s%-26s %s%s%s\n' \
+      printf '  %s%-7s%s %-26s %s%s%s\n' \
         "$([[ "$cur" =~ ^(yes|auto)$ || ( "$cur" != no && -n "$cur" ) ]] && echo "$C_OK" || echo "$C_DIM")" \
         "[$cur]" "$C_RST" "$key" "$C_DIM" "${desc# }" "$C_RST"
     done < "$tmpl"
@@ -68,6 +68,8 @@ list_components() {
   _list_rows 'group_|component_'
   section "language stacks — configurable"
   _list_rows 'lang_'
+  section "dotfiles — configurable role"
+  _list_rows 'configs_role'
   section "conditional — INFORMATIONAL, resolved by hardware detection (override only to force)"
   _list_rows 'cond_'
   echo

@@ -47,6 +47,8 @@ gon() { [[ "$(cv "group_${1//-/_}")" == yes ]]; }
 # headless=yes (profiles/worker): no snaps/flatpaks/debs phases ran, no
 # session exists — those checks would grade a desktop the host never wanted.
 HEADLESS=0; [[ "$(cv headless)" == yes ]] && HEADLESS=1
+CONFIGS_ROLE="$(cv configs_role | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"; CONFIGS_ROLE="${CONFIGS_ROLE:-full}"
+[[ "$CONFIGS_ROLE" == agent ]] && HEADLESS=1
 # configs=no (a box without the owner's .configs): dictation/ocr/tts default
 # off, as in 07 — each serves a .configs tool. dflt KEY prints the value with
 # that default applied.
@@ -324,14 +326,28 @@ command -v gh >/dev/null && pass "gh present" || failv "gh missing"
 gon dev_core && { command -v shellcheck >/dev/null && pass "shellcheck present" || failv "shellcheck missing"; }
 
 # -- 4b. dotfiles actually wired (not just cloned) ------------------------------
-[[ "$(cv configs)" == no ]] && pass "dotfiles: configs=no — the owner's .configs is not used here"
-[[ "$(cv configs)" == no ]] || for df in .bashrc .bash_aliases .gitconfig; do
+case "$CONFIGS_ROLE" in
+  full|agent) ;;
+  *) failv "configs_role=$CONFIGS_ROLE is not full|agent" ;;
+esac
+if [[ "$(cv configs)" == no ]]; then
+  pass "dotfiles: configs=no — the owner's .configs is not used here"
+elif [[ "$CONFIGS_ROLE" == agent ]]; then
+  CONFIGS_DIR="${GIT_HOME:-$(dirname "$PWD")}/.configs"
+  if [[ -x "$CONFIGS_DIR/setup.sh" ]] && (cd "$CONFIGS_DIR" && ./setup.sh check --role agent) >> "$VLOG" 2>&1; then
+    pass "dotfiles: configs_role=agent — role doctor passed"
+  else
+    failv "dotfiles: configs_role=agent — restore $CONFIGS_DIR/setup.sh or repair its role checks"
+  fi
+elif [[ "$CONFIGS_ROLE" == full ]]; then
+for df in .bashrc .bash_aliases .gitconfig; do
   if [[ -L "$HOME/$df" ]] && readlink -f "$HOME/$df" | grep -q "/.configs/"; then
     pass "dotfile: $df → .configs"
   else
     failv "dotfile: $df not symlinked into .configs"
   fi
 done
+fi
 
 # -- 4c. launcher assets (custom-tool icons resolve) ---------------------------
 if (( ! HEADLESS )) && [[ -d "$HOME/git/.configs/.local/share/icons" ]]; then
@@ -362,6 +378,7 @@ fi
 # -- 4d. ~/bin wiring — every .configs tool must be the LIVE symlink ------------
 # A stale real file in ~/bin silently shadows the .configs version (e.g. a
 # stale copy with a dead-venv shebang masking the fixed .configs tool).
+if [[ "$(cv configs)" != no && "$CONFIGS_ROLE" == full ]]; then
 bin_bad=0; bin_n=0
 while IFS= read -r tool; do
   n="$(basename "$tool")"; tgt="$HOME/bin/$n"; bin_n=$((bin_n+1))
@@ -374,6 +391,7 @@ while IFS= read -r tool; do
   fi
 done < <(find "$HOME/git/.configs/bin" -maxdepth 1 -type f -executable 2>/dev/null)
 (( bin_bad == 0 && bin_n > 0 )) && pass "bin: all $bin_n .configs tools live-linked"
+fi
 
 # -- 4e. autostart entries wired ------------------------------------------------
 (( HEADLESS )) || for src in "$HOME"/git/.configs/.config/autostart/*.desktop; do

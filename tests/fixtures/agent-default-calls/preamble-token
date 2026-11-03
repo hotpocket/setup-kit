@@ -1,0 +1,22 @@
+ssh-keygen -F github.com -f <TMP>/home/.ssh/known_hosts
+ssh-keygen -F github.com -f <TMP>/home/.ssh/known_hosts
+ssh-keygen -F github.com -f <TMP>/home/.ssh/known_hosts
+ssh-keygen -F [ssh.github.com]:443 -f <TMP>/home/.ssh/known_hosts
+ssh-keygen -F [ssh.github.com]:443 -f <TMP>/home/.ssh/known_hosts
+ssh-keygen -F [ssh.github.com]:443 -f <TMP>/home/.ssh/known_hosts
+gh auth status --hostname github.com
+gh api user --jq .login
+gh auth setup-git
+git config --global --get-all url.https://github.com/.insteadOf
+git config --global --add url.https://github.com/.insteadOf git@github.com:
+git clone git@github.com-configs:hotpocket/.configs.git <TMP>/home/git/.configs
+LINK <TMP>/home/.bash_aliases -> <TMP>/home/git/.configs/.bash_aliases
+LINK <TMP>/home/.bashrc -> <TMP>/home/git/.configs/.bashrc
+LINK <TMP>/home/.claude/CLAUDE.md -> <TMP>/home/git/.configs/.claude/CLAUDE.md
+LINK <TMP>/home/.claude/settings.json -> <TMP>/home/git/.configs/.claude/settings.json
+LINK <TMP>/home/.claude/statusline-command.sh -> <TMP>/home/git/.configs/.claude/statusline-command.sh
+LINK <TMP>/home/.config/autostart/example.desktop -> <TMP>/home/git/.configs/.config/autostart/example.desktop
+LINK <TMP>/home/.gitconfig -> <TMP>/home/git/.configs/.gitconfig
+LINK <TMP>/home/.local/share/applications/example.desktop -> <TMP>/home/git/.configs/.local/share/applications/example.desktop
+LINK <TMP>/home/.local/share/icons/example.svg -> <TMP>/home/git/.configs/.local/share/icons/example.svg
+LINK <TMP>/home/bin/example -> <TMP>/home/git/.configs/bin/example

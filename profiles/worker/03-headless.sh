@@ -104,6 +104,12 @@ section "machine credentials ($MODE) — verified only; seeding is manual"
 # names it. The blob header says what it is bound to: a seal made before the
 # VM had a TPM is host-key-only and is reported as such.
 AWS_PROF="$(conf_get aws_profile cron-deploy)"
+# conf_get normally treats empty as unset. Here an explicitly empty profile
+# means no credential; a missing key keeps the established cron-deploy default.
+grep -q '^aws_profile=' "$HOST_CONF" 2>/dev/null && AWS_PROF="$(conf_get aws_profile '')"
+if [[ -z "$AWS_PROF" || "$AWS_PROF" == none ]]; then
+  ok "aws: no machine AWS credential is wanted on this box (aws_profile empty/none)"
+else
 if aws_plaintext "$AWS_PROF"; then
   warn "aws profile $AWS_PROF: static key in plaintext at ~/.aws/credentials"
   hint "$(dirname "$0")/seal-aws-profile.sh $AWS_PROF   # → systemd-creds blob, TPM2 + host key, user-scoped"
@@ -139,10 +145,14 @@ if command -v aws >/dev/null 2>&1; then
 else
   warn "awscli not installed yet (group_worker → 02-apt-install); aws profile $AWS_PROF unverified"
 fi
+fi
 
 # git: deploy keys and/or one PAT, per git_auth (lib-deploy-keys.sh); each
 # repo is served by whichever covers it. The workstation's YubiKey FIDO2 keys need a physical
 # press per signature — a cron hangs on them forever — so none live here.
+if [[ "$GIT_AUTH" == none ]]; then
+  ok "git_auth=none — GitHub credentials, deploy-key checks and clone_repos skipped"
+else
 if compgen -G "$HOME/.ssh/*_sk*" >/dev/null || compgen -G "$HOME/.ssh/github_yub_*" >/dev/null; then
   warn "FIDO2 (-sk) ssh key present in ~/.ssh — unusable by unattended jobs (needs a touch)"
 fi
@@ -165,6 +175,7 @@ if auth_has deploy-keys; then
   fi
 fi
 clone_wanted
+fi
 
 # ---- 6. tailnet: the kit installs it, a human joins it ---------------------
 # How this box is REACHED. t3code binds the LAN/tailnet address and devices

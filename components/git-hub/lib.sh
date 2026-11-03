@@ -194,7 +194,10 @@ hub_alias_ensure() {
 # the previous origin kept as `github`. Then probe the hub through it.
 hub_remote_ensure() {
   local name="$1" slug="$2" clone="$3" want="git-hub:$1.git" cur
-  if [[ ! -d "$clone/.git" ]]; then
+  if [[ ! -e "$clone/.git" && "$clone" == "$KIT_DIR" ]]; then
+    ok "git hub: $name is a setup-kit archive — no git metadata or remote to route"; return 0
+  fi
+  if [[ ! -e "$clone/.git" ]]; then
     warn "git hub: $slug has no clone at ${clone/#$HOME/\~} — nothing to re-point"; return 0
   fi
   cur="$(git -C "$clone" remote get-url origin 2>/dev/null)"

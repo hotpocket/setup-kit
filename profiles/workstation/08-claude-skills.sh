@@ -12,6 +12,8 @@ SCRIPT_NAME="ws-08-claude-skills"
 source "$(dirname "$0")/../../lib.sh"
 require_user
 init_mode "${1:-}"
+CONFIGS_ROLE="$(conf_get configs_role full)"
+AGENT_REPO_HOME="${GIT_HOME:-$(dirname "$KIT_DIR")}"  # sibling sources on an agent box
 
 # Claude Code (the `claude` binary) is its own flag, default ON: the conduct
 # skills in .configs are useless without it, so skills=yes implies it.
@@ -117,6 +119,7 @@ fi
 # conduct-only links below (agents, vault-digest) are not this box's business.
 CONFIGS=1; [[ "$(conf_get configs yes)" == no ]] && CONFIGS=0
 CONDUCT_SKILLS_SRC="$HOME/git/.configs/claude-conduct/skills"
+[[ "$CONFIGS_ROLE" == agent ]] && CONDUCT_SKILLS_SRC="$AGENT_REPO_HOME/.configs/claude-conduct/skills"
 SKILLS="$(conf_get claude_skills '')"
 if [[ -z "$SKILLS" ]]; then
   SKILLS="gstack"
@@ -127,23 +130,25 @@ fi
 # gstack sub-skills wanted on top of the router. gstack's own relink would
 # link all ~40; these are the ones actually used here. Same layout gstack
 # uses (real dir, SKILL.md symlinked) so its relink, if ever run, agrees.
-GSTACK_SKILLS="$(conf_get gstack_skills 'browse setup-browser-cookies')"
+GSTACK_DEFAULT='browse setup-browser-cookies'
+[[ "$CONFIGS_ROLE" == agent ]] && GSTACK_DEFAULT=browse
+GSTACK_SKILLS="$(conf_get gstack_skills "$GSTACK_DEFAULT")"
 SKILLS_DIR="$HOME/.claude/skills"
 
 section "claude skills ($MODE) — components/{gstack,vault,conduct}.md"
 
 # registry: source repo, clone url (empty = local-only), skill dir within repo
 skill_repo() { case "$1" in
-  gstack)        echo "$HOME/git/gstack" ;;
-  *)             echo "$HOME/git/.configs" ;;   # every other skill lives in claude-conduct
+  gstack)        if [[ "$CONFIGS_ROLE" == agent ]]; then echo "$AGENT_REPO_HOME/gstack"; else echo "$HOME/git/gstack"; fi ;;
+  *)             echo "${CONDUCT_SKILLS_SRC%/claude-conduct/skills}" ;;
 esac; }
 skill_url() { case "$1" in
   gstack)        echo "https://github.com/garrytan/gstack.git" ;;   # public: no auth, no YubiKey touch
-  *)             echo "git@github.com:hotpocket/.configs.git" ;;
+  *)             if [[ "$CONFIGS_ROLE" == agent ]]; then conf_get configs_repo ''; else echo "git@github.com:hotpocket/.configs.git"; fi ;;
 esac; }
 skill_path() { case "$1" in
-  gstack)  echo "$HOME/git/gstack" ;;            # SKILL.md lives at the repo root
-  *)       echo "$HOME/git/.configs/claude-conduct/skills/$1" ;;
+  gstack)  skill_repo gstack ;;                 # SKILL.md lives at the repo root
+  *)       echo "$CONDUCT_SKILLS_SRC/$1" ;;
 esac; }
 
 # Everything this phase links out of the repos. A checkout that already has all
@@ -151,8 +156,8 @@ esac; }
 # (ssh with the resident -sk key), so freshness is bought only when a wanted
 # path is actually missing (the stale-clone failure the pull exists to fix:
 # a pre-vault-digest claude-conduct left ~/bin/vault-digest unlinkable forever).
-AGENTS_SRC="$HOME/git/.configs/claude-conduct/agents"
-VD_SRC="$HOME/git/.configs/claude-conduct/skills/conduct/templates/vault-digest"
+AGENTS_SRC="${CONDUCT_SKILLS_SRC%/skills}/agents"
+VD_SRC="$CONDUCT_SKILLS_SRC/conduct/templates/vault-digest"
 WANT_PATHS=(); (( CONFIGS )) && WANT_PATHS=("$VD_SRC" "$AGENTS_SRC")
 for s in $SKILLS; do
   p="$(skill_path "$s")"; [[ -n "$p" ]] && WANT_PATHS+=("$p")
@@ -226,9 +231,12 @@ done
 
 # gstack sub-skills: Claude Code only discovers ~/.claude/skills/<name>/SKILL.md,
 # so a skill inside the gstack link is invisible until it has its own entry.
-if [[ " $SKILLS " == *" gstack "* && -d "$HOME/git/gstack" ]]; then
+if [[ " $SKILLS " == *" gstack "* && -d "$(skill_repo gstack)" ]]; then
   for s in $GSTACK_SKILLS; do
-    src="$HOME/git/gstack/$s/SKILL.md"; dir="$SKILLS_DIR/$s"; link="$dir/SKILL.md"
+    if [[ "$CONFIGS_ROLE" == agent && "$s" == setup-browser-cookies ]]; then
+      ok "configs_role=agent — personal browser cookie skill skipped"; continue
+    fi
+    src="$(skill_repo gstack)/$s/SKILL.md"; dir="$SKILLS_DIR/$s"; link="$dir/SKILL.md"
     if [[ ! -f "$src" ]]; then
       warn "gstack skill '$s' source missing at $src"; miss "claude-skills: gstack/$s absent"; continue
     fi
@@ -316,7 +324,7 @@ fi
 #      unconfined+userns profile the google-chrome deb installs for itself.
 if [[ " $SKILLS " == *" gstack "* ]]; then
   OS_VER="$(. /etc/os-release && echo "$VERSION_ID")"
-  PW_MIN="$(grep -oP '"playwright":\s*"\^?1\.\K[0-9]+' "$HOME/git/gstack/package.json" 2>/dev/null || true)"
+  PW_MIN="$(grep -oP '"playwright":\s*"\^?1\.\K[0-9]+' "$(skill_repo gstack)/package.json" 2>/dev/null || true)"
   if [[ -n "$PW_MIN" && "${OS_VER%%.*}" -ge 26 && "$PW_MIN" -lt 61 ]]; then
     warn "gstack pins playwright 1.$PW_MIN (< 1.61) — browsers can't install on Ubuntu $OS_VER."
     warn "  Fix: bump to ^1.61 in ~/git/gstack/package.json, bun install, bun run build."

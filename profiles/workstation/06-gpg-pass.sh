@@ -38,6 +38,10 @@ if [[ "$(conf_get configs yes)" == no ]]; then
   ok "configs=no — gpg/pass chain skipped (it needs .configs and the owner's YubiKeys)"
   exit 0
 fi
+if [[ "$(conf_get configs_role full)" == agent ]]; then
+  ok "configs_role=agent — personal GPG/pass chain skipped"
+  exit 0
+fi
 
 # ---- 0. deps present? (apt manifest installs them; just verify here) --------
 for b in gpg pass scdaemon; do

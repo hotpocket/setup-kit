@@ -15,8 +15,26 @@ init_mode "${1:-}"
 source "$(dirname "$0")/lib-deploy-keys.sh"
 REPO="$(conf_get configs_repo 'git@github.com-configs:hotpocket/.configs.git')"
 DEST="$HOME/git/.configs"
+if [[ "$(conf_get configs_role full)" == agent || "$GIT_AUTH" == none ]]; then
+  GIT_HOME="${GIT_HOME:-$(dirname "$KIT_DIR")}"; DEST="$GIT_HOME/.configs"
+fi
 
 section "github auth preamble ($MODE) — worker"
+if [[ "$GIT_AUTH" == none ]]; then
+  ok "git_auth=none — GitHub authentication, host keys and deploy keys skipped"
+  [[ "$(conf_get configs yes)" == no ]] && { ok "configs=no — .configs not used here"; exit 0; }
+  [[ -d "$DEST/.git" ]] && { ok ".configs already cloned"; exit 0; }
+  (( INSTALL )) || { warn ".configs not cloned — phase 06 retries after git hub setup"; exit 0; }
+  mkdir -p "$(dirname "$DEST")"
+  # The git-hub alias is created later (03-headless §7). A missing alias or
+  # unavailable local repo/bundle must not turn this preamble into an auth gate.
+  if git clone "$REPO" "$DEST" >> "$LOG_DIR/$SCRIPT_NAME.log" 2>&1 && [[ -d "$DEST/.git" ]]; then
+    ok ".configs cloned"
+  else
+    warn ".configs unavailable — phase 06 retries after git hub setup (check configs_repo and hub access)"
+  fi
+  exit 0
+fi
 mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 
 # ---- 1. host keys: GitHub's published values (pinned constants, not a

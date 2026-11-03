@@ -18,9 +18,11 @@ command -v git >/dev/null 2>&1 || {
   sudo apt-get update -qq && sudo apt-get install -y -qq git
 }
 
-if [[ -d "$DEST/.git" ]]; then
+if [[ -e "$DEST/.git" ]]; then
   echo "==> updating $DEST"
   git -C "$DEST" pull --ff-only
+elif [[ -x "$DEST/bootstrap.sh" && -f "$DEST/lib.sh" && -d "$DEST/profiles" ]]; then
+  echo "==> using setup-kit archive at $DEST (no git metadata; update skipped)"
 else
   mkdir -p "$(dirname "$DEST")"
   echo "==> cloning $REPO"

@@ -8,6 +8,16 @@ init_mode "${1:-}"
 
 REPO="$(conf_get configs_repo 'git@github.com:hotpocket/.configs.git')"
 DEST="$HOME/git/.configs"
+CONFIGS_ROLE="$(conf_get configs_role full)"
+case "$CONFIGS_ROLE" in
+  full|agent) ;;
+  *) fail "configs_role=$CONFIGS_ROLE is not full|agent"; exit 1 ;;
+esac
+# The new role uses sibling repos (also when the kit is an extracted archive).
+# Keep the full role's existing destination for workstation/worker compatibility.
+if [[ "$CONFIGS_ROLE" == agent || "$(conf_get git_auth '')" == none ]]; then
+  GIT_HOME="${GIT_HOME:-$(dirname "$KIT_DIR")}"; DEST="$GIT_HOME/.configs"
+fi
 
 section ".configs ($MODE)"
 if [[ "$(conf_get configs yes)" == no ]]; then
@@ -23,7 +33,7 @@ else
     git clone "$REPO" "$DEST" 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
     # private repo + fresh box = no auth yet. At a real terminal, fix it
     # inline instead of bouncing the user out to re-run.
-    if [[ ! -d "$DEST/.git" ]] && [[ -t 0 ]] && command -v gh >/dev/null 2>&1; then
+    if [[ ! -d "$DEST/.git" && "$(conf_get git_auth '')" != none ]] && [[ -t 0 ]] && command -v gh >/dev/null 2>&1; then
       warn ".configs is private and this box has no GitHub auth yet"
       read -rp "Authenticate with GitHub now (gh auth login)? [Y/n] " a
       if [[ ! "$a" =~ ^[Nn] ]]; then
@@ -32,9 +42,15 @@ else
       fi
     fi
     if [[ ! -d "$DEST/.git" ]]; then
-      fail ".configs clone failed — needs GitHub auth"
-      hint "gh auth login   (or restore your ssh key), then re-run install"
-      miss ".configs: clone blocked on auth"
+      if [[ "$(conf_get git_auth '')" == none ]]; then
+        fail ".configs clone failed — configured source is unavailable"
+        hint "check configs_repo (local repo, bundle, or hub URL) and git-hub SSH access, then re-run install"
+        miss ".configs: configured source unavailable"
+      else
+        fail ".configs clone failed — needs GitHub auth"
+        hint "gh auth login   (or restore your ssh key), then re-run install"
+        miss ".configs: clone blocked on auth"
+      fi
       exit 1
     fi
   else
@@ -47,6 +63,11 @@ fi
 # of private .configs above proves GitHub ssh auth works — flip the kit's
 # own remote to match.
 KIT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+if [[ ! -e "$KIT_DIR/.git" ]]; then
+  ok "setup-kit archive: no git metadata — remote setup skipped"
+elif [[ "$(conf_get git_auth '')" == none ]]; then
+  ok "setup-kit remote left as-is (git_auth=none)"
+else
 KIT_URL="$(git -C "$KIT_DIR" remote get-url origin 2>/dev/null || true)"
 if [[ "$(conf_get headless no)" == yes ]]; then
   ok "setup-kit remote left as-is (headless: public https pull, per-repo deploy keys only)"
@@ -55,6 +76,22 @@ elif [[ "$KIT_URL" == https://github.com/* ]]; then
   do_or_say git -C "$KIT_DIR" remote set-url origin "git@github.com:${KIT_URL#https://github.com/}"
 else
   ok "setup-kit remote: ssh"
+fi
+fi
+
+if [[ "$CONFIGS_ROLE" == agent ]]; then
+  # .configs owns the agent allowlist. No fixed dotfiles, executable sweep,
+  # launchers, autostart, or dconf from the full role may follow this call.
+  if [[ ! -x "$DEST/setup.sh" ]]; then
+    fail ".configs/setup.sh missing — restore the agent-capable checkout at $DEST"
+    exit 1
+  fi
+  if (cd "$DEST" && ./setup.sh "$MODE" --role agent) 2>&1 | extout; then
+    ok ".configs role agent: $MODE complete"
+    exit 0
+  fi
+  fail ".configs role agent: $MODE failed — repair the reported role checks, then re-run"
+  exit 1
 fi
 
 if [[ -x "$DEST/setup.sh" ]]; then
