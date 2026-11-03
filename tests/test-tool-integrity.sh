@@ -3,12 +3,12 @@ source "$(dirname "$0")/tools-fixture.sh"
 source "$(dirname "$0")/playwright-fixture.sh"
 source "$KIT_DIR/manifests/tool-versions.conf"
 conf_tools component_flutter_headless=yes
-printf 'dart.zip.part\n' > "$STATE/checksum-fail-for"
+printf 'flutter.tar.xz.part\n' > "$STATE/checksum-fail-for"
 run_tools install
-assert 'Dart checksum failure prevents extraction and Flutter execution' 'grep -q "dart-sdk-linux-x64.zip" "$CALLS" && ! grep -q "unzip .*dart.zip" "$CALLS" && ! grep -q "^flutter " "$CALLS" && [[ ! -e "$HOME/development/flutter/bin/cache/dart-sdk/bin/dart" ]]'
+assert 'Flutter release checksum failure prevents extraction and Flutter execution' 'grep -q "flutter_linux_3.47.2-stable.tar.xz" "$CALLS" && ! grep -q "tar .*flutter.tar.xz" "$CALLS" && ! grep -q "^flutter " "$CALLS" && [[ ! -e "$HOME/development/flutter/bin/cache/dart-sdk/bin/dart" ]]'
 rm "$STATE/checksum-fail-for"
 run_tools install
-assert 'Dart is verified and published before Flutter bootstrap' '[[ -x "$HOME/development/flutter/bin/cache/dart-sdk/bin/dart" && "$(cat "$HOME/development/flutter/bin/cache/engine-dart-sdk.stamp")" == "$FLUTTER_ENGINE_REVISION" && "$(cat "$HOME/development/flutter/bin/cache/dart-sdk/.setup-kit-sha256")" == "$FLUTTER_DART_SHA256" ]] && grep -q "dart.zip.part" "$STATE/checksum-input"'
+assert 'Dart and compiled tool are verified and published together before bootstrap' '[[ -x "$HOME/development/flutter/bin/cache/dart-sdk/bin/dart" && "$(cat "$HOME/development/flutter/bin/cache/engine-dart-sdk.stamp")" == "$FLUTTER_ENGINE_REVISION" && -s "$HOME/development/flutter/bin/cache/flutter_tools.snapshot" && -s "$HOME/development/flutter/.setup-kit-release.json" ]] && grep -q "flutter.tar.xz.part" "$STATE/checksum-input"'
 for name in chromium headless ffmpeg; do
   rm -rf "$HOME/.cache/ms-playwright"
   printf '%s.zip.part\n' "$name" > "$STATE/checksum-fail-for"
@@ -23,5 +23,5 @@ assert 'all browser archives have integrity receipts before completion' '[[ "$(c
 cp /usr/bin/sha256sum "$TMP/bin/sha256sum"
 rm -rf "$HOME/development/flutter/bin/cache/dart-sdk"
 conf_tools component_flutter_headless=yes; run_tools install
-assert 'real SHA256 mismatch blocks the fake Dart archive before extraction' 'grep -q "did NOT match" "$TMP/out" && ! grep -q "unzip .*dart.zip" "$CALLS" && ! grep -q "^flutter " "$CALLS"'
+assert 'real SHA256 mismatch blocks the fake release archive before extraction' 'grep -q "did NOT match" "$TMP/out" && ! grep -q "tar .*flutter.tar.xz" "$CALLS" && ! grep -q "^flutter " "$CALLS"'
 finish

@@ -7,36 +7,35 @@ SDK_DIR="$HOME/Android/Sdk"
 JAVA_DIR="$TOOL_ROOT/usr/lib/jvm/java-21-openjdk-amd64"
 export ANDROID_HOME="$SDK_DIR" ANDROID_SDK_ROOT="$SDK_DIR" JAVA_HOME="$JAVA_DIR"
 export PATH="$FLUTTER_DIR/bin:$JAVA_DIR/bin:$SDK_DIR/cmdline-tools/latest/bin:$SDK_DIR/platform-tools:$PATH"
-flutter_clone() (
-  tool_x64 flutter || exit 1
-  mkdir -p "$(dirname "$FLUTTER_DIR")" || exit 1
+# The verified release ships Dart and the compiled tool. A Git clone would
+# bootstrap flutter_tools with unpinned Pub archives on its first invocation.
+flutter_release_install() (
+  tool_x64 Flutter || exit 1
+  local parent owner stage backup
+  parent=$(dirname "$FLUTTER_DIR")
+  mkdir -p "$parent" || exit 1
   owner=$BASHPID
-  stage=$(tool_stage "$(dirname "$FLUTTER_DIR")" flutter "$owner") || exit 1
+  stage=$(tool_stage "$parent" flutter "$owner") || exit 1
   trap 'rm -rf "$stage"' EXIT
-  git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$stage/flutter" \
+  tool_fetch "$FLUTTER_RELEASE_URL" "$FLUTTER_RELEASE_SHA256" "$stage/flutter.tar.xz" \
+    && tar --no-same-owner -xJf "$stage/flutter.tar.xz" -C "$stage" \
     && [[ "$(git -C "$stage/flutter" rev-parse HEAD)" == "$FLUTTER_REVISION" ]] \
-    && mv -T "$stage/flutter" "$FLUTTER_DIR"
-)
-flutter_dart_ready() {
-  [[ -x "$FLUTTER_DIR/bin/cache/dart-sdk/bin/dart" \
-    && "$(cat "$FLUTTER_DIR/bin/cache/dart-sdk/.setup-kit-sha256" 2>/dev/null)" == "$FLUTTER_DART_SHA256" \
-    && "$(cat "$FLUTTER_DIR/bin/cache/engine-dart-sdk.stamp" 2>/dev/null)" == "$FLUTTER_ENGINE_REVISION" ]] && tool_content_valid "$FLUTTER_DIR/bin/cache/dart-sdk" bin/dart
-}
-flutter_dart_install() (
-  tool_x64 Dart || exit 1
-  mkdir -p "$FLUTTER_DIR/bin/cache" || exit 1
-  owner=$BASHPID
-  stage=$(tool_stage "$FLUTTER_DIR/bin/cache" dart "$owner") || exit 1
-  trap 'rm -rf "$stage"' EXIT
-  tool_fetch "https://storage.googleapis.com/flutter_infra_release/flutter/$FLUTTER_ENGINE_REVISION/dart-sdk-linux-x64.zip" \
-    "$FLUTTER_DART_SHA256" "$stage/dart.zip" \
-    && unzip -q "$stage/dart.zip" -d "$stage" \
-    && chmod +x "$stage/dart-sdk/bin/"* \
-    && [[ -x "$stage/dart-sdk/bin/dart" ]] \
-    && printf '%s\n' "$FLUTTER_DART_SHA256" > "$stage/dart-sdk/.setup-kit-sha256" \
-    && tool_content_receipt "$stage/dart-sdk" bin/dart \
-    && tool_publish_dir "$stage/dart-sdk" "$FLUTTER_DIR/bin/cache/dart-sdk" "$stage" \
-    && tool_write "$FLUTTER_ENGINE_REVISION" "$FLUTTER_DIR/bin/cache/engine-dart-sdk.stamp"
+    && python3 -I "$KIT_DIR/components/flutter-release.py" prepare "$KIT_DIR" "$stage/flutter" \
+    && python3 -I "$KIT_DIR/components/flutter-release.py" seal "$KIT_DIR" "$stage/flutter" || exit 1
+  if [[ -e "$FLUTTER_DIR" || -L "$FLUTTER_DIR" ]]; then
+    if [[ ! -L "$FLUTTER_DIR" ]] && { \
+      python3 -I "$KIT_DIR/components/flutter-release.py" managed "$KIT_DIR" "$FLUTTER_DIR" \
+      || { [[ "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]] \
+        && [[ -z "$(git -C "$FLUTTER_DIR" status --porcelain --untracked-files=all)" ]]; }; }; then
+      mv -T "$FLUTTER_DIR" "$stage/previous" || exit 1
+    else
+      # Keep unrelated or locally edited trees outside disposable staging.
+      backup=$(mktemp -d "$parent/flutter.backup.XXXXXX") || exit 1
+      mv -T "$FLUTTER_DIR" "$backup" || exit 1
+      warn "previous Flutter tree preserved in $backup"
+    fi
+  fi
+  mv -T "$stage/flutter" "$FLUTTER_DIR"
 )
 android_tools_install() (
   tool_x64 android-tools || exit 1
@@ -56,37 +55,31 @@ android_accept() { # yes may SIGPIPE; only sdkmanager's status decides success
 }
 if pkg_installed openjdk-21-jdk-headless; then ok "headless JDK 21"
 else warn "headless JDK 21 missing"; apt_install openjdk-21-jdk-headless || miss "flutter: headless JDK 21 install failed"; fi
-if [[ ! -d "$FLUTTER_DIR" ]]; then
-  warn "flutter $FLUTTER_VERSION missing"; do_or_say flutter_clone || miss "flutter: pinned git clone failed"
-elif [[ "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" != "$FLUTTER_REVISION" ]]; then
-  warn "flutter revision drift: expected $FLUTTER_REVISION; preserve checkout and inspect before replacing"
-  miss "flutter: checkout revision does not match pin"
-else ok "flutter revision $FLUTTER_VERSION"; fi
-if ! flutter_dart_ready; then
-  warn "pinned Dart SDK missing or unverified"
-  (( ! INSTALL )) || rm -f "$FLUTTER_DIR/bin/cache/setup-kit-android.complete"
-  if (( INSTALL )) && [[ -x "$FLUTTER_DIR/bin/flutter" && "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]]; then
-    flutter_dart_install || miss "flutter: Dart archive verification failed"
-  fi
+if tool_flutter_release_ready; then ok "flutter release $FLUTTER_VERSION"
+else
+  warn "verified Flutter release missing or drifted"
+  do_or_say flutter_release_install || miss "flutter: release archive verification or publication failed"
 fi
-if flutter_dart_ready && tool_flutter_cache_ready && [[ "$(cat "$FLUTTER_DIR/bin/cache/setup-kit-android.complete" 2>/dev/null)" == "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" && -f "$FLUTTER_DIR/bin/cache/flutter.version.json" ]] && python3 -I - "$FLUTTER_DIR/bin/cache/flutter.version.json" "$FLUTTER_VERSION" "$FLUTTER_DART_VERSION" <<'PY'
+if tool_flutter_release_ready && tool_flutter_cache_ready && [[ "$(cat "$FLUTTER_DIR/bin/cache/setup-kit-android.complete" 2>/dev/null)" == "$FLUTTER_REVISION:$FLUTTER_RELEASE_SHA256" && -f "$FLUTTER_DIR/bin/cache/flutter.version.json" ]] && python3 -I - "$FLUTTER_DIR/bin/cache/flutter.version.json" "$FLUTTER_VERSION" "$FLUTTER_DART_VERSION" <<'PY2'
 import json,sys
 try:
  d=json.load(open(sys.argv[1])); sys.exit(0 if d['frameworkVersion']==sys.argv[2] and d['dartSdkVersion']==sys.argv[3] else 1)
 except (OSError,ValueError,KeyError): sys.exit(1)
-PY
+PY2
 then ok "flutter/Dart cache matches pin"
 else
   warn "flutter/Dart cache missing or drifted"
-  if flutter_dart_ready && [[ -x "$FLUTTER_DIR/bin/flutter" && "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]]; then
+  if tool_flutter_release_ready; then
     flutter_precache() {
       rm -f "$FLUTTER_DIR/bin/cache/setup-kit-android.complete" || return 1
       tool_flutter_cache_ready || flutter_cache_install || return 1
-      # An unsupported scheme makes any unexpected upstream HTTP fetch fail
-      # before extraction. No network service or free local port is trusted.
-      env FLUTTER_STORAGE_BASE_URL=setup-kit-verified://offline FLUTTER_PREBUILT_ENGINE_VERSION="$FLUTTER_ENGINE_REVISION" "$FLUTTER_DIR/bin/flutter" precache --android \
-        && tool_flutter_cache_ready \
-        && tool_write "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" "$FLUTTER_DIR/bin/cache/setup-kit-android.complete"
+      # Refuse unexpected downloads from either bootstrap Pub or engine storage.
+      # Empty tool args keep the vendor snapshot's compile key unchanged.
+      env FLUTTER_TOOL_ARGS= PUB_CACHE="$FLUTTER_DIR/.setup-kit-pub-cache" PUB_HOSTED_URL=setup-kit-verified://offline \
+        FLUTTER_STORAGE_BASE_URL=setup-kit-verified://offline FLUTTER_PREBUILT_ENGINE_VERSION="$FLUTTER_ENGINE_REVISION" \
+        "$FLUTTER_DIR/bin/flutter" precache --android \
+        && tool_flutter_release_ready && tool_flutter_cache_ready \
+        && tool_write "$FLUTTER_REVISION:$FLUTTER_RELEASE_SHA256" "$FLUTTER_DIR/bin/cache/setup-kit-android.complete"
     }
     do_or_say flutter_precache || miss "flutter: Android precache failed"
   fi

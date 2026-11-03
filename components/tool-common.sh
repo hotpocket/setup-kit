@@ -83,18 +83,22 @@ tool_android_payload() { # SDK directory, sdkmanager package token
 tool_flutter_cache_ready() {
   python3 -I "$KIT_DIR/components/flutter-cache.py" check "$KIT_DIR" "$HOME/development/flutter/bin/cache"
 }
+tool_flutter_release_ready() {
+  local flutter="$HOME/development/flutter"
+  [[ -x "$flutter/bin/flutter" && "$(git -C "$flutter" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]] \
+    && python3 -I "$KIT_DIR/components/flutter-release.py" check "$KIT_DIR" "$flutter"
+}
 tool_flutter_installed() {
+  tool_flutter_release_ready || return 1
   tool_flutter_cache_ready || return 1
   local flutter="$HOME/development/flutter" sdk="$HOME/Android/Sdk" package props expected value
   [[ -x "$flutter/bin/flutter" && -x "$flutter/bin/cache/dart-sdk/bin/dart" \
     && "$(git -C "$flutter" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" \
-    && "$(cat "$flutter/bin/cache/dart-sdk/.setup-kit-sha256" 2>/dev/null)" == "$FLUTTER_DART_SHA256" \
     && "$(cat "$flutter/bin/cache/engine-dart-sdk.stamp" 2>/dev/null)" == "$FLUTTER_ENGINE_REVISION" \
-    && "$(cat "$flutter/bin/cache/setup-kit-android.complete" 2>/dev/null)" == "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" \
+    && "$(cat "$flutter/bin/cache/setup-kit-android.complete" 2>/dev/null)" == "$FLUTTER_REVISION:$FLUTTER_RELEASE_SHA256" \
     && -x "$sdk/cmdline-tools/latest/bin/sdkmanager" && -s "$sdk/licenses/android-sdk-license" \
     && "$(readlink "$sdk/cmdline-tools/latest" 2>/dev/null)" == "$ANDROID_TOOLS_VERSION" \
     && "$(tool_property "$sdk/cmdline-tools/$ANDROID_TOOLS_VERSION/source.properties" Pkg.Revision)" == "$ANDROID_TOOLS_VERSION" ]] || return 1
-  tool_content_valid "$flutter/bin/cache/dart-sdk" bin/dart || return 1
   python3 -I - "$flutter/bin/cache/flutter.version.json" "$FLUTTER_VERSION" "$FLUTTER_DART_VERSION" <<'PY' || return 1
 import json,sys
 try:

@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess
 import sys
+import urllib.parse
 
 
 class Drift(Exception):
@@ -77,14 +78,48 @@ def main():
         revision = subprocess.check_output(["git", "-C", str(flutter), "rev-parse", "HEAD"], text=True).strip()
         require(revision == pins['FLUTTER_REVISION'], "Flutter source revision drift")
         cache = flutter / "bin/cache"
-        text_is(cache / "dart-sdk/.setup-kit-sha256", pins['FLUTTER_DART_SHA256'])
+        # Check the complete release bootstrap independently, before executing Dart.
+        release = json.loads((flutter / '.setup-kit-release.json').read_text())
+        release_keys = ('FLUTTER_VERSION', 'FLUTTER_REVISION', 'FLUTTER_DART_VERSION',
+                        'FLUTTER_ENGINE_REVISION', 'FLUTTER_RELEASE_URL', 'FLUTTER_RELEASE_SHA256')
+        require(release.get('schema') == 1 and release['pins'] == {k: pins[k] for k in release_keys},
+                'Flutter release archive drift')
+        entries = {'bin/flutter', 'bin/dart', 'bin/cache/flutter_tools.snapshot',
+                   'bin/cache/flutter_tools.stamp', 'bin/cache/engine-dart-sdk.stamp',
+                   'packages/flutter_tools/pubspec.yaml', 'packages/flutter_tools/pubspec.lock',
+                   'packages/flutter_tools/.dart_tool/package_config.json'}
+        for directory in ('bin/internal', 'bin/cache/dart-sdk', '.setup-kit-pub-cache', '.pub-preload-cache'):
+            entries.update(p.relative_to(flutter).as_posix() for p in (flutter / directory).rglob('*') if p.is_file())
+        require(set(release['files']) == entries, 'Flutter bootstrap file inventory drift')
+        package_file = flutter / 'packages/flutter_tools/.dart_tool/package_config.json'
+        package_config = json.loads(package_file.read_text())
+        require(package_config.get('configVersion') == 2 and package_config.get('packages'),
+                'missing offline Flutter package configuration')
+        for package in package_config['packages']:
+            uri = urllib.parse.urlsplit(package['rootUri'])
+            directory = (package_file.parent / urllib.parse.unquote(uri.path)).resolve()
+            require(not uri.scheme and not uri.netloc and not uri.path.startswith('/') and
+                    directory.is_relative_to(flutter.resolve()) and (directory / 'pubspec.yaml').is_file(),
+                    'Flutter Pub source missing or outside verified release')
+        executable(cache / 'dart-sdk/bin/dart')
+        require((cache / 'flutter_tools.snapshot').stat().st_size > 0, 'missing Flutter tool snapshot')
+        text_is(cache / 'flutter_tools.stamp', pins['FLUTTER_REVISION'] + ':')
+        require((flutter / 'packages/flutter_tools/pubspec.yaml').stat().st_mtime_ns <=
+                (flutter / 'packages/flutter_tools/pubspec.lock').stat().st_mtime_ns,
+                'Flutter sources would trigger Pub bootstrap')
+        for name, expected in release['files'].items():
+            path = flutter / name
+            with path.open('rb') as stream:
+                actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+            require(actual == expected['sha256'], f'corrupt Flutter bootstrap {path}')
+            if expected['executable']:
+                executable(path)
         text_is(cache / "engine-dart-sdk.stamp", pins['FLUTTER_ENGINE_REVISION'])
-        content(cache / "dart-sdk", "bin/dart")
         version(cache / "dart-sdk/bin/dart", rf"Dart SDK version: {re.escape(pins['FLUTTER_DART_VERSION'])}(?:\s|$)")
         metadata = json.loads((cache / "flutter.version.json").read_text())
         require(metadata.get('frameworkVersion') == pins['FLUTTER_VERSION'] and
                 metadata.get('dartSdkVersion') == pins['FLUTTER_DART_VERSION'], "Flutter/Dart metadata drift")
-        text_is(cache / "setup-kit-android.complete", pins['FLUTTER_REVISION'] + ':' + pins['FLUTTER_DART_SHA256'])
+        text_is(cache / "setup-kit-android.complete", pins['FLUTTER_REVISION'] + ':' + pins['FLUTTER_RELEASE_SHA256'])
         # Independent of the installer's cache probe: validate pinned archive
         # identity, required entries, stamps, and all sealed payload bytes.
         receipt = json.loads((cache / 'setup-kit-cache.json').read_text())

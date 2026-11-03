@@ -16,12 +16,12 @@ fi
 exec "$FIXTURE/bin/curl-ready" "$@"
 SH2
 chmod +x "$TMP/bin/curl"
-for runtime in dart chromium engine; do
+for runtime in flutter chromium engine; do
   label=$runtime
   rm -f "$STATE/download-started" "$STATE/stage-path"
-  if [[ "$runtime" == dart ]]; then
+  if [[ "$runtime" == flutter ]]; then
     conf_tools component_flutter_headless=yes
-    phase=07-components; export PAUSE_URL=dart-sdk-linux-x64.zip
+    phase=07-components; export PAUSE_URL=flutter_linux_3.47.2-stable.tar.xz
     target="$HOME/development/flutter/bin/cache/dart-sdk/bin/dart"
   elif [[ "$runtime" == engine ]]; then
     conf_tools component_flutter_headless=yes

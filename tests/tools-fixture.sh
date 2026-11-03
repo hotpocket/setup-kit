@@ -14,7 +14,7 @@ s=p(os.environ['STATE']); home=p(os.environ['HOME'])
 if name=='curl':
  if (s/'curl-fail').exists(): sys.exit(22)
  url=next(a for a in args if a.startswith('https:')); dest=args[args.index('-o')+1]
- src='pip-26.2.2-py3-none-any.whl' if '/pip-' in url else 'certifi-2026.10.19-py3-none-any.whl' if '/certifi-' in url else 'uv.tar.gz' if 'uv-' in url else 'blender.tar.xz' if 'blender-' in url else 'dart.zip' if 'dart-sdk-linux' in url else 'chromium.zip' if 'chrome-linux64.zip' in url else 'headless.zip' if 'chrome-headless-shell-linux64.zip' in url else 'ffmpeg.zip' if 'ffmpeg-linux.zip' in url else 'android.zip'
+ src='flutter.tar.xz' if 'flutter_linux_' in url else 'pip-26.2.2-py3-none-any.whl' if '/pip-' in url else 'certifi-2026.10.19-py3-none-any.whl' if '/certifi-' in url else 'uv.tar.gz' if 'uv-' in url else 'blender.tar.xz' if 'blender-' in url else 'dart.zip' if 'dart-sdk-linux' in url else 'chromium.zip' if 'chrome-linux64.zip' in url else 'headless.zip' if 'chrome-headless-shell-linux64.zip' in url else 'ffmpeg.zip' if 'ffmpeg-linux.zip' in url else 'android.zip'
  cache=json.loads((p(os.environ['FIXTURE'])/'cache-fixtures.json').read_text())
  src=cache.get(url.removeprefix('https://storage.googleapis.com/'),src)
  shutil.copyfile(p(os.environ['FIXTURE'])/src,dest)
@@ -30,7 +30,8 @@ elif name=='git':
   (d/'bin/flutter').chmod(0o755); (d/'HEAD').write_text('d3b14c876900e553bc736ca19295fc09e3853e8e')
  elif 'rev-parse' in args:
   d=p(args[args.index('-C')+1]); print((d/'HEAD').read_text() if (d/'HEAD').exists() else 'abc123')
- elif 'status' in args: pass
+ elif 'status' in args:
+  if (s/'git-dirty').exists(): print(' M packages/flutter_tools/pubspec.yaml')
 elif name=='sdkmanager':
  sdk=p(next((a.split('=',1)[1] for a in args if a.startswith('--sdk_root=')),str(home/'Android/Sdk')))
  if '--licenses' in args:
@@ -142,3 +143,48 @@ SH2
 chmod +x "$TMP/bin/unzip"
 
 /usr/bin/python3 "$KIT_DIR/tests/flutter-cache-fixture.py" "$TMP"
+
+# Complete vendor release fixture: Dart and the compiled tool ship together.
+mkdir -p "$TMP/payload/flutter/bin/cache" "$TMP/payload/flutter/bin/internal" "$TMP/payload/flutter/packages/flutter_tools" "$TMP/payload/flutter/.git"
+cp -a "$TMP/payload/dart-sdk" "$TMP/payload/flutter/bin/cache/"
+cat > "$TMP/payload/flutter/bin/cache/dart-sdk/bin/dart" <<'PY'
+#!/usr/bin/python3
+import json,os,pathlib,sys
+p=pathlib.Path; args=sys.argv[1:]
+if args==['--version']:
+ print('Dart SDK version: 3.13.2 (stable)'); sys.exit(0)
+with open(os.environ['CALLS'],'a') as out: out.write('release-dart '+' '.join(args)+'\n')
+cache=p(os.environ['PUB_CACHE']); state=p(os.environ['STATE'])
+if args[:3]==['pub','cache','preload']:
+ if (state/'pub-preload-fail').exists(): sys.exit(42)
+ assert args[3:] and all(p(x).is_file() for x in args[3:])
+ package=cache/'hosted/pub.dev/fixture-1.0.0'; package.mkdir(parents=True)
+ (package/'pubspec.yaml').write_text('name: fixture\nversion: 1.0.0\n')
+ (package/'fixture.dart').write_text('const fixture = true;\n')
+elif args[:2]==['pub','get']:
+ assert '--offline' in args and '--enforce-lockfile' in args
+ config=p.cwd()/'.dart_tool/package_config.json'; config.parent.mkdir()
+ config.write_text(json.dumps({'configVersion':2,'packages':[{'name':'fixture','rootUri':(cache/'hosted/pub.dev/fixture-1.0.0').as_uri(),'packageUri':'lib/'}],'pubCache':cache.as_uri()}))
+else: sys.exit(43)
+PY
+chmod +x "$TMP/payload/flutter/bin/cache/dart-sdk/bin/dart"
+mkdir -p "$TMP/payload/flutter/.pub-preload-cache"
+printf 'verified release package archive fixture\n' > "$TMP/payload/flutter/.pub-preload-cache/fixture-1.0.0.tar.gz"
+# Reuse the old clone's launcher behavior so the component seam stays the same.
+"$TMP/bin/git" clone fixture "$TMP/clone-launcher"
+cp "$TMP/clone-launcher/bin/flutter" "$TMP/payload/flutter/bin/flutter"
+cp "$TMP/clone-launcher/bin/flutter" "$TMP/payload/flutter/bin/dart"
+printf 'd3b14c876900e553bc736ca19295fc09e3853e8e\n' > "$TMP/payload/flutter/HEAD"
+printf 'compiled flutter_tools fixture\n' > "$TMP/payload/flutter/bin/cache/flutter_tools.snapshot"
+printf 'd3b14c876900e553bc736ca19295fc09e3853e8e:\n' > "$TMP/payload/flutter/bin/cache/flutter_tools.stamp"
+printf 'a804b261645ef8c13eb3d5c44a5c2fb0340c5539\n' > "$TMP/payload/flutter/bin/cache/engine-dart-sdk.stamp"
+printf '# vendor launcher support\n' > "$TMP/payload/flutter/bin/internal/shared.sh"
+printf 'name: flutter_tools\n' > "$TMP/payload/flutter/packages/flutter_tools/pubspec.yaml"
+cp "$TMP/payload/flutter/packages/flutter_tools/pubspec.yaml" "$TMP/payload/flutter/packages/flutter_tools/pubspec.lock"
+/usr/bin/tar -cJf "$TMP/flutter.tar.xz" -C "$TMP/payload" flutter
+cat > "$TMP/bin/tar" <<'SH'
+#!/bin/bash
+echo "tar $*" >> "$CALLS"
+exec /usr/bin/tar "$@"
+SH
+chmod +x "$TMP/bin/tar"

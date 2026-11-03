@@ -3,18 +3,27 @@
 `component_flutter_headless=yes` enables this stack. Unset/no does nothing.
 The pin file is `manifests/tool-versions.conf`.
 
-- Flutter 3.47.2, exact upstream commit, Dart 3.13.2, at `$HOME/development/flutter`.
+- Flutter 3.47.2 and Dart 3.13.2 from the official Linux release archive,
+  checked against the SHA256 in Google's release metadata, at `$HOME/development/flutter`.
+  The archive includes the compiled Flutter tool and vendored Pub package archives.
+  Setup-kit preloads those packages into a private cache, resolves them with
+  `dart pub get --offline --enforce-lockfile`, and makes package paths relative
+  before publication. First launch needs no Pub upgrade or registry download.
 - Android command-line tools 22.0 (build 15859902), vendor-published SHA256,
   at `$HOME/Android/Sdk/cmdline-tools/22.0`, with `latest` pointing there.
 - `platform-tools`, `platforms;android-36`, `build-tools;36.0.0`,
   `ndk;28.2.13676358`; licenses accepted through `sdkmanager --licenses`.
 - Apt `openjdk-21-jdk-headless`. No Studio, emulator, system image or AVD.
 
-Check reads git revision, Flutter cache metadata, Android package receipts,
-licenses and environment content. It does not run Flutter or sdkmanager.
-Install stages the verified clone/archive, pre-caches Android artifacts and
-requests only absent/drifted SDK packages. Existing drifted Flutter checkouts
-and command-tool version directories require inspection before replacement.
+Check reads the release receipt and bootstrap bytes, Git revision, pinned engine
+cache, Android package receipts, licenses and environment content. It does not
+run Flutter or sdkmanager. Install verifies the release archive before extraction
+and stages it before replacing the previous tree by rename. Clean same-release
+Git installs and managed releases are replaced directly. Other trees are kept in
+a sibling `flutter.backup.*` directory. Old Dart receipts and completion markers
+leave with the previous tree. Android artifacts retain their separate committed
+checksums. Drifted command-tool version directories require inspection before
+replacement.
 SDKmanager verifies its repository-managed downloads; its packages are named
 explicitly, rather than downloading an unversioned Android installer.
 
@@ -48,3 +57,9 @@ build JVM to be 17. Tools 22 retain the licenses interface used by Flutter
 
 Test: `bash tests/test-flutter-headless.sh`. A real headless build remains a
 VM acceptance check; provisioning is never run on Beast by this slice.
+
+Offline first-launch calibration: `python3 tests/flutter-release-calibration.py --help`.
+Supply the official release archive and an already verified pinned engine cache.
+It uses fresh HOME directories and bubblewrap network isolation, then proves the
+old Git bootstrap still reaches a private loopback registry. It never provisions
+the host or uses its Pub cache.
