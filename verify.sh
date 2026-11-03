@@ -58,6 +58,18 @@ dflt() { local v; v="$(cv "$1")"; echo "${v:-$CFG_DEF}"; }
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 [[ -f "$CONF" ]] || { echo "no $CONF — nothing to verify against"; exit 1; }
 
+# Worker DHCP policy is opt-in. The checker independently reads netplan and
+# compares coverage, bytes and metadata without using the installer's helpers.
+DHCP_IDENTIFIER="$(cv net_dhcp_identifier | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+if [[ -n "$DHCP_IDENTIFIER" ]]; then
+  if [[ "$DHCP_IDENTIFIER" == mac ]] \
+      && sudo /usr/bin/python3 "$PWD/profiles/worker/verify-dhcp.py" "${KIT_NETPLAN_ROOT:-/}"; then
+    pass "DHCP identifier: netplan DHCP ethernets use mac (mode 600, root:root)"
+  else
+    failv "DHCP identifier: missing or drifted; check netplan YAML and run worker install"
+  fi
+fi
+
 # -- 1. apt packages ----------------------------------------------------------
 # wanted = enabled groups' manifests, minus skip_pkgs, minus release-unknowns
 SKIPS=" $(cv skip_pkgs | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/') "
