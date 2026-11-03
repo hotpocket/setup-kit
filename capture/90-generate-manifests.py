@@ -115,6 +115,12 @@ DIRECT_DEBS = {
 }
 
 OPTIONAL = {  # group: (header, [pkgs])
+    # Playwright v1.62.1 nativeDeps.ts: ubuntu26.04-x64 tools + chromium.
+    # https://github.com/microsoft/playwright/blob/v1.62.1/packages/playwright-core/src/server/registry/nativeDeps.ts
+    # Mesa/DejaVu/xauth/ripgrep are the CPU-rendering/CLI additions.
+    "dev-headless": ("Headless CPU rendering + Playwright 1.62.1 Chromium on Ubuntu 26.04 — OFF by default",
+                     ['fonts-dejavu', 'fonts-freefont-ttf', 'fonts-ipafont-gothic', 'fonts-liberation', 'fonts-noto-color-emoji', 'fonts-tlwg-loma-otf', 'fonts-unifont', 'fonts-wqy-zenhei', 'libasound2t64', 'libatk-bridge2.0-0t64', 'libatk1.0-0t64', 'libatspi2.0-0t64', 'libcairo2', 'libcups2t64', 'libdbus-1-3', 'libdrm2', 'libegl-mesa0', 'libfontconfig1', 'libfreetype6', 'libgbm1', 'libgl1', 'libgl1-mesa-dri', 'libglib2.0-0t64', 'libnspr4', 'libnss3', 'libpango-1.0-0', 'libx11-6', 'libxcb1', 'libxcomposite1', 'libxdamage1', 'libxext6', 'libxfixes3', 'libxkbcommon0', 'libxrandr2', 'ripgrep', 'xauth', 'xfonts-cyrillic', 'xfonts-scalable', 'xvfb']),
+
     "dev-db": ("Databases — OFF by default; flip on in host config",
                ["postgresql", "mariadb-server"]),
     "dev-php": ("PHP — OFF by default", ["php", "composer"]),
@@ -339,8 +345,11 @@ def main():
     manual = [p.split(":")[0] for p in manual]
 
     placed = set(DROPS) | set(DIRECT_DEBS)
-    for _, (_, pkgs) in {**OPTIONAL, **CONDITIONAL}.items():
-        placed |= set(pkgs)
+    for group, (_, pkgs) in {**OPTIONAL, **CONDITIONAL}.items():
+        # Headless is an additive view of existing runtime packages. Moving
+        # its shared fonts/libs out of desktop would change existing hosts.
+        if group != "dev-headless":
+            placed |= set(pkgs)
 
     groups = collections.defaultdict(list)
     for p in manual:

@@ -442,7 +442,11 @@ if [[ "$(cv tmp_on_disk)" != no ]]; then
     ''|tmpfs|ramfs) failv "tmp: live ${TMP_FS:-unknown}; disk policy requires next reboot (check fstab/tmp.mount)" ;;
     *) pass "tmp: live disk filesystem $TMP_FS" ;;
   esac
-  grep -qx 'q /tmp 1777 root root 10d' "$VROOT/etc/tmpfiles.d/tmp.conf" 2>/dev/null \
+  { if [[ "$(cv tmp_age_rule)" == yes ]]; then
+       [[ ! -L "$VROOT/etc/tmpfiles.d/tmp.conf" \
+          && "$(stat -c %a "$VROOT/etc/tmpfiles.d/tmp.conf" 2>/dev/null)" == 644 ]] \
+         && cmp -s <(printf 'D /tmp 1777 root root mM:10d\n') "$VROOT/etc/tmpfiles.d/tmp.conf"
+     else grep -qx 'q /tmp 1777 root root 10d' "$VROOT/etc/tmpfiles.d/tmp.conf" 2>/dev/null; fi; } \
     && systemctl is-active --quiet systemd-tmpfiles-clean.timer \
     && pass 'tmp: aged cleanup configured and timer active' || failv 'tmp: aged cleanup or timer missing'
 fi
@@ -611,6 +615,12 @@ if (( SETTLE > 0 )); then
   FMAX=$(cv calm_fork_rate); FMAX=${FMAX:-20}
   (( rate <= FMAX )) && pass "calm: fork rate ${rate}/s (max $FMAX)" \
     || failv "calm: high fork churn ${rate}/s (max $FMAX) — something is respawning"
+fi
+
+# The admission gate is opt-in and always read-only, even after an install.
+if [[ "$(cv component_emudhra)" == yes ]]; then
+  if python3 components/emudhra-check --check; then pass "eMudhra admission"
+  else failv "eMudhra admission: patch/rebuild listed consumers, rerun --check"; fi
 fi
 
 if (( ! VERBOSE )); then

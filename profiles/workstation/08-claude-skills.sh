@@ -357,6 +357,11 @@ EOF
   fi
 fi
 
+# Browser downloads belong after the gstack build and existing AppArmor path.
+if [[ "$(conf_get component_playwright_chromium no)" == yes ]]; then
+  source "$KIT_DIR/components/playwright-chromium.sh"
+fi
+
 # Shared vault-digest in ~/bin: the file-based vault reader used by the global
 # SessionStart router (claude-orient) for repos you don't own (external vaults
 # under ~/Documents/AgentMemory/<repo>). Owned repos carry their own copy in

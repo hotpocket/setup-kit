@@ -158,3 +158,8 @@ if [[ "$(conf_get group_dev_rust no)" == yes ]]; then
     do_or_say bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
   fi
 fi
+
+# New envs must meet the opt-in admission floor, including pipx's shared env.
+if [[ "$(conf_get component_emudhra no)" == yes ]]; then
+  source "$KIT_DIR/components/python-trust-floor.sh"
+fi

@@ -211,6 +211,28 @@ comp() {   # conf-key  default  label  [probe ...]
   want_new "$key" "$def" "$@" || return 0
   add_need "$label" "$(declared_kb "$key")" "$(declared_tgt "$key")" declared
 }
+source "$KIT_DIR/manifests/tool-versions.conf"
+# Opt-in agent tools. Charge complete pinned archives when a version/path may
+# need repair; an arbitrary PATH executable is not proof the pin is present.
+if [[ "$(conf_get component_uv no)" == yes ]] && ! {
+  [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" ]] \
+    && [[ "$("$HOME/.local/bin/uv" --version 2>/dev/null)" == "uv $UV_VERSION" \
+       && "$("$HOME/.local/bin/uvx" --version 2>/dev/null)" == "uvx $UV_VERSION" ]]
+}; then
+  comp component_uv no "uv: standalone uv + uvx"
+fi
+if [[ "$(conf_get component_blender no)" == yes ]] && ! {
+  [[ -x "$HOME/.local/opt/blender-$BLENDER_VERSION-linux-x64/blender" ]] \
+    && [[ "$("$HOME/.local/opt/blender-$BLENDER_VERSION-linux-x64/blender" --version 2>/dev/null | head -1)" == "Blender $BLENDER_VERSION LTS" ]]
+}; then
+  comp component_blender no "blender: batch renderer"
+fi
+comp component_flutter_headless no "flutter: headless SDK + Android tools/NDK"
+comp component_playwright_chromium no "Playwright: Chromium + headless shell"
+comp component_emudhra no "eMudhra: admission inventory"
+if [[ "$(conf_get component_flutter_headless no)" == yes ]] && ! pkg_installed openjdk-21-jdk-headless; then
+  add_need "JDK 21: headless (phase 07 apt)" "$(declared_kb component_flutter_headless_jdk)" /usr declared
+fi
 comp component_ollama    no  "ollama: runtime + $(conf_get ollama_model qwen3-coder:30b) weights" \
                              cmd:ollama /usr/local/bin/ollama
 comp component_whisper   no  "whisper: venv + $(conf_get whisper_model large-v3) weights" \

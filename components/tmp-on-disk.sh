@@ -28,8 +28,29 @@ if [[ "$(conf_get tmp_on_disk yes)" == yes ]]; then
   fi
   # Override the vendor file by NAME, retaining /var/tmp's separate age.
   # No --clean now: ongoing agent/test scratch must not disappear mid-run.
-  memory_write "$MEM_ROOT/etc/tmpfiles.d/tmp.conf" \
-    $'# setup-kit: disk-backed scratch must age out\nq /tmp 1777 root root 10d\nq /var/tmp 1777 root root 30d' root 'tmp: aged cleanup (10d)'
+  if [[ "$(conf_get tmp_age_rule no)" == yes ]]; then
+    TMP_RULE="$MEM_ROOT/etc/tmpfiles.d/tmp.conf"
+    TMP_WANT='D /tmp 1777 root root mM:10d'
+    if [[ -f "$TMP_RULE" && ! -L "$TMP_RULE" && "$(stat -c %a "$TMP_RULE")" == 644 ]] \
+        && cmp -s <(printf '%s\n' "$TMP_WANT") "$TMP_RULE"; then
+      ok "tmp: age rule matches"
+    else
+      warn "tmp: age rule missing or drifted ($TMP_RULE; mode 644)"
+      tmp_age_write() (
+        sudo mkdir -p "$(dirname "$TMP_RULE")" || exit 1
+        stage=$(mktemp "$HOME/.setup-kit-tmp.XXXXXX") || exit 1
+        trap 'rm -f "$stage"' EXIT
+        printf '%s\n' "$TMP_WANT" > "$stage" || exit 1
+        # Atomic rename on the target filesystem; no cleanup of live scratch.
+        dest=$(sudo mktemp "${TMP_RULE}.XXXXXX") || exit 1
+        sudo install -m 644 "$stage" "$dest" && sudo mv -Tf "$dest" "$TMP_RULE"
+      )
+      do_or_say tmp_age_write || miss "tmp: age rule write failed"
+    fi
+  else
+    memory_write "$MEM_ROOT/etc/tmpfiles.d/tmp.conf" \
+      $'# setup-kit: disk-backed scratch must age out\nq /tmp 1777 root root 10d\nq /var/tmp 1777 root root 30d' root 'tmp: aged cleanup (10d)'
+  fi
   if ! systemctl is-active --quiet systemd-tmpfiles-clean.timer; then
     warn "tmp: cleanup timer inactive"
     do_or_say sudo systemctl start systemd-tmpfiles-clean.timer
