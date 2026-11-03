@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Read-only admission gate, promoted from Beast's emudhra-fix --check.
+
+Keeps its calibrated known-good / compromised-chain probes. No patch/relink
+code or credentials are shipped. Inventory all user venvs, including caches
+and pipx shared environments; a network failure is UNTESTED, never a pass.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--check', action='store_true', required=True)
+parser.parse_args()
+home = Path.home()
+system = Path(os.environ.get('EMUDHRA_SYSTEM_ROOT', '/'))
+scan_path = os.environ.get('EMUDHRA_PATH', os.environ.get('PATH', ''))
+BAD = [f'{b}{infix}-emudhra.we-have-a-problem.com' for b in
+       ('dv-g3b', 'dv-g3c', 'ev-g3b', 'ev-g3c', 'ov-g3b', 'ov-g3c') for infix in ('', '-aaa')]
+results = []
+
+def record(status, kind, path, detail):
+    results.append(status)
+    print(f'{status:8} {kind} {path}: {detail}', flush=True)
+
+def run(argv, timeout=25, **kwargs):
+    try:
+        return subprocess.run([str(a) for a in argv], capture_output=True, text=True,
+                              timeout=timeout, **kwargs)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(argv, 127, '', str(exc))
+
+def version(value):
+    return tuple(int(x) for x in re.findall(r'\d+', value or ''))
+
+def floor(kind, path, value, minimum, required=True):
+    if value is None and not required:
+        record('ABSENT', kind, path, 'not installed')
+        return
+    meets = value is not None and version(minimum) and version(value) >= version(minimum)
+    record('OK' if meets else 'FAIL', kind, path,
+           f'{value or "absent"}; floor {minimum}; update/rebuild this consumer' if not meets
+           else f'{value}; floor {minimum}')
+
+def inventory():
+    nodes, pythons, venvs, gos = set(), set(), set(), set()
+    for d in scan_path.split(os.pathsep):
+        if not d:
+            continue
+        for name, dest in [('node', nodes), ('python3', pythons), ('python', pythons), ('go', gos)]:
+            p = Path(d) / name
+            if p.is_file() and os.access(p, os.X_OK):
+                dest.add(p)
+    def walk_error(exc):
+        record('UNTESTED', 'inventory', exc.filename, str(exc))
+    # Follow each directory only once by inode: venv python symlinks still
+    # retain their invocation path (resolving them would lose the venv).
+    seen = set()
+    for root in (home, system / 'usr/local', system / 'opt'):
+        if not root.exists():
+            continue
+        for d, dirs, files in os.walk(root, followlinks=True, onerror=walk_error):
+            try:
+                st = os.stat(d)
+            except OSError as exc:
+                walk_error(exc); dirs[:] = []; continue
+            ident = (st.st_dev, st.st_ino)
+            if ident in seen:
+                dirs[:] = []; continue
+            seen.add(ident)
+            base = Path(d)
+            if 'pyvenv.cfg' in files:
+                venvs.add(base)
+                found = next((base / 'bin' / n for n in ('python', 'python3')
+                              if (base / 'bin' / n).exists()), None)
+                if found:
+                    pythons.add(found)
+                else:
+                    record('FAIL', 'venv', base, 'no interpreter; rebuild this environment')
+            for name in files:
+                p = base / name
+                if name == 'node' and os.access(p, os.X_OK):
+                    nodes.add(p)
+                elif name == 'go' and os.access(p, os.X_OK):
+                    gos.add(p)
+                elif base.name == 'bin' and re.fullmatch(r'python(?:\d+(?:\.\d+)?)?', name) and os.access(p, os.X_OK):
+                    pythons.add(p)
+    return sorted(nodes), sorted(pythons), venvs, sorted(gos)
+
+nodes, pythons, venvs, gos = inventory()
+ca = run(['dpkg-query', '-W', '-f=${Version}', 'ca-certificates'])
+floor('ca-certificates', 'system', ca.stdout.strip() if ca.returncode == 0 else None,
+      '20260816ubuntu0.26.04.1')
+for node in nodes:
+    out = run([node, '--version'])
+    value = out.stdout.strip().lstrip('v') if out.returncode == 0 else ''
+    floors = {22: '22.23.4', 24: '24.22.1', 26: '26.12.1'}
+    major = version(value)[0] if version(value) else 0
+    floor('node', node, value, floors.get(major, 'unsupported major'))
+metadata_code = '''from importlib import metadata
+import json
+out = {}
+for name in ("pip", "certifi"):
+ try: out[name] = metadata.version(name)
+ except metadata.PackageNotFoundError: out[name] = None
+print(json.dumps(out))'''
+for python in pythons:
+    out = run([python, '-I', '-c', metadata_code])
+    try:
+        if out.returncode:
+            raise ValueError(out.stderr)
+        data = json.loads(out.stdout)
+    except ValueError:
+        record('UNTESTED', 'python', python, 'metadata unavailable; inspect or rebuild environment')
+        continue
+    floor('pip', python, data.get('pip'), '26.2.2', required=False)
+    floor('certifi', python, data.get('certifi'), '2026.10.19', required=python.parent.parent in venvs)
+for go in gos:
+    out = run([go, 'version']); value = re.search(r'go(\d+\.\d+\.\d+)', out.stdout)
+    value = value.group(1) if value else ''
+    branch = version(value)[:2]
+    floor('go', go, value, {(1, 26): '1.26.10', (1, 27): '1.27.3'}.get(branch, 'unsupported branch'))
+def probe_command(kind, executable, make_args, classify):
+    good = run(make_args('example.com'))
+    if classify(good) != 'trusted':
+        record('UNTESTED', kind, executable, 'known-good site unreachable; restore network and rerun')
+        return
+    trusted = 0
+    unknown = 0
+    for host in BAD:
+        answer = classify(run(make_args(host)))
+        trusted += answer == 'trusted'
+        unknown += answer == 'unknown'
+    record('FAIL' if trusted else 'UNTESTED' if unknown else 'OK', kind, executable,
+           f'trusts {trusted}/12 compromised chains; {unknown} untested')
+
+curl = shutil.which('curl', path=scan_path)
+if curl:
+    probe_command('curl', curl, lambda h: [curl, '-sS', '-o', '/dev/null', '--max-time', '8', 'https://' + h],
+                  lambda r: 'trusted' if r.returncode == 0 else 'rejected' if r.returncode == 60 else 'unknown')
+else:
+    record('UNTESTED', 'curl', 'system', 'curl missing; install and rerun')
+git = shutil.which('git', path=scan_path)
+if git:
+    def git_result(r):
+        if r.returncode == 0 or 'repository not found' in r.stderr or 'The requested URL returned error: 404' in r.stderr:
+            return 'trusted'
+        if re.search(r'certificate|SSL peer', r.stderr, re.I):
+            return 'rejected'
+        return 'unknown'
+    probe_command('git', git, lambda h: [git, '-c', 'credential.helper=', '-c', 'core.askPass=',
+                  'ls-remote', 'https://github.com/git/git' if h == 'example.com' else 'https://' + h + '/x', 'HEAD'], git_result)
+else:
+    record('UNTESTED', 'git', 'system', 'git missing; install and rerun')
+python_probe = '''import sys,urllib.request,ssl
+hosts=sys.argv[1:]
+def probe(open_url,h):
+ try: open_url("https://"+h,timeout=8); return "trusted"
+ except urllib.error.HTTPError: return "trusted"
+ except urllib.error.URLError as e:
+  return "rejected" if isinstance(e.reason,ssl.SSLCertVerificationError) else "unknown"
+ except Exception: return "unknown"
+def report(kind,opener):
+ good=probe(opener,hosts[0]); bad=[probe(opener,h) for h in hosts[1:]]
+ print(kind,"ok" if good=="trusted" else "no",bad.count("trusted"),bad.count("unknown"))
+report("python",urllib.request.urlopen)
+try:
+ import certifi
+ ctx=ssl.create_default_context(cafile=certifi.where())
+ report("certifi",lambda url,timeout:urllib.request.urlopen(url,timeout=timeout,context=ctx))
+except ImportError: pass
+'''
+node_probe = '''
+const https=require("https"); const [g,...hs]=process.argv.slice(1);
+const t=h=>new Promise(r=>{const q=https.get("https://"+h,{timeout:8000},s=>{s.resume();r("trusted")});
+q.on("error",e=>r(["UNABLE_TO_GET_ISSUER_CERT_LOCALLY","CERT_HAS_EXPIRED","UNABLE_TO_VERIFY_LEAF_SIGNATURE","SELF_SIGNED_CERT_IN_CHAIN","CERT_SIGNATURE_FAILURE"].includes(e.code)?"rejected":"unknown"));
+q.on("timeout",()=>{q.destroy();r("unknown")})});
+(async()=>{const good=await t(g); const bad=await Promise.all(hs.map(t));
+console.log("node",good==="trusted"?"ok":"no",bad.filter(x=>x==="trusted").length,bad.filter(x=>x==="unknown").length)})().catch(()=>process.exit(1));
+'''
+for kind, binaries, code, args in [('python', pythons, python_probe, ['-I', '-c']), ('node', nodes, node_probe, ['-e'])]:
+    for binary in binaries:
+        out = run([binary, *args, code, 'example.com', *BAD], timeout=130)
+        rows = out.stdout.splitlines()
+        if out.returncode or not rows:
+            record('UNTESTED', kind, binary, 'TLS probe failed; inspect runtime and rerun'); continue
+        for line in rows:
+            fields = line.split()
+            # Keep compatibility with the original checker's three columns.
+            if len(fields) == 2 and kind == 'node': fields.insert(0, 'node')
+            if len(fields) < 3 or fields[1] != 'ok' or not fields[2].isdigit():
+                record('UNTESTED', kind, binary, 'known-good site unreachable or probe unreadable'); continue
+            count = int(fields[2]); unknown = int(fields[3]) if len(fields) > 3 and fields[3].isdigit() else 0
+            record('FAIL' if count else 'UNTESTED' if unknown else 'OK', fields[0], binary,
+                   f'trusts {count}/12 compromised chains; {unknown} untested')
+print('RESULT: all clear' if not any(s in ('FAIL', 'UNTESTED') for s in results)
+      else 'RESULT: admission failed; patch or rebuild the listed consumers, then rerun --check')
+sys.exit(1 if any(s in ('FAIL', 'UNTESTED') for s in results) else 0)

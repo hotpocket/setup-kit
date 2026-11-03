@@ -6,6 +6,13 @@ source "$(dirname "$0")/../../lib.sh"
 require_user
 init_mode "${1:-}"
 
+# Opt-in headless tools: existing hosts retain their previous path.
+for tool in uv blender flutter_headless; do
+  if [[ "$(conf_get "component_$tool" no)" == yes ]]; then
+    source "$KIT_DIR/components/${tool//_/-}.sh"
+  fi
+done
+
 # Memory guards use a prefixed filesystem only in calibration tests.
 source "$KIT_DIR/components/tmp-on-disk.sh"
 if [[ "$(conf_get component_oom_zram yes)" == yes ]]; then
@@ -192,7 +199,7 @@ if [[ "$T3_WANT" == yes ]]; then
   T3_TS="$(conf_get t3code_tailscale_serve no)"
   T3_UNIT="$HOME/.config/systemd/user/t3code.service"
   T3_DROPIN="$HOME/.config/systemd/user/t3code.service.d/setup-kit.conf"
-  T3_RELOAD=0
+  T3_RELOAD=${HEADLESS_T3_RELOAD:-0}
   if command -v t3 >/dev/null 2>&1; then
     ok "t3 $(t3 --version 2>/dev/null | head -1 | sed "s/^t3 //") ($(command -v t3))"
   else
@@ -940,4 +947,8 @@ elif (( INSTALL )); then
     || miss "tts: flutter build linux --release (bundle still absent)"
 else
   warn "tts flutter client bundle not built (would: cd $TTS_FL_SRC && flutter build linux --release)"
+fi
+
+if [[ "$(conf_get component_emudhra no)" == yes ]]; then
+  source "$KIT_DIR/components/emudhra.sh"
 fi

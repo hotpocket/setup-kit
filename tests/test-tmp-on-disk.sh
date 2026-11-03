@@ -19,4 +19,18 @@ conf tmp_on_disk=yes; : > "$ROOT/etc/fstab"; runv
 assert 'independent verifier rejects live tmpfs' 'grep -q "FAIL.*tmp:.*tmpfs" "$TMP/out"'
 echo ext4 > "$STATE/fstype"; runv
 assert 'independent verifier accepts disk /tmp' 'grep -q "PASS.*tmp:.*ext4" "$TMP/out"'
+conf tmp_on_disk=yes tmp_age_rule=yes; run07 check
+assert 'age opt-in check reports content drift without sudo' 'grep -q "tmp: age rule.*drift" "$TMP/out" && ! grep -q "^sudo " "$CALLS"'
+run07 install
+assert 'age opt-in writes exact D mM rule at 644' '[[ "$(cat "$ROOT/etc/tmpfiles.d/tmp.conf")" == "D /tmp 1777 root root mM:10d" && "$(stat -c %a "$ROOT/etc/tmpfiles.d/tmp.conf")" == 644 ]]'
+run07 install
+assert 'age second install does not rewrite or clean' '! grep -qE "sudo (tee|install|mv)|tmpfiles.*--clean" "$CALLS"'
+chmod 600 "$ROOT/etc/tmpfiles.d/tmp.conf"; run07 check
+assert 'age check sees mode drift' 'grep -q "WARN.*tmp: age rule" "$TMP/out"'
+run07 install
+assert 'age install heals mode drift' '[[ "$(stat -c %a "$ROOT/etc/tmpfiles.d/tmp.conf")" == 644 ]]'
+printf 'D /tmp 1777 root root mM:10d\n\n' > "$ROOT/etc/tmpfiles.d/tmp.conf"; run07 check
+assert 'age rule rejects an extra blank line' 'grep -q "WARN.*tmp: age rule" "$TMP/out"'
+run07 install
+assert 'age rule repair is byte exact' 'python3 -c '\''import sys; assert open(sys.argv[1],"rb").read()==b"D /tmp 1777 root root mM:10d\n"'\'' "$ROOT/etc/tmpfiles.d/tmp.conf"'
 finish

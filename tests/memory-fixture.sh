@@ -36,7 +36,7 @@ echo "sudo $*" >> "$CALLS"
 case "$1" in
   -n) exit 1 ;; # verify must not refresh real apt metadata
   systemctl|sysctl|fallocate|mkswap|swapon|swapoff|blkid) exec "$@" ;;
-  tee|mkdir|chmod|mv|rm|install|cp)
+  tee|mkdir|chmod|mv|rm|install|cp|mktemp)
     for a in "${@:2}"; do
       case "$a" in /*) [[ "$a" == "$ROOT"/* || "$a" == "$HOME"/* ]] || { echo "UNSAFE $*" >&2; exit 99; } ;; esac
     done
