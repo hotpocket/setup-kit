@@ -14,16 +14,17 @@ s=p(os.environ['STATE']); home=p(os.environ['HOME'])
 if name=='curl':
  if (s/'curl-fail').exists(): sys.exit(22)
  url=next(a for a in args if a.startswith('https:')); dest=args[args.index('-o')+1]
- src='pip-26.2.2-py3-none-any.whl' if '/pip-' in url else 'certifi-2026.10.19-py3-none-any.whl' if '/certifi-' in url else 'uv.tar.gz' if 'uv-' in url else 'blender.tar.xz' if 'blender-' in url else 'android.zip'
+ src='pip-26.2.2-py3-none-any.whl' if '/pip-' in url else 'certifi-2026.10.19-py3-none-any.whl' if '/certifi-' in url else 'uv.tar.gz' if 'uv-' in url else 'blender.tar.xz' if 'blender-' in url else 'dart.zip' if 'dart-sdk-linux' in url else 'chromium.zip' if 'chrome-linux64.zip' in url else 'headless.zip' if 'chrome-headless-shell-linux64.zip' in url else 'ffmpeg.zip' if 'ffmpeg-linux.zip' in url else 'android.zip'
  shutil.copyfile(p(os.environ['FIXTURE'])/src,dest)
 elif name=='sha256sum':
  line=sys.stdin.read()
  with (s/'checksum-input').open('a') as f: f.write(line)
- sys.exit(1 if (s/'checksum-fail').exists() else 0)
+ sys.exit(1 if (s/'checksum-fail').exists() or ((s/'checksum-fail-for').exists() and (s/'checksum-fail-for').read_text().strip() in line) else 0)
 elif name=='git':
  if 'clone' in args:
   d=p(args[-1]); (d/'.git').mkdir(parents=True); (d/'bin/cache').mkdir(parents=True)
   (d/'bin/flutter').write_text('#!/bin/sh\necho "flutter $*" >> "$CALLS"\nmkdir -p "$HOME/development/flutter/bin/cache"\nprintf \'{"frameworkVersion":"3.47.2","dartSdkVersion":"3.13.2"}\\n\' > "$HOME/development/flutter/bin/cache/flutter.version.json"\n')
+  (d/'bin/flutter').write_text((d/'bin/flutter').read_text()+   'if [ -f "$STATE/precache-fail" ]; then exit 42; fi\nif [ -f "$STATE/precache-pause" ]; then touch "$STATE/precache-started"; sleep 120; fi\nprintf "android artifacts complete\\n" > "$HOME/development/flutter/bin/cache/android-sdk.stamp"\n')
   (d/'bin/flutter').chmod(0o755); (d/'HEAD').write_text('d3b14c876900e553bc736ca19295fc09e3853e8e')
  elif 'rev-parse' in args:
   d=p(args[args.index('-C')+1]); print((d/'HEAD').read_text() if (d/'HEAD').exists() else 'abc123')
@@ -45,6 +46,10 @@ elif name=='dpkg-query':
  pkg=args[-1]; print(((s/'ca-version').read_text().strip() if (s/'ca-version').exists() else '20260816ubuntu0.26.04.1') if pkg=='ca-certificates' else 'install ok installed' if (s/('pkg-'+pkg)).exists() else '')
  sys.exit(0 if pkg=='ca-certificates' or (s/('pkg-'+pkg)).exists() else 1)
 elif name=='apt-get':
+ if '-s' in args:
+  if (s/'apt-sim-fail').exists(): sys.exit(100)
+  if (s/'apt-removal-for').exists() and (s/'apt-removal-for').read_text().strip() in args: print('Remv protected-package [1.0]')
+  sys.exit(0)
  if 'install' in args and '-s' not in args:
   for a in args[args.index('install')+1:]:
    if not a.startswith('-'): (s/('pkg-'+a)).touch()
@@ -106,3 +111,24 @@ printf 'ID=ubuntu\nVERSION_ID=26.04\n' > "$ROOT/etc/os-release"
 conf_tools() { conf component_docker_rootless=skip "$@"; }
 run_tools() { run07 "${1:-check}"; }
 mutations() { grep -E '^(curl |git .*clone|sdkmanager .*--licenses|sdkmanager .*--install|sudo |flutter .*precache)' "$CALLS" || true; }
+
+mkdir -p "$TMP/payload/dart-sdk/bin"
+printf '#!/bin/sh\necho "Dart SDK version: 3.13.2 (stable)"\n' > "$TMP/payload/dart-sdk/bin/dart"
+chmod +x "$TMP/payload/dart-sdk/bin/dart"
+printf '3.13.2\n' > "$TMP/payload/dart-sdk/version"
+/usr/bin/python3 - "$TMP" <<'PY2'
+import sys,pathlib,zipfile
+p=pathlib.Path(sys.argv[1])
+for name,entry in [('dart','dart-sdk/bin/dart'),('chromium','chrome-linux64/chrome'),('headless','chrome-headless-shell-linux64/chrome-headless-shell'),('ffmpeg','ffmpeg-linux')]:
+ with zipfile.ZipFile(p/(name+'.zip'),'w') as z:
+  if name=='dart':
+   for f in (p/'payload/dart-sdk').rglob('*'):
+    if f.is_file(): z.write(f,f.relative_to(p/'payload'))
+  else: z.writestr(entry,'#!/bin/sh\necho "Chromium 151.0.7922.34"\n')
+PY2
+cat > "$TMP/bin/unzip" <<'SH2'
+#!/bin/bash
+echo "unzip $*" >> "$CALLS"
+exec /usr/bin/unzip "$@"
+SH2
+chmod +x "$TMP/bin/unzip"

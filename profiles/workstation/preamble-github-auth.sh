@@ -27,6 +27,9 @@ init_mode "${1:-}"
 
 REPO="$(conf_get configs_repo 'git@github.com:hotpocket/.configs.git')"
 DEST="$HOME/git/.configs"
+if [[ "$(conf_get configs_role full)" == agent || "$(conf_get git_auth '')" == none ]]; then
+  GIT_HOME="${GIT_HOME:-$(dirname "$KIT_DIR")}"; DEST="$GIT_HOME/.configs"
+fi
 
 section "github auth preamble ($MODE)"
 # configs=no: a box that isn't the kit owner's (no private .configs, no YubiKey).
@@ -34,6 +37,18 @@ section "github auth preamble ($MODE)"
 # masking below exists only for the owner's FIDO2 keys.
 if [[ "$(conf_get configs yes)" == no ]]; then
   ok "configs=no — no .configs to clone; GitHub auth is the user's own (gh auth login)"
+  exit 0
+fi
+if [[ "$(conf_get git_auth '')" == none ]]; then
+  ok "git_auth=none — GitHub authentication, host keys and agent changes skipped"
+  [[ -d "$DEST/.git" ]] && { ok ".configs already cloned"; exit 0; }
+  (( INSTALL )) || { warn ".configs not cloned — phase 06 retries the configured source"; exit 0; }
+  mkdir -p "$(dirname "$DEST")"
+  if git clone "$REPO" "$DEST" >> "$LOG_DIR/$SCRIPT_NAME.log" 2>&1 && [[ -d "$DEST/.git" ]]; then
+    ok ".configs cloned"
+  else
+    warn ".configs unavailable — phase 06 retries (check configs_repo and hub access)"
+  fi
   exit 0
 fi
 [[ "$REPO" == git@github.com:* ]] || { ok "configs_repo is not github-ssh — nothing to do"; exit 0; }

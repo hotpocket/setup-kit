@@ -1,11 +1,21 @@
 #!/bin/bash
-# Golden comparison: fixtures are the normalized calls and links recorded by
-# these same stubs against main before the agent role was added. To reproduce:
-# GOLDEN_KIT_DIR=<main archive> RECORD_GOLDEN=<output dir> bash <this test>.
-# Main is read as data; tests never need GitHub, sudo, or a real user profile.
+# Compare the same fake machine against the exact pre-agent base commit.
+# Expected calls are generated locally with these same stubs, so filesystem
+# permissions, command versions and a sibling .configs cannot taint recordings.
+# Full git history containing BASE_REV is required; no network is used.
 set -uo pipefail
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+BASE_REV=f3c804f0ed942958b9c82d4e8fedbc30c0f7b134
+if [[ -z "${RECORD_GOLDEN:-}" ]]; then
+  mkdir -p "$TMP/base" "$TMP/expected"
+  if ! git -C "$KIT_DIR" archive "$BASE_REV" lib.sh profiles components manifests | tar -xf - -C "$TMP/base"; then
+    echo "default baseline $BASE_REV missing; use a clone containing that commit" >&2
+    exit 1
+  fi
+  GOLDEN_KIT_DIR="$TMP/base" RECORD_GOLDEN="$TMP/expected" bash "${BASH_SOURCE[0]}" > "$TMP/baseline.log" 2>&1 \
+    || { cat "$TMP/baseline.log"; exit 1; }
+fi
 H="$TMP/home"; K="$H/git/setup-kit"; BIN="$TMP/bin"; CALLS="$TMP/calls"
 mkdir -p "$K" "$BIN" "$K/.git" "$H/.ssh"
 cp -a "${GOLDEN_KIT_DIR:-$KIT_DIR}"/{lib.sh,profiles,components,manifests} "$K/"
@@ -44,9 +54,9 @@ capture() {
   if [[ -n "${RECORD_GOLDEN:-}" ]]; then
     mkdir -p "$RECORD_GOLDEN"; cp "$TMP/$name" "$RECORD_GOLDEN/$name"; return
   fi
-  if diff -u "$KIT_DIR/tests/fixtures/agent-default-calls/$name" "$TMP/$name"; then
-    ((pass++)); echo "  ok   $name matches main"
-  else ((fail++)); echo "  FAIL $name changed from main"; fi
+  if diff -u "$TMP/expected/$name" "$TMP/$name"; then
+    ((pass++)); echo "  ok   $name matches pinned base"
+  else ((fail++)); echo "  FAIL $name changed from pinned base"; fi
 }
 for role in unset full; do
  for headless in yes no; do

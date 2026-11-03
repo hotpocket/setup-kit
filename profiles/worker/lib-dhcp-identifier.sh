@@ -17,6 +17,10 @@ worker_dhcp_identifier() {
   fi
   state=$(sudo stat -c '%a:%u:%g' "$file" 2>/dev/null) || state=""
   if [[ "$state" == 600:0:0 ]] && printf '%s\n' "$want" | sudo cmp -s "$file" -; then
+    if ! sudo /usr/bin/python3 "$KIT_DIR/profiles/worker/verify-dhcp.py" "$root"; then
+      fail "DHCP identifier: merged policy overrides $file; repair the reported source and retry"
+      return 1
+    fi
     ok "DHCP identifier: $file matches (mac)"; return 0
   fi
   warn "DHCP identifier: $file missing or drifted (want mac, mode 600, root:root)"
@@ -42,9 +46,9 @@ worker_dhcp_identifier() {
   fi
   local -a generate=(netplan generate)
   [[ "$root" == / ]] || generate+=(--root-dir "$root")
-  if ! sudo "${generate[@]}"; then
+  if ! sudo "${generate[@]}" || ! sudo /usr/bin/python3 "$KIT_DIR/profiles/worker/verify-dhcp.py" "$root"; then
     if { if [[ -n "$backup" ]]; then sudo mv -fT "$backup" "$file"; else sudo rm -f "$file"; fi; }; then
-      fail "DHCP identifier: netplan generate failed; previous file state restored; fix netplan YAML and retry"
+      fail "DHCP identifier: netplan validation failed; previous file state restored; fix netplan YAML and retry"
     else
       fail "DHCP identifier: rollback failed; restore ${backup:-the absent file} at $file before retrying"
     fi

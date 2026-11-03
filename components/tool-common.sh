@@ -55,3 +55,82 @@ tool_write() { # content path; user-owned, preserve external symlinks
   tmp=$(mktemp "${path}.XXXXXX") || return 1
   printf '%s\n' "$want" > "$tmp" && chmod "$perm" "$tmp" && mv -f "$tmp" "$path"
 }
+
+# Both directories are on the same filesystem. An interrupted publication
+# leaves a missing destination, which the next run refetches, never a partial one.
+tool_publish_dir() { # staged-directory destination scratch-directory
+  local src="$1" dest="$2" scratch="$3"
+  [[ ! -L "$dest" ]] || return 1
+  if [[ -e "$dest" ]]; then mv -T "$dest" "$scratch/previous" || return 1; fi
+  mv -T "$src" "$dest"
+}
+
+# Read-only installed-state probes for space accounting. The independent
+# verifier deliberately implements its own checks.
+tool_flutter_installed() {
+  local flutter="$HOME/development/flutter" sdk="$HOME/Android/Sdk" package props expected value
+  [[ -x "$flutter/bin/flutter" && -x "$flutter/bin/cache/dart-sdk/bin/dart" \
+    && "$(git -C "$flutter" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" \
+    && "$(cat "$flutter/bin/cache/dart-sdk/.setup-kit-sha256" 2>/dev/null)" == "$FLUTTER_DART_SHA256" \
+    && "$(cat "$flutter/bin/cache/engine-dart-sdk.stamp" 2>/dev/null)" == "$FLUTTER_ENGINE_REVISION" \
+    && "$(cat "$flutter/bin/cache/setup-kit-android.complete" 2>/dev/null)" == "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" \
+    && -x "$sdk/cmdline-tools/latest/bin/sdkmanager" && -s "$sdk/licenses/android-sdk-license" \
+    && "$(readlink "$sdk/cmdline-tools/latest" 2>/dev/null)" == "$ANDROID_TOOLS_VERSION" \
+    && "$(tool_property "$sdk/cmdline-tools/$ANDROID_TOOLS_VERSION/source.properties" Pkg.Revision)" == "$ANDROID_TOOLS_VERSION" ]] || return 1
+  tool_content_valid "$flutter/bin/cache/dart-sdk" bin/dart || return 1
+  python3 -I - "$flutter/bin/cache/flutter.version.json" "$FLUTTER_VERSION" "$FLUTTER_DART_VERSION" <<'PY' || return 1
+import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+    sys.exit(0 if (d.get('frameworkVersion'),d.get('dartSdkVersion'))==tuple(sys.argv[2:]) else 1)
+except (OSError,ValueError): sys.exit(1)
+PY
+  for package in platform-tools "platforms;$ANDROID_PLATFORM" "build-tools;$ANDROID_BUILD_TOOLS" "ndk;$ANDROID_NDK"; do
+    props="$sdk/${package//;/\/}/source.properties"; expected="${package#*;}"
+    case "$package" in
+      platform-tools) value=$(tool_property "$props" Pkg.Revision); [[ "$value" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1 ;;
+      platforms\;*) [[ "$(tool_property "$props" AndroidVersion.ApiLevel)" == "${ANDROID_PLATFORM#android-}" ]] || return 1 ;;
+      *) [[ "$(tool_property "$props" Pkg.Revision)" == "$expected" ]] || return 1 ;;
+    esac
+  done
+}
+tool_playwright_installed() {
+  local gs="${GIT_HOME:-$(dirname "$KIT_DIR")}/gstack" dir sha exe row
+  python3 -I - "$gs/package.json" "$gs/node_modules/playwright/package.json" "$PLAYWRIGHT_VERSION" <<'PY' || return 1
+import json,sys
+try:
+    want=json.load(open(sys.argv[1]))['dependencies']['playwright']
+    got=json.load(open(sys.argv[2]))['version']
+    sys.exit(0 if want in (sys.argv[3],'^'+sys.argv[3]) and got==sys.argv[3] else 1)
+except (OSError,ValueError,KeyError): sys.exit(1)
+PY
+  for row in "chromium-$PLAYWRIGHT_CHROMIUM_REVISION:$PLAYWRIGHT_CHROMIUM_SHA256:chrome-linux64/chrome" \
+    "chromium_headless_shell-$PLAYWRIGHT_CHROMIUM_REVISION:$PLAYWRIGHT_HEADLESS_SHA256:chrome-headless-shell-linux64/chrome-headless-shell" \
+    "ffmpeg-$PLAYWRIGHT_FFMPEG_REVISION:$PLAYWRIGHT_FFMPEG_SHA256:ffmpeg-linux"; do
+    IFS=: read -r dir sha exe <<< "$row"
+    [[ -f "$HOME/.cache/ms-playwright/$dir/INSTALLATION_COMPLETE" \
+      && -x "$HOME/.cache/ms-playwright/$dir/$exe" \
+      && "$(cat "$HOME/.cache/ms-playwright/$dir/.setup-kit-sha256" 2>/dev/null)" == "$sha" ]] || return 1
+    tool_content_valid "$HOME/.cache/ms-playwright/$dir" "$exe" || return 1
+  done
+}
+
+# Record executable bytes only after the containing archive passed its pin.
+# This receipt detects later disk corruption; the archive pin is the trust root.
+tool_content_receipt() {
+  python3 -I - "$1" "$2" <<'PY'
+import hashlib,json,pathlib,sys
+root=pathlib.Path(sys.argv[1]); entry=sys.argv[2]
+(root/'.setup-kit-executables.json').write_text(json.dumps({entry:hashlib.sha256((root/entry).read_bytes()).hexdigest()})+'\n')
+PY
+}
+tool_content_valid() {
+  python3 -I - "$1" "$2" <<'PY'
+import hashlib,json,pathlib,sys
+try:
+ root=pathlib.Path(sys.argv[1]); entry=sys.argv[2]
+ receipt=json.loads((root/'.setup-kit-executables.json').read_text())
+ sys.exit(0 if receipt=={entry:hashlib.sha256((root/entry).read_bytes()).hexdigest()} else 1)
+except (OSError,ValueError): sys.exit(1)
+PY
+}

@@ -29,10 +29,23 @@ def main():
             data = yaml.safe_load(sources[name].read_text()) or {}
             for ident, settings in data.get("network", {}).get("ethernets", {}).items():
                 devices.setdefault(ident, {}).update(settings)
+    # Attribute an ineffective policy without printing unrelated YAML values.
+    sources = {}
+    for directory in ("lib", "etc", "run"):
+        sources.update({p.name: p for p in (root / directory / "netplan").glob("*.yaml")})
+    origins = {}
+    for name in sorted(sources):
+        data = yaml.safe_load(sources[name].read_text()) or {}
+        for ident, settings in data.get("network", {}).get("ethernets", {}).items():
+            if "dhcp-identifier" in settings:
+                origins[ident] = str(sources[name])
     wanted = {}
     for ident in sorted(devices):
         properties = devices[ident]
         if properties.get("dhcp4") is True or properties.get("dhcp6") is True:
+            if properties.get("dhcp-identifier") != "mac":
+                source = origins.get(ident, "netplan merged settings")
+                raise ValueError(f"DHCP identifier: {ident} is not mac; override in {source}; repair that setting and retry")
             wanted[ident] = {"dhcp-identifier": "mac"}
     if not wanted:
         return
@@ -51,5 +64,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError, yaml.YAMLError):
+    except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError, yaml.YAMLError) as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith("DHCP identifier:"):
+            print(str(exc), file=sys.stderr)
         sys.exit(1)

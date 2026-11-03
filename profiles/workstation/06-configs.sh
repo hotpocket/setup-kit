@@ -86,6 +86,12 @@ if [[ "$CONFIGS_ROLE" == agent ]]; then
     fail ".configs/setup.sh missing — restore the agent-capable checkout at $DEST"
     exit 1
   fi
+  # Unknown first-position actions are rejected even by the legacy dispatcher.
+  if ! capabilities=$(cd "$DEST" && ./setup.sh role-capabilities) \
+      || ! grep -qx agent <<< "$capabilities"; then
+    fail ".configs agent role capability missing; update the checkout at $DEST before retrying"
+    exit 1
+  fi
   # Codex parity in the role installer needs `codex`, which setup-kit installs
   # into ~/.local/bin (phase 07); a non-login shell may not have it on PATH.
   if (cd "$DEST" && PATH="$HOME/.local/bin:$PATH" ./setup.sh "$MODE" --role agent) 2>&1 | extout; then

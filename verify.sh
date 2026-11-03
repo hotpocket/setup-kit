@@ -348,11 +348,16 @@ if [[ "$(cv configs)" == no ]]; then
   pass "dotfiles: configs=no — the owner's .configs is not used here"
 elif [[ "$CONFIGS_ROLE" == agent ]]; then
   CONFIGS_DIR="${GIT_HOME:-$(dirname "$PWD")}/.configs"
-  if [[ -x "$CONFIGS_DIR/setup.sh" ]] && (cd "$CONFIGS_DIR" && PATH="$HOME/.local/bin:$PATH" ./setup.sh check --role agent) >> "$VLOG" 2>&1; then
+  if [[ ! -x "$CONFIGS_DIR/setup.sh" ]] \
+      || ! capabilities=$(cd "$CONFIGS_DIR" && ./setup.sh role-capabilities) \
+      || ! grep -qx agent <<< "$capabilities"; then
+    failv "dotfiles: agent role capability missing; update $CONFIGS_DIR before retrying"
+  elif (cd "$CONFIGS_DIR" && PATH="$HOME/.local/bin:$PATH" ./setup.sh check --role agent) >> "$VLOG" 2>&1; then
     pass "dotfiles: configs_role=agent — role doctor passed"
   else
-    failv "dotfiles: configs_role=agent — restore $CONFIGS_DIR/setup.sh or repair its role checks"
+    failv "dotfiles: configs_role=agent — repair its role checks"
   fi
+
 elif [[ "$CONFIGS_ROLE" == full ]]; then
 for df in .bashrc .bash_aliases .gitconfig; do
   if [[ -L "$HOME/$df" ]] && readlink -f "$HOME/$df" | grep -q "/.configs/"; then
@@ -475,9 +480,12 @@ if [[ "$(cv tmp_on_disk)" != no ]]; then
     *) pass "tmp: live disk filesystem $TMP_FS" ;;
   esac
   { if [[ "$(cv tmp_age_rule)" == yes ]]; then
+       source "$PWD/manifests/tmpfiles.conf"
+       TMP_AGE="$(cv tmp_age | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+       TMP_AGE="${TMP_AGE:-$TMP_AGE_DEFAULT}"
        [[ ! -L "$VROOT/etc/tmpfiles.d/tmp.conf" \
           && "$(stat -c %a "$VROOT/etc/tmpfiles.d/tmp.conf" 2>/dev/null)" == 644 ]] \
-         && cmp -s <(printf 'D /tmp 1777 root root mM:10d\n') "$VROOT/etc/tmpfiles.d/tmp.conf"
+         && cmp -s <(printf 'D /tmp 1777 root root %s\n' "$TMP_AGE") "$VROOT/etc/tmpfiles.d/tmp.conf"
      else grep -qx 'q /tmp 1777 root root 10d' "$VROOT/etc/tmpfiles.d/tmp.conf" 2>/dev/null; fi; } \
     && systemctl is-active --quiet systemd-tmpfiles-clean.timer \
     && pass 'tmp: aged cleanup configured and timer active' || failv 'tmp: aged cleanup or timer missing'
@@ -651,6 +659,17 @@ if (( SETTLE > 0 )); then
   (( rate <= FMAX )) && pass "calm: fork rate ${rate}/s (max $FMAX)" \
     || failv "calm: high fork churn ${rate}/s (max $FMAX) — something is respawning"
 fi
+
+# Independent checks for the opt-in tools, including completed cache artifacts.
+for tool in uv blender flutter_headless playwright_chromium; do
+  if [[ "$(cv component_$tool)" == yes ]]; then
+    if python3 -I components/verify-agent-tools.py "$tool" "$PWD" "${KIT_TOOL_ROOT:-/}" "${GIT_HOME:-$(dirname "$PWD")}" >> "$VLOG" 2>&1; then
+      pass "agent tool $tool: pinned installation complete"
+    else
+      failv "agent tool $tool: missing, incomplete or drifted; repair its component install (detail in $VLOG)"
+    fi
+  fi
+done
 
 # The admission gate is opt-in and always read-only, even after an install.
 if [[ "$(cv component_emudhra)" == yes ]]; then

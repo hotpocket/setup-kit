@@ -16,6 +16,27 @@ flutter_clone() (
     && [[ "$(git -C "$stage/flutter" rev-parse HEAD)" == "$FLUTTER_REVISION" ]] \
     && mv -T "$stage/flutter" "$FLUTTER_DIR"
 )
+flutter_dart_ready() {
+  [[ -x "$FLUTTER_DIR/bin/cache/dart-sdk/bin/dart" \
+    && "$(cat "$FLUTTER_DIR/bin/cache/dart-sdk/.setup-kit-sha256" 2>/dev/null)" == "$FLUTTER_DART_SHA256" \
+    && "$(cat "$FLUTTER_DIR/bin/cache/engine-dart-sdk.stamp" 2>/dev/null)" == "$FLUTTER_ENGINE_REVISION" ]] && tool_content_valid "$FLUTTER_DIR/bin/cache/dart-sdk" bin/dart
+}
+flutter_dart_install() (
+  tool_x64 Dart || exit 1
+  mkdir -p "$FLUTTER_DIR/bin/cache" || exit 1
+  owner=$BASHPID
+  stage=$(tool_stage "$FLUTTER_DIR/bin/cache" dart "$owner") || exit 1
+  trap 'rm -rf "$stage"' EXIT
+  tool_fetch "https://storage.googleapis.com/flutter_infra_release/flutter/$FLUTTER_ENGINE_REVISION/dart-sdk-linux-x64.zip" \
+    "$FLUTTER_DART_SHA256" "$stage/dart.zip" \
+    && unzip -q "$stage/dart.zip" -d "$stage" \
+    && chmod +x "$stage/dart-sdk/bin/"* \
+    && [[ -x "$stage/dart-sdk/bin/dart" ]] \
+    && printf '%s\n' "$FLUTTER_DART_SHA256" > "$stage/dart-sdk/.setup-kit-sha256" \
+    && tool_content_receipt "$stage/dart-sdk" bin/dart \
+    && tool_publish_dir "$stage/dart-sdk" "$FLUTTER_DIR/bin/cache/dart-sdk" "$stage" \
+    && tool_write "$FLUTTER_ENGINE_REVISION" "$FLUTTER_DIR/bin/cache/engine-dart-sdk.stamp"
+)
 android_tools_install() (
   tool_x64 android-tools || exit 1
   mkdir -p "$SDK_DIR/cmdline-tools" || exit 1
@@ -40,7 +61,13 @@ elif [[ "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" != "$FLUTTER_REVIS
   warn "flutter revision drift: expected $FLUTTER_REVISION; preserve checkout and inspect before replacing"
   miss "flutter: checkout revision does not match pin"
 else ok "flutter revision $FLUTTER_VERSION"; fi
-if [[ -f "$FLUTTER_DIR/bin/cache/flutter.version.json" ]] && python3 -I - "$FLUTTER_DIR/bin/cache/flutter.version.json" "$FLUTTER_VERSION" "$FLUTTER_DART_VERSION" <<'PY'
+if ! flutter_dart_ready; then
+  warn "pinned Dart SDK missing or unverified"
+  if (( INSTALL )) && [[ -x "$FLUTTER_DIR/bin/flutter" && "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]]; then
+    flutter_dart_install || miss "flutter: Dart archive verification failed"
+  fi
+fi
+if flutter_dart_ready && [[ "$(cat "$FLUTTER_DIR/bin/cache/setup-kit-android.complete" 2>/dev/null)" == "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" && -f "$FLUTTER_DIR/bin/cache/flutter.version.json" ]] && python3 -I - "$FLUTTER_DIR/bin/cache/flutter.version.json" "$FLUTTER_VERSION" "$FLUTTER_DART_VERSION" <<'PY'
 import json,sys
 try:
  d=json.load(open(sys.argv[1])); sys.exit(0 if d['frameworkVersion']==sys.argv[2] and d['dartSdkVersion']==sys.argv[3] else 1)
@@ -49,8 +76,13 @@ PY
 then ok "flutter/Dart cache matches pin"
 else
   warn "flutter/Dart cache missing or drifted"
-  if [[ -x "$FLUTTER_DIR/bin/flutter" && "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]]; then
-    do_or_say "$FLUTTER_DIR/bin/flutter" precache --android || miss "flutter: Android precache failed"
+  if flutter_dart_ready && [[ -x "$FLUTTER_DIR/bin/flutter" && "$(git -C "$FLUTTER_DIR" rev-parse HEAD 2>/dev/null)" == "$FLUTTER_REVISION" ]]; then
+    flutter_precache() {
+      rm -f "$FLUTTER_DIR/bin/cache/setup-kit-android.complete" || return 1
+      env FLUTTER_PREBUILT_ENGINE_VERSION="$FLUTTER_ENGINE_REVISION" "$FLUTTER_DIR/bin/flutter" precache --android \
+        && tool_write "$FLUTTER_REVISION:$FLUTTER_DART_SHA256" "$FLUTTER_DIR/bin/cache/setup-kit-android.complete"
+    }
+    do_or_say flutter_precache || miss "flutter: Android precache failed"
   fi
 fi
 if [[ -x "$SDK_DIR/cmdline-tools/$ANDROID_TOOLS_VERSION/bin/sdkmanager" ]] \
