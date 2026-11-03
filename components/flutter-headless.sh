@@ -171,3 +171,4 @@ if [[ ! -f "$T3_DROP" || "$(cat "$T3_DROP")" != "$T3_ENV" ]]; then
 fi
 
 source "$KIT_DIR/components/headless-ssh.sh"
+source "$KIT_DIR/components/headless-login.sh"

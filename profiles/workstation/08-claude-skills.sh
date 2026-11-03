@@ -108,6 +108,11 @@ PY
   fi
 fi
 
+# The refusing-WebKit check (.configs bin/iphone) needs .configs' link and
+# node, not the skills below, so it runs before their gate; opt-in.
+if [[ "$(conf_get component_iphone_webkit no)" == yes ]]; then
+  source "$KIT_DIR/components/iphone-webkit.sh"
+fi
 [[ "$(conf_get component_claude_skills yes)" == yes ]] || exit 0
 
 # Default = gstack + EVERY skill dir in claude-conduct (one with a SKILL.md).
