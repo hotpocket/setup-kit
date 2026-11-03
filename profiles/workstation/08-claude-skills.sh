@@ -394,3 +394,33 @@ else
   warn "vault-digest template missing (claude-conduct subtree not present?)"
 fi
 
+
+# Codex (Sol) parity: .configs/setup.sh codex derives Codex's skills, MCP
+# servers and hooks from what Claude has installed. Phase 06 runs .configs'
+# install BEFORE this phase links Claude's skills, so it must run again here,
+# after them, or a fresh box's Sol misses every skill linked above
+# (ai-3090 2026-11-03). Path derived from the one .configs location above.
+CONFIGS_SETUP="${CONDUCT_SKILLS_SRC%/claude-conduct/skills}/setup.sh"
+# An agent box gets Codex from .configs' own agent installer, which applies the
+# agent MCP allowlist and hook gate; plain `setup.sh codex` would bypass both.
+if (( CONFIGS )) && [[ "$CONFIGS_ROLE" != agent && -x "$CONFIGS_SETUP" ]]; then
+  section "codex parity ($MODE)"
+  # The codex CLI installs to ~/.local/bin, which a fresh box's shell may not
+  # have on PATH yet; without the CLI there is no Codex to give parity to.
+  CODEX_PATH="$HOME/.local/bin:$PATH"
+  if ! PATH="$CODEX_PATH" command -v codex >/dev/null 2>&1; then
+    warn "codex CLI not installed — Codex parity skipped (rerun phase 08 after installing codex)"
+  elif (( INSTALL )); then
+    # Output, not an action: it is idempotent, and do_or_say would mark every
+    # pass as a change so bootstrap could never converge.
+    log "running .configs/setup.sh codex..."
+    PATH="$CODEX_PATH" "$CONFIGS_SETUP" codex 2>&1 | extout
+    if (( PIPESTATUS[0] != 0 )); then
+      fail ".configs/setup.sh codex failed — Sol lacks Claude's skills/hooks"
+      miss "claude-skills: .configs/setup.sh codex failed — rerun it"
+      exit 1
+    fi
+  else
+    do_or_say env PATH="$CODEX_PATH" "$CONFIGS_SETUP" codex
+  fi
+fi
