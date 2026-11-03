@@ -25,6 +25,31 @@ else
   do_or_say sudo update-locale "LANG=$LOCALE_WANT"
 fi
 
+# Git author for a box without the owner's .configs .gitconfig (configs_role=agent):
+# git_user_name / git_user_email in the host conf. Unset = no change. An author
+# string only, never a credential. A different existing value is reported, not
+# overwritten; a ~/.gitconfig linked elsewhere is never written through.
+GIT_NAME_WANT="$(conf_get git_user_name '')"; GIT_EMAIL_WANT="$(conf_get git_user_email '')"
+if [[ -n "$GIT_NAME_WANT$GIT_EMAIL_WANT" ]]; then
+  if [[ -L "$HOME/.gitconfig" ]]; then
+    warn "git author: ~/.gitconfig is linked ($(readlink "$HOME/.gitconfig")); set the author there, not here"
+  else
+    git_ok=1
+    for kv in "user.name=$GIT_NAME_WANT" "user.email=$GIT_EMAIL_WANT"; do
+      key="${kv%%=*}"; want="${kv#*=}"; [[ -n "$want" ]] || continue
+      have="$(git config --global --includes --get "$key" 2>/dev/null)"
+      if [[ "$have" == "$want" ]]; then :
+      elif [[ -z "$have" ]]; then
+        git_ok=0; warn "git author: $key not set"
+        do_or_say git config --global "$key" "$want"
+      else
+        git_ok=0; warn "git author: $key is '$have', host conf wants '$want'; left as is"
+      fi
+    done
+    (( git_ok )) && ok "git author $GIT_NAME_WANT <$GIT_EMAIL_WANT>"
+  fi
+fi
+
 # Guest agent only when we ARE a kvm guest (Proxmox VM)
 if [[ "$(virt_context)" == kvm ]]; then
   if dpkg -s qemu-guest-agent >/dev/null 2>&1; then
