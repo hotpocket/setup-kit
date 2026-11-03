@@ -86,7 +86,9 @@ if [[ "$CONFIGS_ROLE" == agent ]]; then
     fail ".configs/setup.sh missing — restore the agent-capable checkout at $DEST"
     exit 1
   fi
-  if (cd "$DEST" && ./setup.sh "$MODE" --role agent) 2>&1 | extout; then
+  # Codex parity in the role installer needs `codex`, which setup-kit installs
+  # into ~/.local/bin (phase 07); a non-login shell may not have it on PATH.
+  if (cd "$DEST" && PATH="$HOME/.local/bin:$PATH" ./setup.sh "$MODE" --role agent) 2>&1 | extout; then
     ok ".configs role agent: $MODE complete"
     exit 0
   fi

@@ -26,6 +26,7 @@ mv "$FIXTURE/.local/share/icons/test.svg" "$FIXTURE/.local/share/icons/agent-fix
 cat > "$FIXTURE/setup.sh" <<'S'
 #!/bin/bash
 echo "configs $*" >> "$CALLS"
+echo "PATH=$PATH" >> "$CALLS.path"
 exit "${DOCTOR_RC:-0}"
 S
 chmod +x "$FIXTURE/setup.sh"
@@ -76,6 +77,8 @@ if [[ "${CASE:-all}" == all || "${CASE:-}" == role ]]; then
   reset_home; present; conf configs_run_setup=no
   run profiles/worker/06-configs.sh
   assert 'R1 install delegates the role even when configs_run_setup=no' '[[ $rc == 0 ]] && grep -qx "configs install --role agent" "$CALLS"'
+  # The role installer runs Codex parity; setup-kit puts codex in ~/.local/bin.
+  assert 'R1b the role installer sees ~/.local/bin on PATH' 'tail -1 "$CALLS.path" | grep -q "^PATH=$H/.local/bin:"'
   assert 'R2 fixed dotfiles are not linked by setup-kit' '[[ ! -L "$H/.gitconfig" && ! -L "$H/.bash_aliases" && ! -L "$H/.bashrc" && ! -e "$H/.claude" ]]'
   assert 'R3 blanket bin and desktop trees are not linked' '[[ ! -e "$H/bin/personal-tool" && ! -e "$H/.local/share/applications/test.desktop" && ! -e "$H/.config/autostart/test.desktop" ]]'
   run profiles/worker/06-configs.sh check
@@ -92,6 +95,7 @@ if [[ "${CASE:-all}" == all || "${CASE:-}" == role ]]; then
   rm -rf "$H/git/.configs"; mkdir -p "$H/git"; cp -a "$FIXTURE" "$H/git/.configs"
   conf; run verify.sh
   assert 'R8 verifier delegates the agent doctor' 'grep -qx "configs check --role agent" "$CALLS" && ! grep -qE "FAIL.*(dotfile:|bin:|launcher|autostart)" "$TMP/out"'
+  assert 'R8b the verifier gives the agent doctor ~/.local/bin on PATH' 'tail -1 "$CALLS.path" | grep -q "^PATH=$H/.local/bin:"'
   DOCTOR_RC=7 run verify.sh
   assert 'R9 verifier reports a failed agent doctor' 'grep -q "FAIL.*agent" "$TMP/out"'
   conf configs_role=typo; run verify.sh

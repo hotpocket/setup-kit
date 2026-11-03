@@ -348,7 +348,7 @@ if [[ "$(cv configs)" == no ]]; then
   pass "dotfiles: configs=no — the owner's .configs is not used here"
 elif [[ "$CONFIGS_ROLE" == agent ]]; then
   CONFIGS_DIR="${GIT_HOME:-$(dirname "$PWD")}/.configs"
-  if [[ -x "$CONFIGS_DIR/setup.sh" ]] && (cd "$CONFIGS_DIR" && ./setup.sh check --role agent) >> "$VLOG" 2>&1; then
+  if [[ -x "$CONFIGS_DIR/setup.sh" ]] && (cd "$CONFIGS_DIR" && PATH="$HOME/.local/bin:$PATH" ./setup.sh check --role agent) >> "$VLOG" 2>&1; then
     pass "dotfiles: configs_role=agent — role doctor passed"
   else
     failv "dotfiles: configs_role=agent — restore $CONFIGS_DIR/setup.sh or repair its role checks"
