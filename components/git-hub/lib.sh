@@ -106,7 +106,7 @@ hub_keys_ensure() {
 hub_token_check() {
   local tok="$GIT_HUB_TOKEN_FILE" exp="$GIT_HUB_TOKEN_FILE.expires" d days
   local warn_days; warn_days="$(conf_get git_hub_token_warn_days 21)"
-  [[ -s "$tok" ]] || return 0
+  [[ -s "$tok" || -e "$tok.cred" ]] || return 0
   if [[ ! -s "$exp" ]]; then
     warn "git-hub forward token: expiry unknown — write its expiry date (YYYY-MM-DD, from GitHub's token page) to ${exp/#$HOME/\~}"
     return 0
@@ -118,9 +118,9 @@ hub_token_check() {
   # both as UTC midnights: local midnights straddling DST are 23 or 25 h apart
   days=$(( ($(date -u -d "$d" +%s) - $(date -u -d "$(date +%F)" +%s)) / 86400 ))
   if (( days < 0 )); then
-    warn "git-hub forward token EXPIRED $d ($(( -days )) days ago) — forwards to GitHub fail while it stays. Make a new token (fine-grained, Contents read/write), replace ${tok/#$HOME/\~}, update ${exp/#$HOME/\~}"
+    warn "git-hub forward token EXPIRED $d ($(( -days )) days ago) — forwards to GitHub fail while it stays. Make a new token (fine-grained, Contents read/write), run git-hub token-set for a sealed token, or replace ${tok/#$HOME/\~} and update ${exp/#$HOME/\~}"
   elif (( days <= warn_days )); then
-    warn "git-hub forward token expires $d ($days days) — make a new token (fine-grained, Contents read/write), replace ${tok/#$HOME/\~}, update ${exp/#$HOME/\~}"
+    warn "git-hub forward token expires $d ($days days) — make a new token (fine-grained, Contents read/write), run git-hub token-set for a sealed token, or replace ${tok/#$HOME/\~} and update ${exp/#$HOME/\~}"
   else
     ok "git-hub forward token valid until $d ($days days)"
   fi
@@ -269,4 +269,128 @@ WantedBy=timers.target"
     (( INSTALL )) && loginctl enable-linger "$USER" && log "linger enabled for $USER"
   fi
   (( drift )) || ok "git-hub-release units current (reviews go to $(conf_get git_hub_review_thread 'nowhere: git_hub_review_thread unset'))"
+}
+
+# Replace one marked block, preserving every unrelated line. Temp and rename
+# are beside the target, so readers never see a partial authorized_keys/config.
+hub_block_ensure() {  # <file> <begin> <end> <content> <label>
+  local file="$1" begin="$2" end="$3" content="$4" label="$5" have tmp
+  have="$(sed -n "\|^$begin\$|,\|^$end\$|p" "$file" 2>/dev/null)"
+  [[ "$have" == "$content" ]] && { ok "$label current"; return 0; }
+  warn "$label missing or drifted"
+  (( INSTALL )) || return 0
+  mkdir -p "$(dirname "$file")"; chmod 700 "$(dirname "$file")"
+  tmp="$(mktemp "$file.tmp.XXXXXX")" || return 1
+  # Read content on a separate fd; awk -v would reinterpret backslashes in keys/options.
+  if [[ -f "$file" ]]; then
+    awk -v b="$begin" -v e="$end" '
+      BEGIN { while ((getline l < "/dev/fd/3") > 0) block=block l ORS }
+      $0==b { if (!done) printf "%s",block; done=1; skip=1; next }
+      $0==e {skip=0; next}
+      !skip {print}
+      END {if (!done) printf "%s",block}
+    ' "$file" 3< <(printf '%s\n' "$content") > "$tmp" || { rm -f "$tmp"; return 1; }
+  else printf '%s\n' "$content" > "$tmp"; fi
+  chmod 600 "$tmp" && mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+  log "$label reconciled"
+}
+
+hub_reviewers_ensure() {
+  local reviewers; reviewers="$(conf_get git_hub_reviewers '' | sed "s|^~|$HOME|")"
+  [[ -n "$reviewers" ]] || return 0
+  [[ "$reviewers" == /* ]] || reviewers="$(dirname "$(readlink -f "$HOST_CONF")")/$reviewers"
+  [[ -r "$reviewers" ]] || { warn "git_hub_reviewers unreadable; restore the configured public-key file"; return 1; }
+  local begin='# >>> setup-kit git-hub reviewers' end='# <<< setup-kit git-hub reviewers' line want
+  local cli="$KIT_DIR/components/git-hub/git-hub"
+  # authorized_keys command quoting must remain one forced command.
+  [[ "$cli" != *[\"\\$'\n\r']* ]] || { warn "git-hub path cannot be quoted for a forced command"; return 1; }
+  want="$begin"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" =~ ^(ssh-|ecdsa-|sk-) ]]; then
+      want+=$'\n'"restrict,command=\"$cli gate\" $line"
+    else
+      # Do not allow a supplied key option to replace the forced command.
+      [[ "$line" != *command=* ]] || { warn "reviewer key has a command option; remove it"; return 1; }
+      want+=$'\n'"restrict,command=\"$cli gate\",$line"
+    fi
+  done < "$reviewers"
+  want+=$'\n'"$end"
+  hub_block_ensure "$HOME/.ssh/authorized_keys" "$begin" "$end" "$want" 'git-hub reviewers'
+}
+
+hub_cli_ensure() {
+  local link="$HOME/.local/bin/git-hub"
+  [[ "$(readlink -f "$link" 2>/dev/null)" == "$KIT_DIR/components/git-hub/git-hub" ]] && return 0
+  warn "git-hub CLI missing or drifted"
+  (( INSTALL )) || return 0
+  mkdir -p "$(dirname "$link")"; ln -sfn "$KIT_DIR/components/git-hub/git-hub" "$link"
+}
+
+hub_gate_ensure() {
+  local host; host="$(conf_get git_hub_gate '')"; [[ -n "$host" ]] || return 0
+  local key="$HOME/.ssh/git_hub_gate" user want
+  user="$(conf_get git_hub_gate_user control)"
+  if [[ ! -f "$key" ]]; then
+    warn 'git-hub gate key missing'
+    if (( INSTALL )); then
+      mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+      ssh-keygen -q -t ed25519 -N '' -C "git-hub-gate:$(hostname)" -f "$key" || return 1
+    fi
+  fi
+  [[ ! -f "$key.pub" ]] || hint "hub reviewers file needs: $(cat "$key.pub")"
+  local begin='# >>> setup-kit git-hub gate' end='# <<< setup-kit git-hub gate'
+  want="$begin
+Host git-hub-gate
+  HostName $host
+  User $user
+  IdentityFile $key
+  IdentitiesOnly yes
+  IdentityAgent none
+  StrictHostKeyChecking accept-new
+$end"
+  hub_block_ensure "$HOME/.ssh/config" "$begin" "$end" "$want" 'git-hub gate alias'
+  hub_cli_ensure
+  hub_relay_units_ensure
+}
+
+hub_relay_units_ensure() {
+  local ud="$HOME/.config/systemd/user" u want drift=0
+  local -A units=(
+    [git-hub-relay.service]='[Unit]
+Description=Relay git-hub review requests into the standing review thread
+[Service]
+Type=oneshot
+TimeoutStartSec=5min
+Environment=PATH=%h/.local/bin:%h/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/git-hub relay'
+    [git-hub-relay.timer]='[Unit]
+Description=Retry remote git-hub review delivery
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=git-hub-relay.service
+[Install]
+WantedBy=timers.target'
+  )
+  for u in "${!units[@]}"; do
+    want="${units[$u]}"
+    [[ -f "$ud/$u" && "$(cat "$ud/$u")" == "$want" ]] && continue
+    drift=1; warn "$u missing or drifted"
+    if (( INSTALL )); then
+      mkdir -p "$ud"
+      printf '%s\n' "$want" > "$ud/$u.tmp" && mv -f "$ud/$u.tmp" "$ud/$u" || return 1
+    fi
+  done
+  (( drift && INSTALL )) && systemctl --user daemon-reload
+  if ! systemctl --user is-enabled -q git-hub-relay.timer 2>/dev/null || ! systemctl --user is-active -q git-hub-relay.timer 2>/dev/null; then
+    warn 'git-hub-relay.timer not enabled and running'
+    (( INSTALL )) && systemctl --user enable --now git-hub-relay.timer
+  fi
+  if [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != yes ]]; then
+    warn "linger off for $USER: relay stops at logout"
+    (( INSTALL )) && loginctl enable-linger "$USER"
+  fi
+  return 0
 }

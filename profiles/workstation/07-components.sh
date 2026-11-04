@@ -303,6 +303,7 @@ if [[ "$(conf_get component_git_hub no)" == yes ]]; then
   HUB_PUSHERS="$(conf_get git_hub_pushers '' | sed "s|^~|$HOME|")"
   [[ -n "$HUB_PUSHERS" && "$HUB_PUSHERS" != /* ]] && HUB_PUSHERS="$(dirname "$(readlink -f "$HOST_CONF")")/$HUB_PUSHERS"
   hub_keys_ensure "$HUB_PUSHERS"
+  hub_reviewers_ensure
   CLI_LINK="$HOME/.local/bin/git-hub"
   if [[ "$(readlink -f "$CLI_LINK" 2>/dev/null)" == "$KIT_DIR/components/git-hub/git-hub" ]]; then
     ok "git-hub CLI on PATH (git-hub status | forward | stage)"
@@ -314,6 +315,12 @@ if [[ "$(conf_get component_git_hub no)" == yes ]]; then
   hub_token_check
 else
   ok "git-hub: opt-in, currently '$(conf_get component_git_hub no)' (flip component_git_hub=yes to host bare repos)"
+fi
+
+# The review box needs no local bare repos or hub system user.
+if [[ -n "$(conf_get git_hub_gate '')" ]]; then
+  source "$KIT_DIR/components/git-hub/lib.sh"
+  hub_gate_ensure
 fi
 
 # ------------------------------------------------------------- codex

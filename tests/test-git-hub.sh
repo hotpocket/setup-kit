@@ -36,9 +36,27 @@ set -uo pipefail
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap '[[ -n ${KEEP:-} ]] || rm -rf "$TMP"' EXIT; [[ -n ${KEEP:-} ]] && echo "TMP=$TMP"
 pass=0; fail=0
-assert() { if eval "$2"; then ((pass++)); echo "  ok   $1"; else ((fail++)); echo "  FAIL $1"; sed 's/^/       | /' "$TMP/out" | grep -i 'hub\|git' | head -30; fi; }
+assert() {
+  local id selected=1
+  local -a ids=()
+  if [[ -n "${GIT_HUB_ASSERT_ONLY:-}" ]]; then
+    selected=0; IFS=, read -r -a ids <<< "$GIT_HUB_ASSERT_ONLY"
+    for id in "${ids[@]}"; do [[ "$1" == "$id."* ]] && selected=1; done
+    (( selected )) || return 0
+  fi
+  if eval "$2"; then ((pass++)); echo "  ok   $1"
+  else ((fail++)); echo "  FAIL $1"; sed 's/^/       | /' "$TMP/out" | grep -i 'hub\|git' | head -30; fi
+  if [[ -n "${GIT_HUB_ASSERT_STOP_AFTER:-}" && "$1" == "$GIT_HUB_ASSERT_STOP_AFTER."* ]]; then
+    (( fail == 0 )); exit $?
+  fi
+}
+
 ME="$(id -un)"; BIN="$TMP/bin"; mkdir -p "$BIN"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
+# Every fake HOME and empty clone shares one explicit branch policy, independent
+# of the runner's global Git identity, defaults, hooks or credential helpers.
+export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
+printf '[init]\n  defaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 ROOT="$TMP/srv"                     # the hub's git_hub_root
 GH="$TMP/github"                    # stands in for GitHub: file:// upstream base
 mkdir -p "$GH/acme"; git init -q --bare "$GH/acme/books.git"; git init -q --bare "$GH/acme/wbt.git"
@@ -79,6 +97,12 @@ done
 printf '#!/bin/bash\necho "arn:aws:iam::1:user/pub"\n' > "$BIN/aws"
 chmod +x "$BIN"/*
 export TMP ROOT
+
+# The control-103 additions also run alone for focused calibration.
+if [[ "${GIT_HUB_CONTROL_ONLY:-0}" == 1 ]]; then
+  source "$KIT_DIR/tests/git-hub-control.inc.sh"
+  echo "  $pass passed, $fail failed"; (( fail == 0 )); exit $?
+fi
 
 # ---------------------------------------------------------------- H. hub side
 HH="$TMP/hubhome"; mkdir -p "$HH"
@@ -472,7 +496,7 @@ advance
 advance
 wcommit lib/small.py; cli release; CN="$(hubsha)"
 assert "R37a. the brief has no size-based Sol skip: every review gets Sol, at limit only by saying so" \
-  'B="$(tail -1 "$TMP/t3x.calls")"; grep -q "Every release gets Sol, whatever its size" <<<"$B" && grep -q "reasoning max" <<<"$B" && grep -q "Only if Sol is at its usage limit" <<<"$B" && grep -q -- "--sol=" <<<"$B" && ! grep -qiE "judge it yourself|narrow" <<<"$B"'
+  'B="$(tail -1 "$TMP/t3x.calls")"; grep -q "Every release gets Sol, whatever its size" <<<"$B" && grep -q "reasoning xhigh" <<<"$B" && grep -q "Only if Sol is at its usage limit" <<<"$B" && grep -q -- "--sol=" <<<"$B" && ! grep -qiE "judge it yourself|narrow" <<<"$B"'
 cli verdict books "$CN" pass "narrow, judged it myself"; rc=$?
 assert "R37b. pass without naming its Sol review is refused: nothing forwarded" '(( rc != 0 )) && [[ "$(upsha)" == "$U5" ]] && grep -q -- "--sol" "$TMP/out"'
 cli verdict books "$CN" pass "--sol=limit because unavailable" "x"; r1=$?; cli verdict books "$CN" pass "--sol= " "x"; r2=$?
@@ -555,5 +579,7 @@ assert "T8. day count is exact across a DST change (offset ${dst_n:-none found})
 sed -i '/^git_hub_token_warn_days=/d' "$TMP/role/hub.conf"
 rm -f "$TOK" "$TOK.expires"; run07
 assert "T7. no token file: nothing to warn about" '! grep -q "forward token" "$TMP/out"'
+
+source "$KIT_DIR/tests/git-hub-control.inc.sh"
 
 echo "  $pass passed, $fail failed"; (( fail == 0 ))

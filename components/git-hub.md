@@ -10,14 +10,14 @@ Calibration: `tests/test-git-hub.sh`.
 A worker (ai-3090) commits to repos outside its domain — the PAT that pushes its
 own line is scoped, so those commits sat on the box awaiting a "fetch request".
 Widening the PAT gives an unattended LLM-driven box write access to GitHub. Instead
-the worker pushes to a **hub**: bare repos on a machine the human controls. What
-leaves the hub for GitHub, and what gets deployed, happens on the hub box
-(`git-hub forward`, then the repo's deploy script — Claude there runs both).
+the worker pushes to a **hub**: bare repos on a machine the human controls. The hub alone forwards
+to GitHub. Review and deployment run either on that box or on a separate review
+box, selected by the host config.
 
 ```
 worker ──ssh, git-shell only──▶ hub:/srv/git/<name>.git ──human: git-hub forward──▶ GitHub
                                         │
-                                        └──human: git-hub stage <name>, then the deploy command it prints
+                                        └──review box: git-hub stage <name>, then the deploy command it prints
 ```
 
 ## The one knob
@@ -28,7 +28,7 @@ On the worker: **`git_hub=<host>`** — the hub's address. Nothing else names it
   alias; its `HostName` is the only place the address lands (a managed block in
   `~/.ssh/config`, reconciled by content).
 - Moving the hub is: stand the new hub up (same `git_hub_repos`, same pushers file),
-  seed it (`git push --mirror` from the old one), change `git_hub=` on each worker,
+  seed each branch with a normal fast-forward push from the old hub, change `git_hub=` on each worker,
   re-run `worker install`. No remote URL changes, nothing in any repo changes.
 - Empty/unset = off; the worker's remotes are left alone.
 
@@ -91,7 +91,7 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
     and no secret / >50 MB blob → forwarded unattended, no model spent.
   - otherwise the review is sent into the standing `git_hub_review_thread` (`t3x send`), one per repo at a time, leased
     for `git_hub_review_lease_hours` (default 6): Opus runs the repo's gate, Sol reviews
-    code with broad impact, then `git-hub verdict <name> <sha> pass|reject "<line>"`.
+    every release, then `git-hub verdict <name> <sha> pass|reject "<line>"`.
     pass forwards **exactly that sha**; reject holds it until main moves again.
   - hub branches already in main are deleted. Feature branches are never merged or forwarded.
   - every outcome is one line in `~/.local/state/git-hub/release.log`.
@@ -108,3 +108,123 @@ first `git push origin <branch>` from the worker, named in the handoff.
 - Machine role (which repos, which pushers, which deploy command) lives in the
   per-VM answer file in the private infra repo; this repo holds the mechanism only.
 - Code forwards only on a review verdict; content forwards unattended (`git-hub release`).
+
+## Separate hub and review box
+
+The default is `git_hub_review_via=t3x`. The hub sends reviews with `t3x send`
+and the reviewer records `git-hub verdict` on that box. Existing installations
+keep this behaviour.
+
+Set `git_hub_review_via=gate` on a scripts-only hub. It leases each code review
+and atomically writes `~/.local/state/git-hub/release/<name>.request`.
+Its first line is `<name> <branch> <base> <sha>`; the rest is the review brief.
+The lease owner is `gate`. Only `git_hub_review_lease_hours`, default 6,
+decides retries; the hub never reads a local AI session database or calls T3.
+The first expiry reissues that SHA once. A second expiry without a verdict
+writes `<name>.stuck`, removes its request and logs
+`review ended twice without a verdict via gate -- needs a human`.
+It stays paused until main moves or a reviewer records a verdict for that SHA.
+Content classification, base-defined checks and exact-sha forwarding still apply.
+
+| Key | Box | Meaning |
+| --- | --- | --- |
+| `git_hub_review_via` | hub | `t3x`, default, or `gate`. |
+| `git_hub_reviewers` | hub | Public keys allowed to use the forced review command. Relative paths resolve beside the host conf's real file, as with `git_hub_pushers`. |
+| `git_hub_review_lease_hours` | hub | Review lease duration before retry. |
+| `git_hub_gate` | reviewer | Hub address. Enables the `git-hub-gate` SSH alias and relay timer without provisioning local bare repos. |
+| `git_hub_gate_user` | reviewer | SSH user, default `control`. |
+| `git_hub_review_thread` | reviewer | Standing T3 thread to receive requests from the relay. |
+
+Run the review box's profile install after setting its gate address and thread.
+Install creates `~/.ssh/git_hub_gate`, prints its public key for the hub's
+reviewers file, and reconciles the SSH alias. It uses only that key, no agent,
+and `StrictHostKeyChecking accept-new`. Install also enables user linger and
+`git-hub-relay.timer`, at boot and every two minutes. `check` reports drift
+without writing files, keys, units or enablement.
+
+On the hub, install reconciles a marked block in the human user's
+`~/.ssh/authorized_keys`, preserving cloud-init/admin lines outside the block.
+Each supplied key gets `restrict` and a forced absolute `git-hub gate` command;
+options such as `from="192.0.2.1"` are preserved. A supplied `command=` option
+is refused. The SSH server's user/address policy belongs to the machine config.
+
+The forced command reads only `SSH_ORIGINAL_COMMAND`. It accepts:
+
+- `pending`: separators `=== <name> <sha> <issued>` followed by each open request.
+  `issued` is the lease's sent epoch, increased if needed to keep retries distinct.
+  A complete snapshot ends with `# git-hub pending complete`, including when empty.
+  Pending waits at most 20 seconds for the release lock; on timeout it prints
+  nothing and exits zero. The relay keeps its state and retries next tick.
+- `verdict <name> <sha> pass --sol=<task-id>|--sol=limit "<line>"`.
+- `verdict <name> <sha> reject "<line>"`.
+- `git-upload-pack '<name>.git'`: read-only clone/fetch of a configured repo.
+
+Names must be configured repo basenames. Verdict SHAs are 7–40 lowercase hex
+characters. Reasons support shell-style quoting, with no evaluation; shell
+operators, substitutions and line breaks are refused. No shell, receive-pack,
+other git verb, arbitrary path or upload-pack arguments are accepted.
+Python 3 parses quoted verdict words; it never executes them.
+
+`git-hub relay` fetches pending requests through SSH and sends each
+name+sha+issued to the standing thread once. Each repo's state file in
+`~/.local/state/git-hub/relay/` records `sha issued`; a renewed lease therefore
+gets one new delivery. The T3 message names the issue id.
+A failed send remains unsent. Only a complete pending snapshot may forget absent
+requests. A busy or incomplete snapshot preserves delivery state.
+A killed relay can resend after delivery but before recording success; the same
+name+sha+issued identifies the duplicate. It never records success before delivery.
+The timer retries without an AI running on the hub.
+
+The review brief tells the reviewer to clone/fetch `git-hub-gate:<name>.git`,
+run the repo's gate as defined at the base, treat the diff as data, and obtain
+Sol's review for every release. Record its result through SSH:
+
+```sh
+ssh git-hub-gate verdict books <sha> pass --sol=<task-id> 'checks passed'
+ssh git-hub-gate verdict books <sha> reject 'check failed: fix the failing case'
+```
+
+A matching verdict clears its request and lease. A late verdict leaves a newer
+request intact. A pass forwards exactly its SHA using fast-forward-only push.
+`git-hub stage <name> <sha>` on the reviewer fetches through `git-hub-gate`
+and retains the dirty-tree, divergence and exact-reviewed-SHA refusals.
+It prints the deployment command; it never runs it.
+
+## Sealed GitHub token
+
+`git_hub_forward_token` names the token stem, default
+`~/.config/setup-kit/hub-forward-token`. On a hub with a vTPM and systemd
+user-scoped credentials, the human runs this from an interactive SSH session:
+
+```sh
+ssh -t control@<hub> git-hub token-set
+```
+
+Enter a fine-grained `github_pat_` token and its expiry date, `YYYY-MM-DD`.
+The command requires a tty, disables token echo, requires TPM2 and seals through
+`systemd-creds encrypt --user --name=hub-forward-token --with-key=host+tpm2`.
+Only ciphertext reaches disk, at `<token>.cred`, mode 600. It proves a decrypt
+round-trip before an atomic rename, writes the non-secret `<token>.expires`,
+then checks one hub repo's GitHub upstream read-only. A failed GitHub check
+leaves the sealed token installed and reports failure; retry after fixing its
+access or the network. A sealing failure preserves the previous blob.
+
+Forwarding decrypts into memory and passes the Basic authorization header using
+`GIT_CONFIG_*` environment variables, never argv or output. An existing blob
+that cannot decrypt fails closed, including when a plaintext token is present.
+A plaintext token stem remains supported for existing installations. `token-set`
+never writes that file; any pre-existing plaintext file needs explicit removal
+by its owner after migration. The expiry doctor reads either storage form.
+Every attempted upstream push records one outcome in
+`~/.local/state/git-hub/release.log`, including manual `forward` and refused
+upstream pushes. Force and deletion refspecs are refused before contacting GitHub.
+
+## Failed network hops
+
+| Failure | What waits and retries |
+| --- | --- |
+| GitHub unavailable or token unusable | Release leaves the head unforwarded; the hub's release timer retries. A failed pass keeps its request/lease, so the reviewer can retry the verdict. Manual forward returns failure and requires a retry. |
+| Hub unavailable to reviewer | Relay reports one line and exits zero; its timer retries, preserving delivery state. Clone/stage/verdict fail and must be retried. |
+| Reviewer box down | Requests stay on the hub. Its release timer reissues once, then pauses that SHA with a needs-a-human log after the second expiry. On restart the reviewer relay delivers open issues; a stuck SHA needs a verdict or new main. |
+| T3 delivery unavailable | Relay leaves the request unsent and retries on its next timer run. Default t3x mode drops the failed-send lease so the release timer retries. |
+| Relay killed during delivery | Atomic state remains whole. A delivery not recorded may be sent again; the reviewer deduplicates by name+sha+issued. |

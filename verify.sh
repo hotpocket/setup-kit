@@ -199,6 +199,9 @@ done < <(grep -v '^\s*#' manifests/debs.list 2>/dev/null)
 PYVER=$(grep -hvE '^\s*(#|$)' manifests/lang/python.list | grep -v '^pipx:' | head -1)
 command -v python3 >/dev/null && pass "python: system python3 present ($(python3 --version 2>&1))" \
   || failv "python: no system python3"
+# The installer provisions pyenv only when lang_python is wanted. Its opt-out
+# leaves system python3 mandatory for the kit and the host's scripts.
+if [[ "$(cv lang_python)" != no ]]; then
 if [[ -x "$HOME/.pyenv/bin/pyenv" ]]; then
   got=$(PYENV_ROOT="$HOME/.pyenv" "$HOME/.pyenv/bin/pyenv" global 2>/dev/null | head -1)
   # policy: global stays system (clean prompt — version only shows in projects
@@ -209,6 +212,7 @@ if [[ -x "$HOME/.pyenv/bin/pyenv" ]]; then
     | grep -E "^${PYVER}(\.|$)" | grep -qv / && pass "python: $PYVER available for projects" \
     || failv "python: $PYVER not installed"
 else failv "python: pyenv missing"; fi
+else pass "python: pyenv not wanted (lang_python=no)"; fi
 # audio-tool venvs — deps isolated in dedicated venvs, not in global/bare 3.12
 # tts venv: default on (.configs ships the clipboard TTS client + server
 # unconditionally), opt-out with component_tts=no (a worker with no desktop

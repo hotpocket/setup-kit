@@ -252,4 +252,9 @@ else
   hub_each hub_remote_ensure
 fi
 
+if [[ -n "$(conf_get git_hub_gate '')" ]]; then
+  source "$KIT_DIR/components/git-hub/lib.sh"
+  hub_gate_ensure
+fi
+
 exit $(( ${DHCP_FAILED:-0} ))
