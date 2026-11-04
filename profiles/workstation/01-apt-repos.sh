@@ -104,10 +104,18 @@ repo cli_system charm \
 # apt compares keyring PATHS, not keys — if it ever starts shipping one, a
 # kit-written entry at a different path is the fatal Signed-By clash that took
 # out all of apt for vscode and steam. Matching the vendor path cannot clash.
-repo worker tailscale \
-  "https://pkgs.tailscale.com/stable/ubuntu/$CODENAME.asc" \
-  "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu $CODENAME main" \
-  /usr/share/keyrings/tailscale-archive-keyring.gpg
+# reach=ssh (an agent VM behind its router): no tailscale repo at all; one left over is named (tests/test-reach.sh).
+if [[ "$(reach_mode)" == ssh ]]; then
+  if [[ -e "$SRCDIR/tailscale.list" ]]; then
+    warn "repo tailscale present on a reach=ssh host (an agent VM never runs tailscale)"
+    hint "sudo rm $SRCDIR/tailscale.list"
+  fi
+else
+  repo worker tailscale \
+    "https://pkgs.tailscale.com/stable/ubuntu/$CODENAME.asc" \
+    "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu $CODENAME main" \
+    /usr/share/keyrings/tailscale-archive-keyring.gpg
+fi
 
 ppa media  ppa:obsproject/obs-studio
 ppa media  ppa:marin-m/songrec

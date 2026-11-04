@@ -3,7 +3,7 @@
 # them here.
 # Format: name [--classic] [@group]   — @group gates on that apt group's
 # host-conf toggle; no @group = always (dev-on-VM baseline).
-tailscale                               # node networking — always
+tailscale                               # node networking: reach=tailnet only (default); ssh forbids it
 imgcat                                  # tiny CLI — always
 canonical-livepatch                     # needs 'pro attach' before it does anything
 chromium @apps

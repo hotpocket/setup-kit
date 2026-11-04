@@ -40,7 +40,13 @@ and reboot it out of the desktop.
 - [ ] Both (`git_auth="deploy-keys token"`): the two lines above, each for its
       own repos — a repo named in `deploy_repos` never touches the token.
 
-## Tailnet (the kit installs the package; joining is yours)
+## Tailnet (reach=tailnet only)
+
+Agentnet workers use `reach=ssh` and stay off the tailnet. Skip all steps below;
+Tailscale packages, joining and Serve would bypass their router.
+
+For `reach=tailnet`, the kit installs the package; joining and Serve are yours.
+
 - [ ] `sudo tailscale up --hostname=<host>` — authenticates this machine to
       YOUR tailnet. `group_worker` installs the package (apt, from
       pkgs.tailscale.com), never the identity; 03-headless §6 reports the state

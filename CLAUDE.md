@@ -14,10 +14,11 @@ packages, toolchains, configs — idempotently.
   - `worker check|install` — headless media/AI worker VM (`profiles/worker/`): the same
     pass loop over symlinks to the workstation phases it shares plus `03-headless`
     (multi-user.target at boot, sshd, linger, nvidia held under unattended-upgrades,
-    tailnet doctor (the `tailscale` package rides `group_worker` from apt —
+    tailnet doctor (reach=tailnet only: the `tailscale` package rides `group_worker` from apt —
     headless skips the snap phase — but `tailscale up` and
     `tailscale set --operator=$USER` are the human's; the second is what
-    `t3 pair --tailscale` needs and nothing else names — `tests/test-tailscale.sh`),
+    `t3 pair --tailscale` and Tailscale Serve need — `tests/test-tailscale.sh`),
+    agentnet workers stay off the tailnet with `reach=ssh`,
     machine-credential doctor: the aws key is sealed by `seal-aws-profile.sh` into a
     user-scoped systemd-creds blob, TPM2 + host key, read through `credential_process`;
     the doctor reads the blob header and names a host-key-only seal — `tests/test-aws-sealed.sh`).
@@ -52,8 +53,8 @@ packages, toolchains, configs — idempotently.
 - **No silent sudo** — detect root needs upfront, one consolidated sudo pass; log gaps to `logs/missing.log` instead of failing silently.
 - **A phase may stop the run** — exit 3 means "unsafe to continue" and
   bootstrap aborts the phase loop there (exit 1 is an ordinary failure the loop
-  absorbs). Only `00-disk-space` uses it, and only in install mode: the doctor
-  always reports everything.
+  absorbs). `00-disk-space` uses it in install mode. An explicit unknown
+  `reach` value stops bootstrap and direct phases before provisioning, in either mode.
 - **Estimates carry their provenance** — `manifests/sizes.conf` rows say where
   each number came from. After a real install, `du -sh` the target and correct
   the row; an estimate nobody revisits is how the preflight starts lying.

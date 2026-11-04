@@ -58,6 +58,47 @@ dflt() { local v; v="$(cv "$1")"; echo "${v:-$CFG_DEF}"; }
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 [[ -f "$CONF" ]] || { echo "no $CONF — nothing to verify against"; exit 1; }
 
+# Parse reach here independently. Only an absent key keeps the tailnet default.
+REACH=tailnet
+if grep -q '^reach=' "$CONF"; then
+  REACH="$(cv reach | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+fi
+case "$REACH" in
+  tailnet|ssh) ;;
+  *) failv "reach='$REACH' unknown; set tailnet or ssh in $CONF before provisioning"
+     (( VERBOSE )) || printf '\n%s\n' "${FAILS[@]}"
+     exit 1 ;;
+esac
+
+# SSH hosts must remain off the tailnet, including headless hosts whose snap
+# phase is skipped. Check packages, binaries and running daemons separately.
+if [[ "$REACH" == ssh ]]; then
+  TS_DRIFT=0
+  if [[ "$(dpkg-query -W -f='${Status}' tailscale 2>/dev/null)" == 'install ok installed' ]]; then
+    failv "reach=ssh: tailscale apt package installed; sudo systemctl disable --now tailscaled && sudo apt-get remove -y tailscale"
+    TS_DRIFT=1
+  fi
+  if command -v snap >/dev/null 2>&1 && snap list tailscale >/dev/null 2>&1; then
+    failv "reach=ssh: tailscale snap installed; sudo snap remove tailscale"
+    TS_DRIFT=1
+  fi
+  if (( ! TS_DRIFT )) && { command -v tailscale >/dev/null 2>&1 || command -v tailscaled >/dev/null 2>&1; }; then
+    failv "reach=ssh: tailscale binary present; locate and remove its installation"
+    TS_DRIFT=1
+  fi
+  for unit in tailscaled.service snap.tailscale.tailscaled.service; do
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+      failv "reach=ssh: tailscale daemon running ($unit); sudo systemctl disable --now $unit, then remove its installation"
+      TS_DRIFT=1
+    fi
+  done
+  if pgrep -x tailscaled >/dev/null 2>&1; then
+    failv "reach=ssh: tailscale daemon process running; identify its launcher, stop it and remove its installation"
+    TS_DRIFT=1
+  fi
+  (( TS_DRIFT )) || pass "reach=ssh: no tailscale package, binary or daemon"
+fi
+
 # Worker DHCP policy is opt-in. The checker independently reads netplan and
 # compares coverage, bytes and metadata without using the installer's helpers.
 DHCP_IDENTIFIER="$(cv net_dhcp_identifier | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
@@ -111,6 +152,7 @@ if (( ${#FILES[@]} > 0 )); then
   # 1b below grades whether that driver actually drives the GPU
   CUR_DRV=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'nvidia-driver-*' 2>/dev/null | awk '/^ii /{print $2; exit}')
   while IFS= read -r p; do
+    [[ "$REACH" == ssh && "$p" == tailscale ]] && continue
     [[ "$p" =~ ^(winehq|wine)-stable$ ]] && p="${p%-stable}-$WB"
     [[ "$SKIPS" == *" $p "* ]] && continue
     [[ "$p" =~ ^nvidia-driver-[0-9]+ && -n "$CUR_DRV" && "$p" != "$CUR_DRV" ]] && continue
@@ -160,8 +202,9 @@ fi
   line="${line%%#*}"; line=$(echo "$line" | xargs); [[ -z "$line" ]] && continue
   grp=""; [[ "$line" == *" @"* ]] && { grp="${line##*@}"; line="${line% @*}"; }
   name="${line%% *}"
+  [[ "$REACH" == ssh && "$name" == tailscale ]] && continue
   [[ -n "$grp" ]] && ! gon "$grp" && continue
-  if [[ "$name" == tailscale ]] && dpkg-query -W -f='${Status}' tailscale 2>/dev/null | grep -q 'ok installed'; then
+  if [[ "$name" == tailscale && "$(dpkg-query -W -f='${Status}' tailscale 2>/dev/null)" == "install ok installed" ]]; then
     pass "tailscale: from apt, not snap (one tailscaled only)"; continue
   fi
   snap list "$name" >/dev/null 2>&1 && pass "snap: $name" || failv "snap: $name"

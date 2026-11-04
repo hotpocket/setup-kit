@@ -19,9 +19,13 @@ while IFS= read -r entry; do
     ok "snap $name: gated off (@$grp)"
     continue
   fi
+  if [[ "$name" == tailscale && "$(reach_mode)" == ssh ]]; then
+    tailscale_ssh_doctor
+    continue
+  fi
   if snap list "$name" >/dev/null 2>&1; then
     ok "snap $name"
-  elif [[ "$name" == tailscale ]] && dpkg-query -W -f='${Status}' tailscale 2>/dev/null | grep -q 'ok installed'; then
+  elif [[ "$name" == tailscale && "$(dpkg-query -W -f='${Status}' tailscale 2>/dev/null)" == "install ok installed" ]]; then
     # A second tailscaled from snap would fight the deb's over tailscale0 and
     # drop the node off the tailnet (tests/test-tailscale-deb.sh).
     ok "tailscale: installed from apt (pkgs.tailscale.com) — no snap copy"

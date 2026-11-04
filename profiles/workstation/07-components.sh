@@ -197,6 +197,11 @@ if [[ "$T3_WANT" == yes ]]; then
   # loopback bind, so other devices and the phone reach it with no LAN
   # listener, and the browser gets a secure context (clipboard copy/paste).
   T3_TS="$(conf_get t3code_tailscale_serve no)"
+  if [[ "$(reach_mode)" == ssh && "$T3_TS" == yes ]]; then
+    warn "reach=ssh conflicts with t3code_tailscale_serve=yes; refusing Tailscale Serve"
+    hint "set t3code_tailscale_serve=no in $HOST_CONF; agentnet hosts stay off the tailnet"
+    T3_TS=no
+  fi
   T3_UNIT="$HOME/.config/systemd/user/t3code.service"
   T3_DROPIN="$HOME/.config/systemd/user/t3code.service.d/setup-kit.conf"
   T3_RELOAD=${HEADLESS_T3_RELOAD:-0}

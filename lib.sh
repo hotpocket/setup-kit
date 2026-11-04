@@ -180,6 +180,42 @@ conf_set() {
   fi
 }
 group_on() { [[ "$(conf_get "group_${1//-/_}" no)" == yes ]]; }
+# reach=tailnet|ssh: how this worker is reached (proxmox_setup_plan docs/router.md). ssh = an agent VM behind its
+# router, reached by ssh through it: no tailscale at all, since a joined daemon is a path around the router.
+# Only an absent key defaults to tailnet. An explicit invalid value is unsafe.
+reach_mode() {
+  local r=tailnet
+  grep -q '^reach=' "$HOST_CONF" 2>/dev/null && r="$(conf_get reach)"
+  case "$r" in
+    tailnet|ssh) echo "$r" ;;
+    *) fail "reach='$r' unknown; set tailnet or ssh in $HOST_CONF before provisioning" >&2; return 3 ;;
+  esac
+}
+
+# reach=ssh forbids either packaging route, even when its CLI is off PATH.
+# Doctor only: package removal remains the operator's action.
+tailscale_ssh_doctor() {
+  local found=0 st
+  st="$(dpkg-query -W -f='${Status}' tailscale 2>/dev/null)"
+  if [[ "$st" == "install ok installed" ]]; then
+    warn "tailscale apt package installed on a reach=ssh host"
+    hint "sudo systemctl disable --now tailscaled && sudo apt-get remove -y tailscale"
+    found=1
+  fi
+  if command -v snap >/dev/null 2>&1 && snap list tailscale >/dev/null 2>&1; then
+    warn "tailscale snap installed on a reach=ssh host"
+    hint "sudo snap remove tailscale"
+    found=1
+  fi
+  if (( ! found )); then
+    if command -v tailscale >/dev/null 2>&1; then
+      warn "tailscale binary present on a reach=ssh host; no apt or snap package found"
+      hint "locate $(command -v tailscale) and remove its installation before using this host"
+    else
+      ok "reach=ssh: no tailscale (reached by ssh through its router)"
+    fi
+  fi
+}
 
 # ---------------------------------------------------------------- detection
 # grep -q would exit at first match → SIGPIPE kills the producer → pipefail
@@ -398,6 +434,11 @@ apt_wanted_pkgs() {
     mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv -f <(tr ' ' '\n' <<<"$SKIPS"))
     echo "@ok honoring skip_pkgs: $SKIPS"
   fi
+  # reach=ssh: an agent VM never gets tailscale (tests/test-reach.sh)
+  if [[ "$(reach_mode)" == ssh ]] && (( ${#WANT[@]} )); then
+    mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv tailscale)
+    echo "@ok reach=ssh: tailscale not installed (an agent VM is reached by ssh through its router)"
+  fi
   # wine branch — the manifest names WineHQ's stable packages; wine_branch
   # (stable|devel|staging) swaps them for the chosen branch. The prefix
   # (~/.wine) is untouched by a branch swap. (2026-09-05: MTGA's mouse-capture
@@ -529,3 +570,6 @@ android_sdk_resolve() {
   awk '{print $1}' | grep -E "$pat" | sort -t';' -k2 -V | tail -1
 }
 
+# Stop at library load, before bootstrap's sudo/preamble or any direct phase.
+# A failure inside $(...) or < <(...) alone could be absorbed by its caller.
+reach_mode >/dev/null || exit 3

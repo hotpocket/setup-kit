@@ -202,7 +202,11 @@ fi
 # so without `tailscale set --operator=$USER` pairing fails with an
 # access-denied that names nothing about operators.
 section "tailnet ($MODE)"
-if ! command -v tailscale >/dev/null 2>&1; then
+# reach=ssh: an agent VM behind its router has no tailscale; one that is there is a path around the router.
+REACH="$(reach_mode)"
+if [[ "$REACH" == ssh ]]; then
+  tailscale_ssh_doctor
+elif ! command -v tailscale >/dev/null 2>&1; then
   warn "tailscale missing — group_worker installs it (apt, pkgs.tailscale.com)"
   hint "it arrives on the next pass: 01-apt-repos adds the repo, 02-apt-install the package"
 else

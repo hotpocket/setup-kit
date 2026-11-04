@@ -148,6 +148,9 @@ case "$cmd" in
       done
       conf_set groups_selected yes
     fi
+    # The first-run editor can change reach after lib.sh's initial validation.
+    # Recheck before sudo or the auth preamble can provision anything.
+    reach_mode >/dev/null || exit 3
     # one sudo upfront so phases don't stall on password prompts mid-run.
     # NB: don't gate on bare `sudo -v` — with verifypw=all it demands a
     # password even when NOPASSWD covers every command.
