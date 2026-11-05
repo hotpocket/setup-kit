@@ -155,6 +155,9 @@ OPTIONAL = {  # group: (header, [pkgs])
     # Absent from any capture box's manual.txt — the workstation's copy is the
     # snap — so it regenerates with an unknown size, which is honest: the
     # preflight measures apt live and never reads these comments.
+    # libtss2-rc0t64: without it systemd-analyze has-tpm2 says "partial" and the
+    # TPM2 seals (git-hub token-set, seal-aws-profile) are refused; found on
+    # control VM 103's lean worker install, 2026-11-04.
     "worker": ("Headless worker (profiles/worker) — OFF for workstations;"
                " the worker host conf turns ONLY this group on",
                ["openssh-server", "qemu-guest-agent", "tailscale",
@@ -168,7 +171,8 @@ OPTIONAL = {  # group: (header, [pkgs])
                 "python3-pip", "python3-venv", "pipx", "build-essential",
                 "libssl-dev", "zlib1g-dev", "libbz2-dev", "libreadline-dev",
                 "libsqlite3-dev", "libncurses-dev", "libxml2-dev",
-                "libxmlsec1-dev", "libffi-dev", "liblzma-dev"]),
+                "libxmlsec1-dev", "libffi-dev", "liblzma-dev",
+                "libtss2-rc0t64"]),
 }
 # dev-go is optional too but has no apt packages (manual install) — see
 # manifests/lang/README note emitted below.

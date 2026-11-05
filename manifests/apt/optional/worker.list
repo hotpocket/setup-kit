@@ -44,4 +44,4 @@ libbz2-dev                                  #      0.1 MB  libdevel
 tailscale                                   #      0.0 MB  ?
 python3-venv                                #      0.0 MB  python
 build-essential                             #      0.0 MB  devel
-libtss2-rc0t64                              #      0.1 MB  libs  systemd-creds TPM2: without it has-tpm2 says "partial" (git-hub token-set, seal-aws-profile)
+libtss2-rc0t64                              #      0.0 MB  ?

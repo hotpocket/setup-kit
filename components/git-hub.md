@@ -124,6 +124,12 @@ The first expiry reissues that SHA once. A second expiry without a verdict
 writes `<name>.stuck`, removes its request and logs
 `review ended twice without a verdict via gate -- needs a human`.
 It stays paused until main moves or a reviewer records a verdict for that SHA.
+If another forwarder has already sent the leased SHA or a descendant upstream,
+release withdraws its request and lease and logs
+`review request withdrawn: already upstream`, before its equal-head or
+back-propagation return. Remaining code above that SHA gets a fresh review.
+Pending also suppresses requests covered by a locally recorded forward without
+contacting GitHub; release detects forwards made elsewhere on its next run.
 Content classification, base-defined checks and exact-sha forwarding still apply.
 
 | Key | Box | Meaning |
@@ -147,6 +153,11 @@ On the hub, install reconciles a marked block in the human user's
 Each supplied key gets `restrict` and a forced absolute `git-hub gate` command;
 options such as `from="192.0.2.1"` are preserved. A supplied `command=` option
 is refused. The SSH server's user/address policy belongs to the machine config.
+Managed reviewer blocks and gate aliases take an exclusive lock on
+`<file>.lock` before reading the target and hold it through the atomic rename.
+The sidecar remains in place. Other writers must use that same lock, including
+`~/.ssh/authorized_keys.lock` for control provisioning. Contention waits at most
+30 seconds, then install fails with a retry message. Check mode creates no lock.
 
 The forced command reads only `SSH_ORIGINAL_COMMAND`. It accepts:
 
@@ -228,3 +239,32 @@ upstream pushes. Force and deletion refspecs are refused before contacting GitHu
 | Reviewer box down | Requests stay on the hub. Its release timer reissues once, then pauses that SHA with a needs-a-human log after the second expiry. On restart the reviewer relay delivers open issues; a stuck SHA needs a verdict or new main. |
 | T3 delivery unavailable | Relay leaves the request unsent and retries on its next timer run. Default t3x mode drops the failed-send lease so the release timer retries. |
 | Relay killed during delivery | Atomic state remains whole. A delivery not recorded may be sent again; the reviewer deduplicates by name+sha+issued. |
+
+## Transport deadlines and interrupted queues
+
+Every Git network operation uses the same noninteractive policy: SSH BatchMode,
+ConnectTimeout=20, GIT_TERMINAL_PROMPT=0, and HTTP low-speed limits of 1000 bytes
+per second for 60 seconds. Upstream push/fetch/ls-remote, manual forward, gate
+verdict, token verification and reviewer stage use a 120-second wall deadline.
+The worker hub probe retains its 20-second deadline.
+
+Git requires GNU coreutils `timeout` on PATH and runs under
+`timeout --kill-after=10`: TERM at the deadline and
+KILL after the grace period. GNU timeout signals the command's process group,
+including SSH/HTTP helpers. Children close release-lock fd 9. If timeout itself
+is killed, the release service's cgroup or the forced SSH session owns cleanup.
+
+A timed-out verdict returns failure, frees the release lock and keeps its request
+and lease. Retry the same verdict; Git still refuses non-fast-forward pushes.
+The push log records timeout as one outcome. A push accepted just before a lost
+response is safe to retry with the same SHA.
+
+Under the release lock, abandoned queue temp files are removed and gate leases
+are checked against their request header, base ancestry and nonempty brief.
+A missing or mismatched request is rebuilt with the same issue id and attempt
+count. If that interrupted pair expired, its deadline is renewed without spending
+an attempt. A valid request whose lease expires still follows the two-attempt
+limit described above.
+
+Pending suppresses held repos without deleting their request or lease. Unholding
+the repo makes its preserved issue available to the relay again.

@@ -81,9 +81,9 @@ up_git() {  # up_git <bare> <upstream> <push|fetch|ls-remote> <args...>
     [[ "$up" != git@github.com:* ]] || up="https://github.com/${up#git@github.com:}"
     GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraHeader" \
     GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$token" | base64 -w0)" \
-      hg "$d" "$verb" "$up" "$@"
+      hub_network_git "$GIT_HUB_NETWORK_TIMEOUT" -c safe.directory="$d" --git-dir="$d" "$verb" "$up" "$@"
   else
-    hg "$d" "$verb" "$up" "$@"
+    hub_network_git "$GIT_HUB_NETWORK_TIMEOUT" -c safe.directory="$d" --git-dir="$d" "$verb" "$up" "$@"
   fi
 }
 push_up() {  # one outcome per push, whether manual, content or reviewed
@@ -96,6 +96,7 @@ push_up() {  # one outcome per push, whether manual, content or reviewed
   sha="$(hg "$d" rev-parse --verify "$src^{commit}" 2>/dev/null)" || return 2
   up_git "$d" "$up" push "$spec" 9>&-; rc=$?   # children never keep the release lock
   if (( rc == 0 )); then rlog "$name $branch ${sha:0:9}: forwarded ($note)"
+  elif (( rc == 124 || rc == 137 )); then rlog "$name $branch ${sha:0:9}: $note forward timed out -- retry"
   else rlog "$name $branch ${sha:0:9}: $note forward refused upstream"; fi
   return "$rc"
 }
@@ -133,8 +134,7 @@ cmd_token_set() {
   fi
   chmod 600 "$tmp" && mv -f "$tmp" "$TOKEN_FILE.cred" || { rm -f "$tmp"; return 1; }
   ( umask 077; atomic "$TOKEN_FILE.expires" "$expiry" ) || return 1
-  if GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20 \
-      up_git "$d" "$up" ls-remote HEAD >/dev/null 2>&1; then
+  if up_git "$d" "$up" ls-remote HEAD >/dev/null 2>&1; then
     echo "git-hub: sealed token installed; GitHub read-only check ok"
   else
     echo "git-hub: sealed token installed; GitHub check failed; check access/network and retry token-set" >&2; return 1
@@ -165,7 +165,7 @@ cmd_stage() {
   [[ -d "$clone/.git" ]] || { echo "git-hub: no working clone at $clone" >&2; return 2; }
   if [[ -n "$(conf_get git_hub_gate '')" ]]; then
     d="git-hub-gate:$name.git"
-    head="$(git ls-remote --symref "$d" HEAD | sed -n 's|^ref: refs/heads/\([^[:space:]]*\).*|\1|p')"
+    head="$(hub_network_git "$GIT_HUB_NETWORK_TIMEOUT" ls-remote --symref "$d" HEAD | sed -n 's|^ref: refs/heads/\([^[:space:]]*\).*|\1|p')"
     [[ -n "$head" ]] || { echo "git-hub: gate HEAD unreadable; retry stage" >&2; return 1; }
   else head="$(hg "$d" symbolic-ref --short HEAD)"; fi
   cur="$(git -C "$clone" symbolic-ref --short HEAD 2>/dev/null)"
@@ -173,7 +173,7 @@ cmd_stage() {
   if [[ -n "$(git -C "$clone" status --porcelain --untracked-files=no)" ]]; then
     echo "git-hub: $clone has uncommitted changes (dirty) — commit or stash, then stage again" >&2; return 1
   fi
-  git -c safe.directory="$d" -C "$clone" fetch -q "$d" "$head" || return 1
+  hub_network_git "$GIT_HUB_NETWORK_TIMEOUT" -c safe.directory="$d" -C "$clone" fetch -q "$d" "$head" || return 1
   if [[ -n "$want" ]]; then   # the reviewed sha, not whatever main is by now
     git -c safe.directory="$d" -C "$clone" merge-base --is-ancestor "$want" FETCH_HEAD 2>/dev/null \
       || { echo "git-hub: $want is not on the hub's $head" >&2; return 1; }
@@ -312,6 +312,34 @@ review_brief() {  # review_brief <name> <head-branch> <base> <sha>
     "This thread is reused for every release review: do the review here, start no threads, reply with one line per outcome. No broadcasts."
 }
 
+# Called under the release lock, in gate mode only. A different forwarder may
+# have satisfied this lease while its reviewer was away.
+release_withdraw_upstream_review() {  # <name> <bare> <branch> <upstream sha>
+  local name="$1" d="$2" b="$3" upsha="$4" lease_sha
+  [[ -r "$RSTATE/$name.lease" ]] || return 0
+  read -r lease_sha _ < "$RSTATE/$name.lease" || return 0
+  [[ "$lease_sha" =~ ^[0-9a-f]{40}$ ]] || return 0
+  hg "$d" merge-base --is-ancestor "$lease_sha" "$upsha" 2>/dev/null || return 0
+  # Remove the request first: an interruption cannot leave a servable request
+  # without a lease, and the next release can reclaim any remaining lease.
+  rm -f "$RSTATE/$name.request" "$RSTATE/$name.lease" || return 1
+  rlog "$name $b ${lease_sha:0:9}: review request withdrawn: already upstream"
+}
+
+gate_request_valid() {  # <name> <branch> <lease sha>
+  local name="$1" b="$2" lease_sha="$3" rn rb base sha extra file="$RSTATE/$1.request"
+  [[ -s "$file" ]] || return 1
+  read -r rn rb base sha extra < "$file" || return 1
+  [[ "$rn" == "$name" && "$rb" == "$b" && "$sha" == "$lease_sha" && "$base" =~ ^[0-9a-f]{40}$ && -z "$extra" ]] || return 1
+  hg "$(bare "$name")" merge-base --is-ancestor "$base" "$lease_sha" 2>/dev/null || return 1
+  awk 'NR>1 && NF {body=1} END {exit !body}' "$file"
+}
+gate_request_write() {  # <name> <branch> <base> <lease sha> [reason]
+  local name="$1" b="$2" base="$3" sha="$4" why="${5:-}"
+  atomic "$RSTATE/$name.request" "$name $b $base $sha
+$(review_brief "$name" "$b" "$base" "$sha")${why:+$'\n'"Held from unattended forward: $why."}"
+}
+
 release_one() {  # release_one <name>
   local name="$1" d up b hub upsha base why
   # git_hub_hold="name ...": paused by Brandon -- nothing reviewed, nothing forwarded, nothing deleted
@@ -323,8 +351,11 @@ release_one() {  # release_one <name>
   release_prune "$name" "$d" "$b" "$hub"
   upsha="$(exec 9>&-; up_git "$d" "$up" ls-remote "refs/heads/$b" 2>/dev/null | cut -f1)"   # no child keeps the lock
   [[ -n "$upsha" ]] || { echo "$name: upstream $b unreadable or absent -- skipped"; return 0; }
-  [[ "$upsha" == "$hub" ]] && return 0
   hg "$d" cat-file -e "$upsha^{commit}" 2>/dev/null || up_git "$d" "$up" fetch -q "refs/heads/$b" 2>/dev/null 9>&-
+  if [[ "$REVIEW_VIA" == gate ]]; then
+    release_withdraw_upstream_review "$name" "$d" "$b" "$upsha" || return 1
+  fi
+  [[ "$upsha" == "$hub" ]] && return 0
   if hg "$d" merge-base --is-ancestor "$hub" "$upsha" 2>/dev/null; then
     # GitHub is ahead (a commit made on this box): carry it back to the hub
     hg "$d" update-ref "refs/heads/$b" "$upsha" "$hub" \
@@ -365,6 +396,17 @@ release_one() {  # release_one <name>
   local lsha="" lexp="" lthread="" lsent="" ltries="" tries=1 now issued
   read -r lsha lexp lthread lsent ltries 2>/dev/null < "$RSTATE/$name.lease"
   now="$(date +%s)"
+  # A complete lease without its matching request has not been delivered. Repair
+  # it before expiry/retry decisions, retaining issue identity and attempt count.
+  if [[ "$REVIEW_VIA" == gate && "$lthread" == gate && -n "$lsha" && "$(cat "$RSTATE/$name.stuck" 2>/dev/null)" != "$lsha" ]] \
+      && ! gate_request_valid "$name" "$b" "$lsha"; then
+    if (( ${lexp:-0} <= now )); then
+      atomic "$RSTATE/$name.lease" "$lsha $((now + LEASE_H * 3600)) gate $lsent ${ltries:-1}" || return 1
+    fi
+    gate_request_write "$name" "$b" "$base" "$lsha" "$why" || return 1
+    rlog "$name $b ${lsha:0:9}: gate request recovered without another attempt"
+    return 0
+  fi
   if [[ "$REVIEW_VIA" == gate && "$lthread" == gate && "$lsha" == "$hub" ]] && (( ${lexp:-0} <= now )); then
     if (( ${ltries:-1} >= 2 )); then
       atomic "$RSTATE/$name.stuck" "$hub" || return 1
@@ -392,8 +434,7 @@ release_one() {  # release_one <name>
     # An immediate reissue or backward clock must not reuse the previous id.
     if [[ "$lthread" == gate && "$lsent" =~ ^[1-9][0-9]*$ ]] && (( issued <= lsent )); then issued=$((lsent + 1)); fi
     atomic "$RSTATE/$name.lease" "$hub $(( now + LEASE_H * 3600 )) gate $issued $tries" || return 1
-    atomic "$RSTATE/$name.request" "$name $b $base $hub
-$(review_brief "$name" "$b" "$base" "$hub")${why:+$'\n'"Held from unattended forward: $why."}" || return 1
+    gate_request_write "$name" "$b" "$base" "$hub" "$why" || return 1
     rlog "$name $b ${base:0:9}..${hub:0:9}: review queued for gate (issue $issued, attempt $tries)"
     return 0
   fi
@@ -425,13 +466,14 @@ release_prune() {  # release_prune <name> <bare> <head> <hubsha>: branches alrea
 release_lock() {  # one release or verdict at a time: base, lease and forward must agree
   mkdir -p "$STATE"; exec 9>"$STATE/release.lock"
   flock -w 900 9 || { echo "git-hub: another release or verdict holds the lock" >&2; return 1; }
+  # Every queue writer owns this lock; any leftover temp file belongs to a dead
+  # writer. Include dotfile repo names and names removed from the current config.
+  if [[ -d "$RSTATE" ]]; then find "$RSTATE" -maxdepth 1 -type f -name '*.tmp.*' -delete || return 1; fi
 }
 cmd_release() {
   local e name
   release_lock || return 1
-  # unattended: a hung upstream must fail, not wedge the lock (timeout can't wrap a function)
-  export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=20}"
-  export GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=60 GIT_TERMINAL_PROMPT=0
+  # All Git transport bounds live in hub_network_git, including manual commands.
   for e in $GIT_HUB_REPOS; do e="${e%%:*}"; release_one "${e##*/}"; done
   return 0
 }
@@ -481,7 +523,7 @@ cmd_verdict() {
 gate_known() { [[ "$1" =~ ^[A-Za-z0-9._-]+$ && "$1" != . && "$1" != .. ]] && known "$1"; }
 gate_refuse() { echo "git-hub gate: refused" >&2; return 2; }
 cmd_gate() {
-  local cmd="${SSH_ORIGINAL_COMMAND:-}" name sha f lsha b base issued
+  local cmd="${SSH_ORIGINAL_COMMAND:-}" name sha f lsha b base issued forwarded
   local -a words=()
   if [[ "$cmd" == pending ]]; then
     # Shorter than relay's SSH timeout: leave no server-side waiters behind.
@@ -490,10 +532,15 @@ cmd_gate() {
     local e
     for e in $GIT_HUB_REPOS; do
       e="${e%%:*}"; name="${e##*/}"; gate_known "$name" || continue
+      held "$name" && continue
       f="$RSTATE/$name.request"; [[ -r "$f" && -r "$RSTATE/$name.lease" ]] || continue
       read -r _ b base sha < "$f"; read -r lsha _ _ issued _ < "$RSTATE/$name.lease"
       [[ "$sha" =~ ^[0-9a-f]{40}$ && "$lsha" == "$sha" && "$issued" =~ ^[1-9][0-9]*$ ]] || continue
       [[ "$(cat "$RSTATE/$name.stuck" 2>/dev/null)" != "$sha" ]] || continue
+      # Local forward markers are cheap evidence; external forwards are observed
+      # by release_one. Pending never adds a network hop while holding the lock.
+      forwarded="$(cat "$STATE/$name/$b" 2>/dev/null)"
+      if [[ "$forwarded" =~ ^[0-9a-f]{40}$ ]] && hg "$(bare "$name")" merge-base --is-ancestor "$sha" "$forwarded" 2>/dev/null; then continue; fi
       printf '=== %s %s %s\n' "$name" "$sha" "$issued"; cat "$f" || return 1
     done
     # Distinguish a complete empty snapshot from a silent lock timeout.

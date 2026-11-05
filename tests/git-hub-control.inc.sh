@@ -15,9 +15,12 @@ cat > "$BIN/systemd-creds" <<'S'
 #!/bin/bash
 verb=$1; shift; [[ "$1" == --user && "$2" == --name=hub-forward-token ]] || exit 1
 shift 2
-[[ "${1:-}" != --with-key=* ]] || shift
 case "$verb" in
- encrypt) [[ ! -e "$TMP/encrypt-fail" ]] || exit 1; { printf 'sealed:'; base64 -w0; } > "$2" ;;
+ encrypt)
+   [[ $# == 3 && "$1" == --with-key=host+tpm2 && "$2" == - ]] || exit 64
+   printf '%s\n' "$1" > "$TMP/last-seal-key"; shift
+   [[ ! -e "$TMP/encrypt-fail" ]] || exit 1
+   { printf 'sealed:'; base64 -w0; } > "$2" ;;
  decrypt) [[ ! -e "$TMP/decrypt-fail" ]] || exit 1
    v=$(cat "$1"); [[ "$v" == sealed:* ]] || exit 1
    [[ ! -e "$TMP/roundtrip-fail" ]] || { echo different; exit; }
@@ -58,7 +61,7 @@ printf '%s\037' "$@" >> "$TMP/control-ssh.calls"; echo >> "$TMP/control-ssh.call
 [[ ! -e "$TMP/hub-down" ]] || exit 255
 # Git's OpenSSH transport adds -o SendEnv=GIT_PROTOCOL before the host.
 while [[ "${1:-}" == -o && $# -ge 2 ]]; do shift 2; done
-[[ "${1:-}" == git-hub-gate ]] || exit 2
+[[ "${1:-}" == git-hub-gate || "${1:-}" == git-hub ]] || exit 2
 shift
 if [[ "$1" == pending ]]; then cat "$TMP/pending"; exit; fi
 # Git's upload-pack request uses the same forced-command entry as a real SSH key.
@@ -81,8 +84,12 @@ ccli token-set </dev/null; rc=$?
 assert 'S01. token-set requires a tty' '(( rc != 0 )) && grep -qi tty "$TMP/out"'
 ctok malformed 2099-01-01; rc=$?
 assert 'S02. malformed token refused before any file is written' '(( rc != 0 )) && grep -q fine-grained "$TMP/out" && [[ ! -e "$TOK" && ! -e "$TOK.cred" ]]'
-touch "$TMP/no-tpm"; ctok "$TEST_TOKEN" 2099-01-01; rc=$?; rm "$TMP/no-tpm"
-assert 'S03. token-set requires TPM2 binding' '(( rc != 0 )) && grep -q TPM2 "$TMP/out" && [[ ! -e "$TOK.cred" ]]'
+touch "$TMP/no-tpm"; ctok "$TEST_TOKEN" 2099-01-01; no_tpm_rc=$?; cp "$TMP/out" "$TMP/no-tpm.out"; rm "$TMP/no-tpm"
+no_tpm_wrote_blob=0; [[ ! -e "$TOK.cred" ]] || no_tpm_wrote_blob=1
+ctok "$TEST_TOKEN" 2099-01-01; has_tpm_rc=$?
+assert 'S03. token-set requires TPM2 binding' \
+  '(( no_tpm_rc != 0 && no_tpm_wrote_blob == 0 && has_tpm_rc == 0 )) && grep -q TPM2 "$TMP/no-tpm.out" && [[ -s "$TOK.cred" && "$(cat "$TMP/last-seal-key")" == --with-key=host+tpm2 ]]'
+rm -f "$TOK.cred" "$TOK.expires"
 ctok "$TEST_TOKEN" 2099-02-30; rc=$?
 assert 'S04. invalid expiry refused without writing' '(( rc != 0 )) && grep -qi date "$TMP/out" && [[ ! -e "$TOK.cred" ]]'
 touch "$TMP/roundtrip-fail"; ctok "$TEST_TOKEN" 2099-01-01; rc=$?; rm "$TMP/roundtrip-fail"
@@ -90,7 +97,7 @@ assert 'S05. failed credential round-trip leaves no blob' '(( rc != 0 )) && grep
 git --git-dir="$ROOT/books.git" config hub.upstream git@github.com:acme/books.git
 ctok "$TEST_TOKEN" 2099-01-01; rc=$?
 assert 'S06. token-set seals mode 600, records expiry and proves GitHub through decrypted token' \
-  '(( rc == 0 )) && [[ -s "$TOK.cred" && "$(stat -c %a "$TOK.cred")" == 600 && "$(cat "$TOK.expires")" == 2099-01-01 && -s "$TMP/auth.calls" ]]'
+  '(( rc == 0 )) && [[ -s "$TOK.cred" && "$(stat -c %a "$TOK.cred")" == 600 && "$(cat "$TOK.expires")" == 2099-01-01 && -s "$TMP/auth.calls" && "$(cat "$TMP/last-seal-key")" == --with-key=host+tpm2 ]]'
 assert 'S07. token and temporary files never contain plaintext or echo it' \
   '[[ ! -e "$TOK" ]] && ! grep -RFq "$TEST_TOKEN" "$HH" "$TMP/out" && [[ -z "$(find "$(dirname "$TOK")" -name "*.tmp.*")" ]]'
 ccli forward books main; rc=$?
@@ -304,3 +311,245 @@ echo "$after_move 1 $owner $sent 2" > "$RS/books.lease"; ccli release
 gate "verdict books $after_move reject 'review completed with findings'"; rc=$?
 assert 'S56. reject for a stuck sha records rejection and clears stuck' \
   '(( rc == 0 )) && [[ -e "$RS/books.rejected.d/$after_move" && ! -e "$RS/books.stuck" && ! -e "$RS/books.request" && ! -e "$RS/books.lease" ]]'
+
+# R3-1: an external forward satisfies the old review independently of its lease.
+# Reset only fixture state at scenario boundaries so one failed cleanup cannot
+# contaminate the next graph. The assertions use release/pending/relay entry points.
+gate "verdict books $after_move pass --sol=task-r3-setup 'advance withdrawal fixture'"
+ctouch src/withdraw-equal.py; withdrawn_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ccli release; gate pending; cp "$TMP/out" "$TMP/pending"; ccli relay
+withdraw_was_open=$(grep -c "^=== books $withdrawn_sha " "$TMP/pending")
+relay_was_present=0; [[ -s "$HH/.local/state/git-hub/relay/books" ]] && relay_was_present=1
+withdraw_logs_before=$(grep -c 'review request withdrawn: already upstream' "$RLOG" || true)
+git -C "$GIT_HOME/books" push -q "$GH/acme/books.git" main
+ccli release; ccli release
+assert 'S57. out-of-band forward withdraws request and lease with one log line' \
+  '[[ "$withdraw_was_open" == 1 && ! -e "$RS/books.request" && ! -e "$RS/books.lease" && "$(grep -c "review request withdrawn: already upstream" "$RLOG")" == "$((withdraw_logs_before + 1))" ]]'
+gate pending; cp "$TMP/out" "$TMP/pending"
+assert 'S58. pending lists no request after upstream withdrawal' \
+  '! grep -q "^=== books " "$TMP/pending" && grep -qx "# git-hub pending complete" "$TMP/pending"'
+ccli relay
+assert 'S59. relay forgets the withdrawn request on a complete pending snapshot' \
+  '[[ "$relay_was_present" == 1 && ! -e "$HH/.local/state/git-hub/relay/books" ]]'
+rm -f "$RS/books.request" "$RS/books.lease"
+
+# Manual forward already records a cheap, local proof even before release runs.
+ctouch src/withdraw-manual.py; manual_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ccli release; gate pending
+manual_was_open=$(grep -c "^=== books $manual_sha " "$TMP/out")
+ccli forward books main; gate pending
+assert 'S60. pending suppresses a request covered by a locally recorded forward' \
+  '[[ "$manual_was_open" == 1 && -s "$RS/books.request" && -s "$RS/books.lease" ]] && ! grep -q "^=== books " "$TMP/out" && grep -qx "# git-hub pending complete" "$TMP/out"'
+ccli release; rm -f "$RS/books.request" "$RS/books.lease"
+
+# The externally advanced upstream commit initially exists only in another clone.
+ctouch src/withdraw-ahead.py; ahead_lease_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ccli release
+outside="$SL/external-forward"; git clone -q "$ROOT/books.git" "$outside"
+git -C "$outside" commit -q --allow-empty -m externally-ahead
+outside_sha=$(git -C "$outside" rev-parse HEAD)
+git -C "$outside" push -q "$GH/acme/books.git" main
+upstream_was_absent=0; git --git-dir="$ROOT/books.git" cat-file -e "$outside_sha^{commit}" 2>/dev/null || upstream_was_absent=1
+ccli release
+assert 'S61. fetched upstream descendant withdraws the lease before back-propagation' \
+  '[[ "$upstream_was_absent" == 1 && "$(git --git-dir="$ROOT/books.git" rev-parse main)" == "$outside_sha" && ! -e "$RS/books.request" && ! -e "$RS/books.lease" ]] && grep -q "${ahead_lease_sha:0:9}: review request withdrawn: already upstream" "$RLOG"'
+rm -f "$RS/books.request" "$RS/books.lease"
+git -C "$GIT_HOME/books" fetch -q "$ROOT/books.git" main; git -C "$GIT_HOME/books" reset -q --hard "$outside_sha"
+
+# An older lease being satisfied must not suppress review of the remaining code.
+ctouch src/withdraw-older.py; older_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ccli release
+ctouch src/still-unreviewed.py; remaining_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+git -C "$GIT_HOME/books" push -q "$GH/acme/books.git" "$older_sha:refs/heads/main"
+ccli release
+assert 'S62. upstream covering an older lease opens a review for the remaining head' \
+  '[[ "$(cut -d" " -f1 "$RS/books.lease")" == "$remaining_sha" && "$(head -1 "$RS/books.request")" == "books main $older_sha $remaining_sha" && "$(git --git-dir="$GH/acme/books.git" rev-parse main)" == "$older_sha" ]] && grep -q "${older_sha:0:9}: review request withdrawn: already upstream" "$RLOG"'
+rm -f "$RS/books.request" "$RS/books.lease"
+
+# Default t3x mode retains its existing lease behaviour at equal upstream.
+ccli forward books main
+echo git_hub_review_via=t3x >> "$CONF"
+ctouch src/t3x-unchanged.py; t3x_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ccli release; t3x_lease_before=$(sha256sum "$RS/books.lease")
+t3x_withdraw_before=$(grep -c 'review request withdrawn: already upstream' "$RLOG" || true)
+git -C "$GIT_HOME/books" push -q "$GH/acme/books.git" main
+ccli release
+assert 'S63. t3x mode keeps its lease and emits no gate withdrawal log' \
+  '[[ "$(sha256sum "$RS/books.lease")" == "$t3x_lease_before" && "$(cut -d" " -f1 "$RS/books.lease")" == "$t3x_sha" && "$(grep -c "review request withdrawn: already upstream" "$RLOG" || true)" == "$t3x_withdraw_before" ]]'
+
+# F1: exercise every network entry point against a strict environment checker.
+# Timeout's production argv is recorded, then scaled only inside this fixture.
+# Ubuntu can expose uutils as timeout and GNU coreutils as gnutimeout. This
+# contract is GNU timeout; the override reproduces the incompatible utility.
+export GIT_HUB_TEST_TIMEOUT="${GIT_HUB_TEST_TIMEOUT:-$(command -v gnutimeout || command -v timeout)}"
+"$GIT_HUB_TEST_TIMEOUT" --version | head -n 1
+cp "$BIN/git" "$BIN/git.base"
+cat > "$BIN/git" <<'S'
+#!/bin/bash
+verb=""
+for a; do case "$a" in push|fetch|ls-remote) verb=$a; break ;; esac; done
+if [[ -n "$verb" ]]; then
+  printf '%s\n' "$verb" >> "$TMP/network.calls"
+  if [[ -e "$TMP/require-network-env" ]]; then
+    [[ "${GIT_TERMINAL_PROMPT:-}" == 0 && "${GIT_HTTP_LOW_SPEED_LIMIT:-}" == 1000 && "${GIT_HTTP_LOW_SPEED_TIME:-}" == 60 && "${GIT_SSH_COMMAND:-}" == *'BatchMode=yes'* && "${GIT_SSH_COMMAND:-}" == *'ConnectTimeout=20'* ]] || { echo 'git fixture: missing noninteractive transport settings' >&2; exit 97; }
+  fi
+  if [[ -e "$TMP/block-upstream" && "$(cat "$TMP/block-upstream")" == "$verb" ]]; then
+    [[ -e "$TMP/stall-cooperative" ]] || trap '' TERM
+    /bin/sleep 60 & child=$!
+    awk '{print $1 " " $22}' "/proc/$$/stat" "/proc/$child/stat" > "$TMP/upstream-pids"
+    touch "$TMP/upstream-started"
+    wait "$child"; exit
+  fi
+fi
+exec "$(dirname "$0")/git.base" "$@"
+S
+cat > "$BIN/timeout" <<'S'
+#!/bin/bash
+printf '%s\n' "$(basename "$0")" >> "$TMP/timeout-names"
+if [[ "${1:-}" == --kill-after=10 ]]; then
+  printf '%s\n' "$2" >> "$TMP/network-deadlines"
+  shift 2
+  "$GIT_HUB_TEST_TIMEOUT" --kill-after=0.2 2 "$@"
+  rc=$?; printf '%s\n' "$rc" >> "$TMP/network-exits"; exit "$rc"
+fi
+exec "$GIT_HUB_TEST_TIMEOUT" "$@"
+S
+cp "$BIN/timeout" "$BIN/gnutimeout"   # both names, as on Ubuntu 26.04: production must pick GNU's
+chmod +x "$BIN/git" "$BIN/timeout" "$BIN/gnutimeout"
+metrics_true() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if all(d.get(k) is True for k in sys.argv[2:]) else 1)' "$@"; }
+net_deadlines() { if [[ -f "$TMP/network-deadlines" ]]; then grep -c "^${1:-120}$" "$TMP/network-deadlines" || true; else echo 0; fi; }
+rm -f "$RS/books.request" "$RS/books.lease"
+echo git_hub_review_via=gate >> "$CONF"
+touch "$TMP/require-network-env"
+ctouch src/network-verdict.py; network_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ccli release; before_deadlines=$(net_deadlines)
+gate "verdict books $network_sha pass --sol=task-net 'network contract'"; rc=$?
+assert 'S64. gate verdict uses noninteractive transport and a server wall-clock deadline' \
+  '(( rc == 0 )) && [[ "$(net_deadlines)" -gt "$before_deadlines" ]]'
+assert 'S90. with uutils timeout and GNU gnutimeout both present (Ubuntu 26.04), the deadline is GNU'"'"'s (it kills the whole process group)' \
+  '[[ -s "$TMP/timeout-names" ]] && ! grep -qvx gnutimeout "$TMP/timeout-names"'
+# Keep cases independent even when a deliberately removed network policy fails.
+git -C "$GIT_HOME/books" push -q "$GH/acme/books.git" main; rm -f "$RS/books.request" "$RS/books.lease"
+ctouch src/network-forward.py; before_deadlines=$(net_deadlines)
+ccli forward books main; rc=$?
+assert 'S65. manual forward uses the same noninteractive settings and deadline' \
+  '(( rc == 0 )) && [[ "$(net_deadlines)" -gt "$before_deadlines" ]]'
+git -C "$GIT_HOME/books" push -q "$GH/acme/books.git" main
+before_deadlines=$(net_deadlines); ctok "$TEST_TOKEN" 2099-01-02; rc=$?
+assert 'S66. token-set read-only verification uses the shared transport and deadline' \
+  '(( rc == 0 )) && [[ "$(net_deadlines)" -gt "$before_deadlines" ]]'
+network_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+cp "$CONF" "$SL/network-hub.conf"; export GATE_HOST_CONF="$SL/network-hub.conf"
+echo "git_hub_root=$SL/no-network-local-hub" >> "$CONF"
+git -C "$GIT_HOME/books" reset -q --hard "$base"; before_deadlines=$(net_deadlines)
+ccli stage books "$network_sha"; rc=$?
+assert 'S67. reviewer stage bounds both remote HEAD lookup and fetch' \
+  '(( rc == 0 )) && [[ "$(net_deadlines)" -ge "$((before_deadlines + 2))" && "$(git -C "$GIT_HOME/books" rev-parse HEAD)" == "$network_sha" ]]'
+echo "git_hub_root=$ROOT" >> "$CONF"; unset GATE_HOST_CONF
+git -C "$GIT_HOME/books" reset -q --hard "$network_sha"
+git -C "$GIT_HOME/books" remote add origin git-hub:books.git
+before_deadlines=$(net_deadlines 20); clib 0 hub_remote_ensure books acme/books "$GIT_HOME/books"; rc=$?
+assert 'S68. worker hub probe is noninteractive and retains its shorter deadline' \
+  '(( rc == 0 )) && [[ "$(net_deadlines 20)" -gt "$before_deadlines" ]] && grep -q "OK.*books: origin is the hub" "$TMP/out"'
+# A real TERM-ignoring Git+child pair proves KILL escalation, lock release and retry.
+ctouch src/network-stall.py; stalled_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ccli release
+net_report="$TMP/network-result.json"
+env PATH="$BIN:/usr/bin:/bin" HOME="$HH" HOST_CONF="$CONF" KIT_LOG_DIR="$SL" \
+  python3 "$KIT_DIR/tests/git-hub-gate-timeout.py" "$stalled_sha" "$net_report" > "$TMP/out" 2>&1; net_probe_rc=$?
+[[ ! -f "$net_report" ]] || { printf 'git-hub timeout: '; cat "$net_report"; echo; } > "$TMP/out"
+assert 'S69. stalled gate push ends by the server deadline rather than the test deadline' \
+  '(( net_probe_rc == 0 )) && metrics_true "$net_report" started server_bounded'
+assert 'S70. timeout terminates upstream children, frees the lock and preserves the request' \
+  'metrics_true "$net_report" started server_bounded children_dead lock_free request_kept'
+assert 'S71. timed-out verdict retries idempotently and forwards exactly the reviewed sha' \
+  'metrics_true "$net_report" request_kept retry_ok exact_sha'
+rm -f "$RS/books.request" "$RS/books.lease"
+# A cooperative stall takes timeout's normal exit-124 path, not KILL escalation.
+ctouch src/network-timeout-log.py; log_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ccli release
+timeout_report="$TMP/network-timeout-result.json"
+env PATH="$BIN:/usr/bin:/bin" HOME="$HH" HOST_CONF="$CONF" KIT_LOG_DIR="$SL" \
+  python3 "$KIT_DIR/tests/git-hub-gate-timeout.py" "$log_sha" "$timeout_report" cooperative > "$TMP/out" 2>&1; timeout_probe_rc=$?
+[[ ! -f "$timeout_report" ]] || { printf 'git-hub timeout: '; cat "$timeout_report"; echo; } > "$TMP/out"
+assert 'S83. exit 124 logs one timeout outcome and leaves the gate verdict retryable' \
+  '(( timeout_probe_rc == 0 )) && metrics_true "$timeout_report" started server_bounded exit_124 timeout_logged lock_free request_kept retry_ok exact_sha'
+rm -f "$RS/books.request" "$RS/books.lease"
+# Retry success is isolated from transport-policy mutants in the following cases.
+git -C "$GIT_HOME/books" push -q "$GH/acme/books.git" main
+
+# F2: kill at the request rename, after publishing a whole lease.
+cat > "$BIN/mv" <<'S'
+#!/bin/bash
+if [[ -e "$TMP/crash-request-rename" && "${@: -1}" == "$HOME/.local/state/git-hub/release/books.request" ]]; then
+  touch "$TMP/request-rename-started"
+  /bin/sleep 60
+fi
+exec /usr/bin/mv "$@"
+S
+chmod +x "$BIN/mv"
+queue_base_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+ctouch src/crash-queue.py; crash_sha=$(git -C "$GIT_HOME/books" rev-parse HEAD)
+queue_report="$TMP/queue-result.json"
+env PATH="$BIN:/usr/bin:/bin" HOME="$HH" HOST_CONF="$CONF" KIT_LOG_DIR="$SL" \
+  python3 "$KIT_DIR/tests/git-hub-queue-stop.py" "$crash_sha" "$queue_report" > "$TMP/out" 2>&1; queue_probe_rc=$?
+assert 'S72. SIGKILL between lease and request renames recovers the missing request immediately' \
+  '(( queue_probe_rc == 0 )) && metrics_true "$queue_report" checkpoint_seen lease_only had_temp replay_ok request_valid pending_visible'
+assert 'S73. recovery preserves the lease attempt and sweeps abandoned queue temp files' \
+  'metrics_true "$queue_report" lease_unchanged temps_swept'
+# Mismatched headers must recover too, without replacing the active lease.
+lease_before=$(sha256sum "$RS/books.lease")
+printf 'unknown main %s %s\nwrong request\n' "$network_sha" "$crash_sha" > "$RS/books.request"
+ccli release
+assert 'S74. mismatched request is rebuilt without consuming a lease attempt' \
+  '[[ "$(sha256sum "$RS/books.lease")" == "$lease_before" && "$(head -1 "$RS/books.request")" == "books main $queue_base_sha $crash_sha" ]] && grep -q "Release review: books" "$RS/books.request"'
+# A second-issuance crash must recover try two, not become stuck without delivery.
+read -r _ _ owner sent tries < "$RS/books.lease"
+echo "$crash_sha $(( $(cat "$TMP/date-epoch") + 21600 )) $owner $((sent + 1)) 2" > "$RS/books.lease"
+rm -f "$RS/books.request"
+second_report="$TMP/second-queue-result.json"
+env PATH="$BIN:/usr/bin:/bin" HOME="$HH" HOST_CONF="$CONF" KIT_LOG_DIR="$SL" \
+  python3 "$KIT_DIR/tests/git-hub-queue-stop.py" "$crash_sha" "$second_report" > "$TMP/out" 2>&1; queue_probe_rc=$?
+# A restart after the old deadline must repair the undelivered pair too.
+read -r _ _ owner sent tries < "$RS/books.lease"
+echo "$crash_sha 1 $owner $sent $tries" > "$RS/books.lease"; rm -f "$RS/books.request"
+ccli release
+expired_pair_recovered=0
+if [[ -s "$RS/books.request" && ! -e "$RS/books.stuck" && "$(cut -d" " -f5 "$RS/books.lease")" == 2 && "$(cut -d" " -f4 "$RS/books.lease")" == "$sent" && "$(cut -d" " -f2 "$RS/books.lease")" -gt "$(cat "$TMP/date-epoch")" ]]; then expired_pair_recovered=1; fi
+assert 'S75. interrupted reissue recovers without a third attempt or a stuck sha' \
+  '(( queue_probe_rc == 0 )) && metrics_true "$second_report" checkpoint_seen request_valid lease_unchanged attempt_preserved attempt_two pending_visible temps_swept && [[ "$expired_pair_recovered" == 1 && ! -e "$RS/books.stuck" ]]'
+
+# F3: start from a valid independent queue even when F2 recovery is removed.
+rm -f "$RS/books.request" "$RS/books.lease" "$RS/books.stuck"
+ccli release
+# Held queues stay on disk but never reach the reviewer relay.
+gate pending; hold_was_open=$(grep -c "^=== books $crash_sha " "$TMP/out")
+hold_lease=$(sha256sum "$RS/books.lease"); hold_request=$(sha256sum "$RS/books.request")
+hold_sends=$(grep -c '^Release review: books ' "$TMP/relay.calls")
+echo git_hub_hold=books >> "$CONF"
+gate pending; cp "$TMP/out" "$TMP/pending"; ccli relay
+assert 'S76. pending and relay suppress held repos without changing their queue state' \
+  '[[ "$hold_was_open" == 1 && "$(sha256sum "$RS/books.lease")" == "$hold_lease" && "$(sha256sum "$RS/books.request")" == "$hold_request" && "$(grep -c "^Release review: books " "$TMP/relay.calls")" == "$hold_sends" ]] && ! grep -q "^=== books " "$TMP/pending"'
+after_hold_sends=$(grep -c '^Release review: books ' "$TMP/relay.calls")
+echo git_hub_hold= >> "$CONF"
+gate pending; cp "$TMP/out" "$TMP/pending"; ccli relay; ccli relay
+assert 'S77. unhold advertises the preserved issue and relays it once' \
+  'grep -q "^=== books $crash_sha " "$TMP/pending" && [[ "$(sha256sum "$RS/books.lease")" == "$hold_lease" && "$(sha256sum "$RS/books.request")" == "$hold_request" && "$(grep -c "^Release review: books " "$TMP/relay.calls")" == "$((after_hold_sends + 1))" ]]'
+
+# B3-03: exercise real sidecar locks at both shared SSH files. Focused runs
+# avoid the real 30-second timeout probes unless their assertions are selected.
+for lock_case in 'S79 timeout authorized_keys' 'S80 timeout config' 'S81 sequence authorized_keys' 'S82 sequence config'; do
+  read -r lock_id lock_scenario lock_file <<< "$lock_case"
+  if [[ -n "${GIT_HUB_ASSERT_ONLY:-}" && ",${GIT_HUB_ASSERT_ONLY}," != *",$lock_id,"* ]]; then continue; fi
+  lock_report="$TMP/$lock_id-lock.json"
+  env PATH="$BIN:/usr/bin:/bin" HOME="$HH" HOST_CONF="$CONF" KIT_LOG_DIR="$SL" \
+    python3 "$KIT_DIR/tests/git-hub-block-lock.py" "$lock_scenario" "$lock_file" "$lock_report" > "$TMP/out" 2>&1; lock_probe_rc=$?
+  if (( lock_probe_rc != 0 )); then cat "$TMP/out"; fi
+  if [[ "$lock_scenario" == timeout ]]; then
+    assert "$lock_id. $lock_file writer fails loudly within its sidecar lock bound" \
+      '(( lock_probe_rc == 0 )) && metrics_true "$lock_report" failed bounded loud unchanged no_temp stable_sidecar lock_released check_readonly'
+  else
+    assert "$lock_id. $lock_file writers serialize the read through rename and preserve both blocks" \
+      '(( lock_probe_rc == 0 )) && metrics_true "$lock_report" waited_before_read rename_seen held_through_rename success both_blocks stable_sidecar mode_600 lock_released check_readonly'
+  fi
+done

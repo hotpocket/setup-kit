@@ -13,6 +13,20 @@ GIT_HUB_ROOT="$(conf_get git_hub_root /srv/git)"
 GIT_HUB_UPSTREAM_BASE="$(conf_get git_hub_upstream_base git@github.com:)"
 GIT_HUB_TOKEN_FILE="$(conf_get git_hub_forward_token "$HOME/.config/setup-kit/hub-forward-token" | sed "s|^~|$HOME|")"
 
+# Every Git network operation has both protocol limits and a whole-process
+# deadline. Timeout signals Git's process group; children never own our lock.
+# shellcheck disable=SC2034 # Shared with the CLI that sources this library.
+GIT_HUB_NETWORK_TIMEOUT=120
+hub_network_git() {  # <deadline seconds> <git args...>
+  local seconds="$1"; shift
+  GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=60 \
+  GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes -o ConnectTimeout=20" \
+    hub_timeout --kill-after=10 "$seconds" git "$@" 9>&-
+}
+# Ubuntu 26.04's `timeout` is uutils', which leaves the command's children (ssh, the https helper) running past the
+# deadline; GNU's, installed beside it as gnutimeout, signals the whole process group. Prefer GNU wherever it exists.
+hub_timeout() { if command -v gnutimeout >/dev/null 2>&1; then gnutimeout "$@"; else timeout "$@"; fi; }
+
 # hub_each <fn>: fn <name> <owner/repo> <clone dir> for every git_hub_repos entry
 hub_each() {
   local e slug path
@@ -211,7 +225,7 @@ hub_remote_ensure() {
     else git -C "$clone" remote add origin "$want"; fi
     log "$name: origin → $want (was ${cur:-unset}; kept as remote github)"
   fi
-  if timeout 20 git -C "$clone" ls-remote origin >/dev/null 2>&1; then
+  if hub_network_git 20 -C "$clone" ls-remote origin >/dev/null 2>&1; then
     ok "$name: origin is the hub ($want)"
   else
     warn "git hub: $name — the hub does not answer for $want (key not in its pushers, repo missing, or unreachable)"
@@ -273,13 +287,20 @@ WantedBy=timers.target"
 
 # Replace one marked block, preserving every unrelated line. Temp and rename
 # are beside the target, so readers never see a partial authorized_keys/config.
-hub_block_ensure() {  # <file> <begin> <end> <content> <label>
-  local file="$1" begin="$2" end="$3" content="$4" label="$5" have tmp
+hub_block_ensure() (  # <file> <begin> <end> <content> <label>
+  local file="$1" begin="$2" end="$3" content="$4" label="$5" have tmp lockfd
+  # Other SSH block writers use the same stable sidecar. This subshell keeps
+  # the lock from before the first read through rename, releasing every return.
+  if (( INSTALL )); then
+    umask 077
+    mkdir -p "$(dirname "$file")" && chmod 700 "$(dirname "$file")" || return 1
+    exec {lockfd}>>"$file.lock" || { warn "$label: cannot open $file.lock; fix permissions and retry" >&2; return 1; }
+    flock -x -w 30 "$lockfd" || { warn "$label: timed out waiting for $file.lock; retry install" >&2; return 1; }
+  fi
   have="$(sed -n "\|^$begin\$|,\|^$end\$|p" "$file" 2>/dev/null)"
   [[ "$have" == "$content" ]] && { ok "$label current"; return 0; }
   warn "$label missing or drifted"
   (( INSTALL )) || return 0
-  mkdir -p "$(dirname "$file")"; chmod 700 "$(dirname "$file")"
   tmp="$(mktemp "$file.tmp.XXXXXX")" || return 1
   # Read content on a separate fd; awk -v would reinterpret backslashes in keys/options.
   if [[ -f "$file" ]]; then
@@ -293,7 +314,7 @@ hub_block_ensure() {  # <file> <begin> <end> <content> <label>
   else printf '%s\n' "$content" > "$tmp"; fi
   chmod 600 "$tmp" && mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
   log "$label reconciled"
-}
+)
 
 hub_reviewers_ensure() {
   local reviewers; reviewers="$(conf_get git_hub_reviewers '' | sed "s|^~|$HOME|")"
@@ -350,7 +371,7 @@ Host git-hub-gate
   IdentityAgent none
   StrictHostKeyChecking accept-new
 $end"
-  hub_block_ensure "$HOME/.ssh/config" "$begin" "$end" "$want" 'git-hub gate alias'
+  hub_block_ensure "$HOME/.ssh/config" "$begin" "$end" "$want" 'git-hub gate alias' || return 1
   hub_cli_ensure
   hub_relay_units_ensure
 }
