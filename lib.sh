@@ -183,9 +183,16 @@ group_on() { [[ "$(conf_get "group_${1//-/_}" no)" == yes ]]; }
 # reach=tailnet|ssh: how this worker is reached (proxmox_setup_plan docs/router.md). ssh = an agent VM behind its
 # router, reached by ssh through it: no tailscale at all, since a joined daemon is a path around the router.
 # Only an absent key defaults to tailnet. An explicit invalid value is unsafe.
+# Parsed here on its own terms, the same way verify.sh parses it (tests/test-reach.sh RR2): the value after
+# `reach=` up to any `#`, outer whitespace (spaces, tabs) trimmed, one pair of matching quotes removed.
 reach_mode() {
-  local r=tailnet
-  grep -q '^reach=' "$HOST_CONF" 2>/dev/null && r="$(conf_get reach)"
+  local r=tailnet line
+  line="$(grep -E '^reach=' "$HOST_CONF" 2>/dev/null | tail -1)" || line=
+  if [[ -n "$line" ]]; then
+    r="${line#reach=}"; r="${r%%#*}"
+    r="${r#"${r%%[![:space:]]*}"}"; r="${r%"${r##*[![:space:]]}"}"
+    if [[ "$r" =~ ^\"(.*)\"$ || "$r" =~ ^\'(.*)\'$ ]]; then r="${BASH_REMATCH[1]}"; fi
+  fi
   case "$r" in
     tailnet|ssh) echo "$r" ;;
     *) fail "reach='$r' unknown; set tailnet or ssh in $HOST_CONF before provisioning" >&2; return 3 ;;
@@ -195,9 +202,10 @@ reach_mode() {
 # reach=ssh forbids either packaging route, even when its CLI is off PATH.
 # Doctor only: package removal remains the operator's action.
 tailscale_ssh_doctor() {
-  local found=0 st
-  st="$(dpkg-query -W -f='${Status}' tailscale 2>/dev/null)"
-  if [[ "$st" == "install ok installed" ]]; then
+  local found=0 st unit
+  # db:Status-Status is "installed" for a held package too ("hold ok installed"): release review 3f4bfe9 R1.
+  st="$(dpkg-query -W -f='${db:Status-Status}' tailscale 2>/dev/null)"
+  if [[ "$st" == installed ]]; then
     warn "tailscale apt package installed on a reach=ssh host"
     hint "sudo systemctl disable --now tailscaled && sudo apt-get remove -y tailscale"
     found=1
@@ -211,10 +219,41 @@ tailscale_ssh_doctor() {
     if command -v tailscale >/dev/null 2>&1; then
       warn "tailscale binary present on a reach=ssh host; no apt or snap package found"
       hint "locate $(command -v tailscale) and remove its installation before using this host"
-    else
-      ok "reach=ssh: no tailscale (reached by ssh through its router)"
+      found=1
+    fi
+    if command -v tailscaled >/dev/null 2>&1; then
+      warn "tailscaled binary present on a reach=ssh host; no apt or snap package found"
+      hint "locate $(command -v tailscaled) and remove its installation before using this host"
+      found=1
     fi
   fi
+  # A running daemon is the actual path around the router, whatever installed it (release review R3). Read-only.
+  for unit in tailscaled.service snap.tailscale.tailscaled.service; do
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+      warn "reach=ssh: tailscale daemon running ($unit)"
+      hint "sudo systemctl disable --now $unit, then remove its installation"
+      found=1
+    fi
+  done
+  # A process check that could not run is not a clean result: pgrep exits 1 for "none", anything else is no answer.
+  local prc=0
+  if ! command -v pgrep >/dev/null 2>&1; then
+    warn "reach=ssh: cannot check for a running tailscaled (pgrep missing)"
+    hint "sudo apt-get install -y procps, then rerun"
+    found=1
+  else
+    pgrep -x tailscaled >/dev/null 2>&1 || prc=$?
+    if (( prc == 0 )); then
+      warn "reach=ssh: tailscaled process running"
+      hint "find what launched it (ps -o pid,ppid,args -C tailscaled), stop it and remove its installation"
+      found=1
+    elif (( prc != 1 )); then
+      warn "reach=ssh: cannot check for a running tailscaled (pgrep exited $prc)"
+      hint "run pgrep -x tailscaled by hand and fix what it reports, then rerun"
+      found=1
+    fi
+  fi
+  (( found )) || ok "reach=ssh: no tailscale (reached by ssh through its router)"
 }
 
 # ---------------------------------------------------------------- detection

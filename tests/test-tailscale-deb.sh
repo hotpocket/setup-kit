@@ -18,7 +18,8 @@ BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/home"
 printf '#!/bin/bash\necho "snap $*" >> "%s/calls"\n[[ "$1" == list ]] && exit 1\nexit 0\n' "$TMP" > "$BIN/snap"
 printf '#!/bin/bash\n"$@"\n' > "$BIN/sudo"
 # dpkg-query: tailscale installed iff $TMP/deb exists
-printf '#!/bin/bash\n[[ "${*: -1}" == tailscale && -e "%s/deb" ]] && { echo "install ok installed"; exit 0; }\nexit 1\n' "$TMP" > "$BIN/dpkg-query"
+# answers in the format asked for, as dpkg does: ${Status} → "install ok installed", ${db:Status-Status} → "installed"
+printf '#!/bin/bash\n[[ "${*: -1}" == tailscale && -e "%s/deb" ]] || exit 1\nif [[ "$*" == *db:Status-Status* ]]; then echo installed; else echo "install ok installed"; fi\n' "$TMP" > "$BIN/dpkg-query"
 printf '#!/bin/bash\nexit 0\n' > "$BIN/flatpak"
 chmod +x "$BIN"/*
 printf 'group_apps=no\n' > "$TMP/host.conf"

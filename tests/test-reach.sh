@@ -56,17 +56,33 @@ assert "R3b. reach=ssh: tailscale not wanted, and the reason is said" \
 
 # ---- R4-R6: the doctor (03-headless) -----------------------------------------
 echo "doctor (03-headless)"
-for s in systemctl loginctl sudo lspci nvidia-smi apt-mark; do
+for s in loginctl sudo lspci nvidia-smi apt-mark; do
   printf '#!/bin/bash\ncase "$1" in get-default) echo multi-user.target;; show-user) echo yes;; is-enabled|is-active) exit 0;; esac\nexit 0\n' > "$BIN/$s"
 done
+cat > "$BIN/systemctl" <<'S'
+#!/bin/bash
+case "$1" in get-default) echo multi-user.target; exit 0 ;; esac
+if [[ "$*" == *tailscale* ]]; then
+  [[ "$*" == *is-active* && "${*: -1}" == tailscaled.service && -e "$STATE/service" ]] && exit 0
+  [[ "$*" == *is-active* && "${*: -1}" == snap.tailscale.tailscaled.service && -e "$STATE/snap-service" ]] && exit 0
+  exit 1
+fi
+exit 0
+S
+cat > "$BIN/pgrep" <<'S'
+#!/bin/bash
+[[ "$*" == '-x tailscaled' && -e "$STATE/process" ]]
+S
 printf '#!/bin/bash\necho "arn:aws:iam::1:user/pub"\nexit 0\n' > "$BIN/aws"
 printf '#!/bin/bash\n[ "$*" = "status --json" ] && printf %s "{\\n  \\"BackendState\\": \\"NeedsLogin\\"\\n}\\n"\nexit 0\n' '%s' > "$TMP/tailscale.stub"
 chmod +x "$BIN/"* "$TMP/tailscale.stub"
 # Install state is independent of CLI presence, including a snap outside PATH.
 cat > "$BIN/dpkg-query" <<'S'
 #!/bin/bash
-[[ "${*: -1}" == tailscale && -e "$STATE/deb" ]] && { echo 'install ok installed'; exit 0; }
-exit 1
+# deb = installed; deb-hold = installed and held (dpkg says "hold ok installed"; its db:Status-Status is "installed")
+[[ "${*: -1}" == tailscale ]] || exit 1
+if [[ -e "$STATE/deb" ]]; then want=install; elif [[ -e "$STATE/deb-hold" ]]; then want=hold; else exit 1; fi
+if [[ "$*" == *'db:Status-Status'* ]]; then echo installed; else echo "$want ok installed"; fi
 S
 cat > "$BIN/snap" <<'S'
 #!/bin/bash
@@ -331,6 +347,72 @@ confv reach=ssh; verify
 assert "R9-4q. verifier does not source the installer library" 'grep -q "PASS.*reach=ssh.*no tailscale" "$TMP/out"'
 
 cp "$TMP/lib-before-poison" "$KIT_DIR/lib.sh"
+
+# ---- release review 3f4bfe9 R1: a HELD apt package is installed ------------
+echo "held apt package (release review R1)"
+# doctor() rebuilds $H; the verifier needs its pyenv fixture back each time.
+pyfix() { mkdir -p "$H/.pyenv/bin" "$H/.pyenv/versions/3.12/bin"
+  printf '#!/bin/bash\ncase "$1" in global) echo system ;; versions) echo 3.12 ;; esac\nexit 0\n' > "$H/.pyenv/bin/pyenv"
+  printf '#!/bin/bash\nexit 0\n' > "$H/.pyenv/versions/3.12/bin/python"; chmod +x "$H/.pyenv/bin/pyenv" "$H/.pyenv/versions/3.12/bin/python"; }
+touch "$STATE/deb-hold"
+conf ""; snaps
+assert "RR1a. default tailnet, held apt tailscale: accepted as installed, no snap install" \
+  'grep -q "OK.*tailscale.*apt" "$TMP/out" && ! grep -q "snap install tailscale" "$CALLS"'
+conf reach=ssh; MODE=check snaps
+assert "RR1b. ssh snap doctor flags a held apt package" 'grep -q "WARN.*apt.*reach=ssh" "$TMP/out"'
+doctor
+assert "RR1c. ssh worker doctor flags a held apt package without its CLI" 'grep -q "WARN.*apt.*reach=ssh" "$TMP/out"'
+confv reach=ssh; pyfix; verify
+assert "RR1d. verifier flags a held apt package on ssh" 'grep -q "FAIL.*reach=ssh.*tailscale.*apt" "$TMP/out"'
+confv "" no; pyfix; verify
+assert "RR1e. default workstation verifier accepts a held apt package instead of the snap" 'grep -q "PASS.*tailscale.*apt" "$TMP/out" && ! grep -q "FAIL.*snap: tailscale" "$TMP/out"'
+rm -f "$STATE/deb-hold"
+
+# ---- release review 3f4bfe9 R2: installer and verifier read reach alike ----
+echo "reach parsing parity (release review R2)"
+for v in 'reach= ssh' $'reach=ssh\t# agentnet' "reach= 'ssh'  # quoted"; do
+  conf "$v"; wanted
+  assert "RR2a. installer reads [$v] as ssh" '! grep -qx tailscale "$TMP/out" && grep -q "reach=ssh" "$TMP/out"'
+  confv "$v"; pyfix; verify; rc=$?
+  assert "RR2b. verifier reads [$v] as ssh" '[[ "$rc" == 0 ]] && grep -q "PASS.*reach=ssh.*no tailscale" "$TMP/out"'
+done
+for v in 'reach=s sh' 'reach=ssh tailnet' "reach=\"'ssh'\"" "reach='\"ssh\"'"; do
+  conf "$v"; wanted; rc=$?
+  assert "RR2c. installer refuses [$v]" '[[ "$rc" != 0 ]] || grep -q "FAIL.*reach" "$TMP/out"'
+  confv "$v"; pyfix; verify; rc=$?
+  assert "RR2d. verifier refuses [$v]" '[[ "$rc" != 0 ]] && grep -q "FAIL.*reach" "$TMP/out"'
+done
+
+# ---- release review 3f4bfe9 R3: the doctor sees a daemon-only host -------------
+echo "daemon-only host (release review R3)"
+conf reach=ssh
+cp "$TMP/tailscale.stub" "$BIN/tailscaled"; doctor
+assert "RR3a. worker doctor flags a tailscaled binary without the CLI" 'grep -q "WARN.*tailscaled.*reach=ssh" "$TMP/out" && ! grep -q "OK.*no tailscale" "$TMP/out"'
+MODE=check snaps
+assert "RR3b. snap doctor flags a tailscaled binary without the CLI" 'grep -q "WARN.*tailscaled.*reach=ssh" "$TMP/out"'
+rm -f "$BIN/tailscaled"
+for marker in service snap-service process; do
+  touch "$STATE/$marker"; doctor
+  assert "RR3c. worker doctor flags running $marker, removal named, nothing removed" \
+    'grep -q "WARN.*reach=ssh.*running" "$TMP/out" && ! grep -q "OK.*no tailscale" "$TMP/out" && ! grep -qE "systemctl (stop|disable)|kill" "$CALLS"'
+  MODE=check snaps
+  assert "RR3d. snap doctor flags running $marker" 'grep -q "WARN.*reach=ssh.*running" "$TMP/out"'
+  rm -f "$STATE/$marker"
+done
+doctor
+assert "RR3e. clean ssh host: OK, no warning" 'grep -q "OK.*reach=ssh.*no tailscale" "$TMP/out" && ! grep -q "WARN" "$TMP/out"'
+# A process check that could not run is not a clean result (Sol review of the fix, F2).
+mv "$BIN/pgrep" "$TMP/pgrep.stub"; [[ -L "$NOTS/pgrep" ]] && mv "$NOTS/pgrep" "$TMP/pgrep.real"
+doctor
+assert "RR3f. no pgrep: the doctor says the process check could not run, never OK" 'grep -q "WARN.*pgrep missing" "$TMP/out" && ! grep -q "OK.*no tailscale" "$TMP/out"'
+pyfix; verify
+assert "RR3g. no pgrep: the verifier fails the process check, never PASS clean" 'grep -q "FAIL.*pgrep missing" "$TMP/out" && ! grep -q "PASS.*no tailscale" "$TMP/out"'
+printf '#!/bin/bash\nexit 3\n' > "$BIN/pgrep"; chmod +x "$BIN/pgrep"
+doctor
+assert "RR3h. pgrep fails (status 3): the doctor says so, never OK" 'grep -q "WARN.*pgrep" "$TMP/out" && ! grep -q "OK.*no tailscale" "$TMP/out"'
+pyfix; verify
+assert "RR3i. pgrep fails (status 3): the verifier fails the check" 'grep -q "FAIL.*pgrep" "$TMP/out"'
+mv "$TMP/pgrep.stub" "$BIN/pgrep"; [[ -e "$TMP/pgrep.real" ]] && mv "$TMP/pgrep.real" "$NOTS/pgrep"
 
 # ---- R9-8: operator instructions and worker template -----------------------
 echo "worker reach documentation"

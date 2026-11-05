@@ -58,10 +58,13 @@ dflt() { local v; v="$(cv "$1")"; echo "${v:-$CFG_DEF}"; }
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 [[ -f "$CONF" ]] || { echo "no $CONF — nothing to verify against"; exit 1; }
 
-# Parse reach here independently. Only an absent key keeps the tailnet default.
+# Parse reach here independently (no lib.sh), by the same rule as lib.sh reach_mode (tests/test-reach.sh RR2):
+# the last `reach=` line's value up to any `#`, outer spaces and tabs trimmed, one pair of matching quotes removed.
+# Only an absent key keeps the tailnet default.
 REACH=tailnet
 if grep -q '^reach=' "$CONF"; then
-  REACH="$(cv reach | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+  REACH="$(grep '^reach=' "$CONF" | tail -1 | sed -E 's/^reach=//; s/#.*//; s/^[[:space:]]+//; s/[[:space:]]+$//' \
+           | sed -E 's/^"(.*)"$/\1/; t; s/^'"'"'(.*)'"'"'$/\1/')"   # one pair only: `t` skips the second
 fi
 case "$REACH" in
   tailnet|ssh) ;;
@@ -74,7 +77,7 @@ esac
 # phase is skipped. Check packages, binaries and running daemons separately.
 if [[ "$REACH" == ssh ]]; then
   TS_DRIFT=0
-  if [[ "$(dpkg-query -W -f='${Status}' tailscale 2>/dev/null)" == 'install ok installed' ]]; then
+  if [[ "$(dpkg-query -W -f='${db:Status-Status}' tailscale 2>/dev/null)" == installed ]]; then   # held counts too
     failv "reach=ssh: tailscale apt package installed; sudo systemctl disable --now tailscaled && sudo apt-get remove -y tailscale"
     TS_DRIFT=1
   fi
@@ -92,9 +95,20 @@ if [[ "$REACH" == ssh ]]; then
       TS_DRIFT=1
     fi
   done
-  if pgrep -x tailscaled >/dev/null 2>&1; then
-    failv "reach=ssh: tailscale daemon process running; identify its launcher, stop it and remove its installation"
+  # pgrep: 0 = running, 1 = none; missing or any other status means the check did not run (not clean).
+  PRC=0
+  if ! command -v pgrep >/dev/null 2>&1; then
+    failv "reach=ssh: cannot check for a running tailscaled (pgrep missing); sudo apt-get install -y procps, then rerun"
     TS_DRIFT=1
+  else
+    pgrep -x tailscaled >/dev/null 2>&1 || PRC=$?
+    if (( PRC == 0 )); then
+      failv "reach=ssh: tailscale daemon process running; identify its launcher, stop it and remove its installation"
+      TS_DRIFT=1
+    elif (( PRC != 1 )); then
+      failv "reach=ssh: cannot check for a running tailscaled (pgrep exited $PRC)"
+      TS_DRIFT=1
+    fi
   fi
   (( TS_DRIFT )) || pass "reach=ssh: no tailscale package, binary or daemon"
 fi
@@ -204,7 +218,7 @@ fi
   name="${line%% *}"
   [[ "$REACH" == ssh && "$name" == tailscale ]] && continue
   [[ -n "$grp" ]] && ! gon "$grp" && continue
-  if [[ "$name" == tailscale && "$(dpkg-query -W -f='${Status}' tailscale 2>/dev/null)" == "install ok installed" ]]; then
+  if [[ "$name" == tailscale && "$(dpkg-query -W -f='${db:Status-Status}' tailscale 2>/dev/null)" == installed ]]; then
     pass "tailscale: from apt, not snap (one tailscaled only)"; continue
   fi
   snap list "$name" >/dev/null 2>&1 && pass "snap: $name" || failv "snap: $name"
