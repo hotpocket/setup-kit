@@ -324,7 +324,7 @@ else
 fi
 
 # A workstation is also a hub client when git_hub is set.
-hub_client_ensure
+hub_client_ensure || exit 1
 
 # The review box needs no local bare repos or hub system user.
 if [[ -n "$(conf_get git_hub_gate '')" ]]; then

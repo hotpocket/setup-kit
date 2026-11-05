@@ -21,7 +21,9 @@
 #   WS. workstation (07-components): the same client routing when git_hub is
 #      set, independent of the hub server and review relay flags; check reports
 #      alias/origin drift without writes; install preserves github, skips absent
-#      clones, probes the hub, and never sets pushurl.
+#      clones, probes the hub, and never sets pushurl. Failed key/alias setup or
+#      a conflicting effective SSH hostname refuses routing and fails the phase;
+#      symlinked SSH config is reconciled through its target under the same lock.
 #   C. git-hub CLI: status names unforwarded branches; forward pushes to the
 #      upstream and clears them; stage refuses a dirty clone, fast-forwards a
 #      clean one and PRINTS the deploy command without running it.
@@ -78,6 +80,12 @@ S
 cat > "$BIN/ssh" <<'S'
 #!/bin/bash
 echo "SSH $*" >> "$TMP/ssh.calls"
+for arg in "$@"; do
+  if [[ "$arg" == -G ]]; then
+    [[ ! -e "$TMP/ws-ssh-g-fail" ]] || exit 255
+    exec /usr/bin/ssh -F "$HOME/.ssh/config" "$@"
+  fi
+done
 cmd="${@: -1}"
 case "$cmd" in git-upload-pack*|git-receive-pack*) cd "$ROOT" && eval "exec $cmd" ;; esac
 exit 128

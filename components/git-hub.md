@@ -106,6 +106,13 @@ the old GitHub URL kept as remote `github` (fetch still works with a read-only P
 → probe with `git ls-remote origin`. Missing clones are named and skipped.
 `check` reports missing or drifted aliases and origins without changing them;
 `install` reconciles them. Neither sets a `pushurl`.
+Failed key or alias setup fails the phase before changing any remote.
+The client checks `ssh -G git-hub` before routing or probing. If its effective
+hostname differs from `git_hub`, fix earlier `Host`, `Match`, or `Include`
+settings and retry. Check mode still lists origin drift without probing that alias.
+A symlinked SSH config keeps its link; the writer reconciles its resolved target
+with an atomic rename under the original `~/.ssh/config.lock`. An unavailable
+target fails the phase and leaves remotes alone.
 The kit never pushes; seeding the hub is the first `git push origin <branch>`
 from the client, named in the handoff.
 

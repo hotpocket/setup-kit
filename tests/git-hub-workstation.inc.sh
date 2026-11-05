@@ -79,3 +79,96 @@ assert 'WS14. relay enabled with git_hub unset leaves clone remotes alone' \
 wsconf git_hub=hub-a.lan component_git_hub=yes git_hub_gate=review.lan; MODE=install runws
 assert 'WS15. server and relay enabled together still reconcile the hub client' \
   '[[ "$(git --git-dir="$WS_SERVER/books.git" config core.bare)" == true && "$(wsurl books)" == git-hub:books.git ]] && grep -q "HostName hub-a.lan" "$WS_SSH" && grep -q "^Host git-hub-gate$" "$WS_SSH"'
+
+# Each refusal starts with unrouted clones so a previous install cannot hide it.
+wsfresh() {
+  WS_HOME="$TMP/workstation-$1/home"; WS_CLONES="$TMP/workstation-$1/clones"
+  WS_SSH="$WS_HOME/.ssh/config"
+  mkdir -p "$WS_HOME/.ssh" "$WS_CLONES/site"
+  git init -q "$WS_CLONES/books"; git init -q "$WS_CLONES/site/wbt"
+  git -C "$WS_CLONES/books" remote add origin "file://$GH/acme/books.git"
+  git -C "$WS_CLONES/site/wbt" remote add origin "file://$GH/acme/wbt.git"
+  wsconf git_hub=hub-a.lan
+}
+wsremotes() { sha256sum "$WS_CLONES/books/.git/config" "$WS_CLONES/site/wbt/.git/config"; }
+wseffective() { /usr/bin/ssh -F "$WS_SSH" -G git-hub 2>/dev/null | awk '$1 == "hostname" { print $2; exit }'; }
+cat > "$BIN/flock" <<'S'
+#!/bin/bash
+[[ ! -e "$TMP/ws-flock-fail" ]] || exit 1
+if [[ -e "$TMP/ws-flock-fast" ]]; then exec /usr/bin/flock -n "${@: -1}"; fi
+exec /usr/bin/flock "$@"
+S
+cat > "$BIN/ssh-keygen" <<'S'
+#!/bin/bash
+[[ ! -e "$TMP/ws-key-fail" ]] || exit 1
+exec /usr/bin/ssh-keygen "$@"
+S
+chmod +x "$BIN/flock" "$BIN/ssh-keygen"
+
+wsfresh lock-failure
+# The existing alias resolves correctly. Effective-host checking must not hide
+# a writer failure just because this previous configuration is still usable.
+printf 'Host git-hub\n  HostName hub-a.lan\n' > "$WS_SSH"
+WS_CONFIG_BEFORE="$(sha256sum "$WS_SSH")"; WS_REMOTES="$(wsremotes)"; : > "$TMP/ssh.calls"
+touch "$TMP/ws-flock-fail"; MODE=install runws; WS_RC=$?; rm "$TMP/ws-flock-fail"
+assert 'WS16. failed alias locking reports a failed workstation phase' \
+  '(( WS_RC != 0 )) && grep -q "lock.*retry install" "$TMP/out" && grep -q "FAIL.*git hub" "$TMP/out"'
+assert 'WS17. failed alias setup changes no remote and starts no hub probe' \
+  '[[ "$(sha256sum "$WS_SSH")" == "$WS_CONFIG_BEFORE" && "$(wsremotes)" == "$WS_REMOTES" ]] && ! grep -q "git-upload-pack" "$TMP/ssh.calls"'
+
+wsfresh key-failure; WS_REMOTES="$(wsremotes)"
+touch "$TMP/ws-key-fail"; MODE=install runws; WS_RC=$?; rm "$TMP/ws-key-fail"
+assert 'WS18. failed client key generation stops the phase before any route' \
+  '(( WS_RC != 0 )) && [[ ! -e "$WS_SSH" && "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "FAIL.*git hub" "$TMP/out"'
+
+wsfresh unmanaged-alias
+printf 'Host git-hub\n  HostName old-hub.lan\n  User previous\n' > "$WS_SSH"
+WS_EFFECTIVE_BEFORE="$(wseffective)"; WS_REMOTES="$(wsremotes)"
+MODE=install runws; WS_RC=$?
+assert 'WS19. real OpenSSH sees an earlier alias win and install refuses routing' \
+  '[[ "$WS_EFFECTIVE_BEFORE" == old-hub.lan && "$(wseffective)" == old-hub.lan && "$(wsremotes)" == "$WS_REMOTES" ]] && (( WS_RC != 0 )) && grep -q "WARN.*effective.*old-hub.lan.*hub-a.lan.*fix" "$TMP/out"'
+WS_BEFORE="$(wsstate)"; runws; WS_RC=$?
+assert 'WS20. check reports the effective alias conflict without writes' \
+  '(( WS_RC != 0 )) && [[ "$(wsstate)" == "$WS_BEFORE" ]] && grep -q "WARN.*effective.*old-hub.lan.*fix" "$TMP/out"'
+git -C "$WS_CLONES/books" remote set-url origin git-hub:books.git
+git -C "$WS_CLONES/site/wbt" remote set-url origin git-hub:wbt.git
+WS_BEFORE="$(wsstate)"; : > "$TMP/ssh.calls"; runws; WS_RC=$?
+assert 'WS21. an invalid effective alias is never probed even for already routed clones' \
+  '(( WS_RC != 0 )) && [[ "$(wsstate)" == "$WS_BEFORE" ]] && ! grep -q "git-upload-pack" "$TMP/ssh.calls"'
+
+wsfresh query-failure; WS_REMOTES="$(wsremotes)"
+touch "$TMP/ws-ssh-g-fail"; MODE=install runws; WS_RC=$?; rm "$TMP/ws-ssh-g-fail"
+assert 'WS22. failed effective SSH evaluation refuses every remote change' \
+  '(( WS_RC != 0 )) && [[ "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "WARN.*effective.*fix" "$TMP/out"'
+
+wsfresh symlink-config; mkdir -p "$WS_HOME/dotfiles"
+WS_SOURCE="$WS_HOME/dotfiles/ssh-config"
+printf '# preserved admin settings\nHost admin\n  HostName admin.lan\n' > "$WS_SOURCE"
+ln -s ../dotfiles/ssh-config "$WS_SSH"
+touch "$WS_SSH.lock"; WS_LOCK_INODE="$(stat -c %i "$WS_SSH.lock")"
+MODE=install runws; WS_RC=$?
+assert 'WS23. symlinked SSH config keeps the link and reconciles its source before routing' \
+  '(( WS_RC == 0 )) && [[ -L "$WS_SSH" && "$(readlink "$WS_SSH")" == ../dotfiles/ssh-config && "$(stat -c %a "$WS_SOURCE")" == 600 && "$(wseffective)" == hub-a.lan && "$(wsurl books)" == git-hub:books.git && "$(wsurl books github)" == "file://$GH/acme/books.git" && "$(stat -c %i "$WS_SSH.lock")" == "$WS_LOCK_INODE" ]] && grep -q "HostName hub-a.lan" "$WS_SOURCE" && grep -q "HostName admin.lan" "$WS_SOURCE"'
+WS_BEFORE="$(wsstate)"; MODE=install runws; WS_RC=$?; runws; WS_CHECK_RC=$?
+assert 'WS24. symlink reconciliation remains unchanged on repeated install and check' \
+  '(( WS_RC == 0 && WS_CHECK_RC == 0 )) && [[ -L "$WS_SSH" && "$(wsstate)" == "$WS_BEFORE" ]]'
+
+# Real lock contention on the original sidecar, shortened only by this fixture.
+wsfresh symlink-lock; mkdir -p "$WS_HOME/dotfiles"
+WS_SOURCE="$WS_HOME/dotfiles/ssh-config"; printf '# admin\n' > "$WS_SOURCE"
+ln -s ../dotfiles/ssh-config "$WS_SSH"
+WS_SOURCE_BEFORE="$(sha256sum "$WS_SOURCE")"; WS_REMOTES="$(wsremotes)"
+touch "$TMP/ws-flock-fast"
+{
+  /usr/bin/flock -x 8
+  MODE=install runws; WS_RC=$?
+} 8> "$WS_SSH.lock"
+rm "$TMP/ws-flock-fast"
+assert 'WS25. a symlinked config still honors the original config.lock before target writes' \
+  '(( WS_RC != 0 )) && [[ -L "$WS_SSH" && "$(sha256sum "$WS_SOURCE")" == "$WS_SOURCE_BEFORE" && "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "config.lock.*retry install" "$TMP/out"'
+
+wsfresh dangling-link; ln -s ../missing/config "$WS_SSH"; WS_REMOTES="$(wsremotes)"
+MODE=install runws; WS_RC=$?
+assert 'WS26. an unresolved config symlink refuses routing and preserves the link' \
+  '(( WS_RC != 0 )) && [[ -L "$WS_SSH" && ! -e "$WS_SSH" && "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "WARN.*symlink.*fix" "$TMP/out"'
+rm "$BIN/flock" "$BIN/ssh-keygen"

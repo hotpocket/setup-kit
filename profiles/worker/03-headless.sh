@@ -246,7 +246,7 @@ fi
 # clone's origin is git-hub:<name>.git. Moving the hub = change git_hub, re-run.
 # The kit never pushes; the first push from each clone seeds the hub.
 source "$KIT_DIR/components/git-hub/lib.sh"
-hub_client_ensure
+hub_client_ensure || exit 1
 
 if [[ -n "$(conf_get git_hub_gate '')" ]]; then
   source "$KIT_DIR/components/git-hub/lib.sh"

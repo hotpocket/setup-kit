@@ -164,15 +164,27 @@ hub_user_ensure() {
 # ------------------------------------------------------------------ client side
 # Same routing for workers and workstations, independent of server/relay flags.
 hub_client_ensure() {
-  local host; host="$(conf_get git_hub '')"
+  local host effective GIT_HUB_CLIENT_READY=1; host="$(conf_get git_hub '')"
   section "git hub ($MODE)"
   if [[ -z "$host" ]]; then
     ok "git hub: off (git_hub unset) — remotes left as they are"
     return 0
   fi
-  hub_alias_ensure "$host"
+  hub_alias_ensure "$host" || {
+    fail "git hub client: alias setup failed; fix the warning above and retry install"
+    return 1
+  }
+  # OpenSSH uses the first matching value, including earlier unmanaged blocks.
+  if ! effective="$(ssh -G git-hub 2>/dev/null | awk '$1 == "hostname" {print $2}')"; then effective=''; fi
+  if [[ "$effective" != "$host" ]]; then
+    warn "git hub: effective git-hub HostName is ${effective:-unavailable}, want $host; fix earlier Host/Match/Include settings in ~/.ssh/config, then retry"
+    fail "git hub client: SSH configuration is unusable; remotes unchanged"
+    GIT_HUB_CLIENT_READY=0
+    (( INSTALL )) && return 1
+  fi
   [[ -z "$GIT_HUB_REPOS" ]] && warn "git hub: git_hub_repos empty — no clone routes through $host"
-  hub_each hub_remote_ensure
+  # Check still lists origin drift, but never probes an invalid effective alias.
+  hub_each hub_remote_ensure && (( GIT_HUB_CLIENT_READY ))
 }
 
 GIT_HUB_KEY="$HOME/.ssh/git_hub"
@@ -192,8 +204,8 @@ hub_alias_ensure() {
   else
     warn "git hub key ${GIT_HUB_KEY/#$HOME/\~} missing"
     if (( INSTALL )); then
-      mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
-      do_or_say ssh-keygen -q -t ed25519 -N '' -C "git-hub:$(hostname)" -f "$GIT_HUB_KEY"
+      mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh" || return 1
+      do_or_say ssh-keygen -q -t ed25519 -N '' -C "git-hub:$(hostname)" -f "$GIT_HUB_KEY" || return 1
     fi
   fi
   [[ -f "$GIT_HUB_KEY.pub" ]] && hint "hub pushers file needs: $(cat "$GIT_HUB_KEY.pub")"
@@ -222,6 +234,7 @@ hub_remote_ensure() {
     else git -C "$clone" remote add origin "$want"; fi
     log "$name: origin → $want (was ${cur:-unset}; kept as remote github)"
   fi
+  (( ${GIT_HUB_CLIENT_READY:-1} )) || return 0
   if hub_network_git 20 -C "$clone" ls-remote origin >/dev/null 2>&1; then
     ok "$name: origin is the hub ($want)"
   else
@@ -285,7 +298,7 @@ WantedBy=timers.target"
 # Replace one marked block, preserving every unrelated line. Temp and rename
 # are beside the target, so readers never see a partial authorized_keys/config.
 hub_block_ensure() (  # <file> <begin> <end> <content> <label>
-  local file="$1" begin="$2" end="$3" content="$4" label="$5" have tmp lockfd
+  local file="$1" begin="$2" end="$3" content="$4" label="$5" have tmp lockfd resolved
   # Other SSH block writers use the same stable sidecar. This subshell keeps
   # the lock from before the first read through rename, releasing every return.
   if (( INSTALL )); then
@@ -293,6 +306,15 @@ hub_block_ensure() (  # <file> <begin> <end> <content> <label>
     mkdir -p "$(dirname "$file")" && chmod 700 "$(dirname "$file")" || return 1
     exec {lockfd}>>"$file.lock" || { warn "$label: cannot open $file.lock; fix permissions and retry" >&2; return 1; }
     flock -x -w 30 "$lockfd" || { warn "$label: timed out waiting for $file.lock; retry install" >&2; return 1; }
+  fi
+  # Lock the public path before resolving it, so all config writers share the
+  # same sidecar. Rename beside the resolved target, leaving the link intact.
+  if [[ -L "$file" ]]; then
+    if ! resolved="$(readlink -f -- "$file")" || [[ ! -f "$resolved" || ! -r "$resolved" ]]; then
+      warn "$label: symlink target unavailable; fix $file and retry install" >&2
+      return 1
+    fi
+    file="$resolved"
   fi
   have="$(sed -n "\|^$begin\$|,\|^$end\$|p" "$file" 2>/dev/null)"
   [[ "$have" == "$content" ]] && { ok "$label current"; return 0; }
