@@ -18,6 +18,10 @@
 #      install writes key + alias + re-points origin (old URL kept as `github`)
 #      and the probe reaches the hub; idempotent; CHANGING git_hub moves only the
 #      alias's HostName — the remote URLs stay put (the durability claim).
+#   WS. workstation (07-components): the same client routing when git_hub is
+#      set, independent of the hub server and review relay flags; check reports
+#      alias/origin drift without writes; install preserves github, skips absent
+#      clones, probes the hub, and never sets pushurl.
 #   C. git-hub CLI: status names unforwarded branches; forward pushes to the
 #      upstream and clears them; stage refuses a dirty clone, fast-forwards a
 #      clean one and PRINTS the deploy command without running it.
@@ -101,6 +105,11 @@ export TMP ROOT
 # The control-103 additions also run alone for focused calibration.
 if [[ "${GIT_HUB_CONTROL_ONLY:-0}" == 1 ]]; then
   source "$KIT_DIR/tests/git-hub-control.inc.sh"
+  echo "  $pass passed, $fail failed"; (( fail == 0 )); exit $?
+fi
+
+source "$KIT_DIR/tests/git-hub-workstation.inc.sh"
+if [[ "${GIT_HUB_WORKSTATION_ONLY:-0}" == 1 ]]; then
   echo "  $pass passed, $fail failed"; (( fail == 0 )); exit $?
 fi
 

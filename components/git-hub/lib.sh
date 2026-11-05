@@ -1,6 +1,6 @@
 #!/bin/bash
-# git hub — shared by the hub (07-components), the worker (03-headless §7) and
-# the git-hub CLI. Spec: components/git-hub.md. Expects lib.sh already sourced.
+# git hub — shared by workstation/worker profiles and the git-hub CLI.
+# Spec: components/git-hub.md. Expects lib.sh already sourced.
 #
 # Both sides list repos like clone_repos: owner/repo[:path]. The bare repo is
 # <basename>.git, owner/repo is its GitHub upstream, :path is where THIS host's
@@ -161,8 +161,22 @@ hub_user_ensure() {
   fi
 }
 
-# ------------------------------------------------------------------ worker side
+# ------------------------------------------------------------------ client side
+# Same routing for workers and workstations, independent of server/relay flags.
+hub_client_ensure() {
+  local host; host="$(conf_get git_hub '')"
+  section "git hub ($MODE)"
+  if [[ -z "$host" ]]; then
+    ok "git hub: off (git_hub unset) — remotes left as they are"
+    return 0
+  fi
+  hub_alias_ensure "$host"
+  [[ -z "$GIT_HUB_REPOS" ]] && warn "git hub: git_hub_repos empty — no clone routes through $host"
+  hub_each hub_remote_ensure
+}
+
 GIT_HUB_KEY="$HOME/.ssh/git_hub"
+# Keep the original marker so existing managed blocks reconcile in place.
 _HUB_BEGIN="# >>> setup-kit git-hub (03-headless; edit git_hub= in the host conf, not this block)"
 _HUB_END="# <<< setup-kit git-hub"
 

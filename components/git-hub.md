@@ -1,8 +1,9 @@
 # git-hub — a machine that holds bare repos its workers push to
 
-**Status:** opt-in (`component_git_hub=yes` on the hub; `git_hub=<host>` on a worker).
+**Status:** opt-in (`component_git_hub=yes` on the hub; `git_hub=<host>` on a worker or workstation).
 Code: `components/git-hub/` (lib, hook, `git-hub` CLI); hub side in
-`profiles/workstation/07-components.sh`, worker side in `profiles/worker/03-headless.sh` §7.
+`profiles/workstation/07-components.sh`. Both that phase and `profiles/worker/03-headless.sh` §7
+call the shared `hub_client_ensure` for client routing.
 Calibration: `tests/test-git-hub.sh`.
 
 ## Why
@@ -22,15 +23,17 @@ worker ──ssh, git-shell only──▶ hub:/srv/git/<name>.git ──human: g
 
 ## The one knob
 
-On the worker: **`git_hub=<host>`** — the hub's address. Nothing else names it.
+On a worker or workstation, `git_hub=<host>` sets the hub's address.
+Client routing, the hub server (`component_git_hub=yes`), and the review relay
+(`git_hub_gate=<host>`) are independent. Any combination can run on the same box.
 
 - Every hub-routed clone's `origin` is `git-hub:<name>.git`. `git-hub` is an ssh
   alias; its `HostName` is the only place the address lands (a managed block in
   `~/.ssh/config`, reconciled by content).
 - Moving the hub is: stand the new hub up (same `git_hub_repos`, same pushers file),
-  seed each branch with a normal fast-forward push from the old hub, change `git_hub=` on each worker,
-  re-run `worker install`. No remote URL changes, nothing in any repo changes.
-- Empty/unset = off; the worker's remotes are left alone.
+  seed each branch with a normal fast-forward push from the old hub, change `git_hub=` on each client,
+  re-run that client's profile install. No remote URL changes, nothing in any repo changes.
+- Empty/unset = off; the client's remotes are left alone.
 
 ## Knobs
 
@@ -40,8 +43,8 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
 
 | key | side | meaning |
 |---|---|---|
-| `git_hub` | worker | hub address (IP or name). The move-the-hub knob. |
-| `git_hub_repos` | both | worker: which clones route via the hub. hub: which bare repos exist. |
+| `git_hub` | client | hub address (IP or name), on a worker or workstation. The move-the-hub knob. |
+| `git_hub_repos` | both | client: which clones route via the hub. hub: which bare repos exist. |
 | `component_git_hub` | hub | `yes` provisions the hub. |
 | `git_hub_root` | hub | default `/srv/git` (the `git` user's home). |
 | `git_hub_pushers` | hub | file of public keys allowed to push, one per line; the kit renders them into the `git` user's `authorized_keys`, each prefixed `restrict`. |
@@ -96,12 +99,15 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
   - hub branches already in main are deleted. Feature branches are never merged or forwarded.
   - every outcome is one line in `~/.local/state/git-hub/release.log`.
 
-## Worker side (`03-headless` §7)
+## Client side (worker `03-headless` §7, workstation `07-components`)
 
 key → alias block → for each `git_hub_repos` clone: `origin` → `git-hub:<name>.git`,
 the old GitHub URL kept as remote `github` (fetch still works with a read-only PAT)
-→ probe with `git ls-remote origin`. The kit never pushes; seeding the hub is the
-first `git push origin <branch>` from the worker, named in the handoff.
+→ probe with `git ls-remote origin`. Missing clones are named and skipped.
+`check` reports missing or drifted aliases and origins without changing them;
+`install` reconciles them. Neither sets a `pushurl`.
+The kit never pushes; seeding the hub is the first `git push origin <branch>`
+from the client, named in the handoff.
 
 ## Not here (decided elsewhere or later)
 

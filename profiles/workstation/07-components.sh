@@ -293,9 +293,10 @@ fi
 # Bare repos a worker pushes to instead of GitHub; the human forwards and
 # deploys (components/git-hub.md). Mechanism only: which repos, which pushers
 # and which deploy command are the host conf's (the machine's role).
+source "$KIT_DIR/components/git-hub/lib.sh"
+
 if [[ "$(conf_get component_git_hub no)" == yes ]]; then
   section "git-hub ($MODE) — components/git-hub.md"
-  source "$KIT_DIR/components/git-hub/lib.sh"
   hub_user_ensure
   if [[ ! -d "$GIT_HUB_ROOT" ]]; then
     warn "hub root $GIT_HUB_ROOT missing"
@@ -322,9 +323,11 @@ else
   ok "git-hub: opt-in, currently '$(conf_get component_git_hub no)' (flip component_git_hub=yes to host bare repos)"
 fi
 
+# A workstation is also a hub client when git_hub is set.
+hub_client_ensure
+
 # The review box needs no local bare repos or hub system user.
 if [[ -n "$(conf_get git_hub_gate '')" ]]; then
-  source "$KIT_DIR/components/git-hub/lib.sh"
   hub_gate_ensure
 fi
 

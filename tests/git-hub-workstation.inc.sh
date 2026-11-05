@@ -1,0 +1,81 @@
+# shellcheck shell=bash
+# Sourced by test-git-hub.sh. Workstation profile, real Git, isolated HOME and hub.
+WS_HOME="$TMP/workstation-home"; WS_CLONES="$TMP/workstation-clones"
+WS_SERVER="$TMP/workstation-server"; WS_PEER="$TMP/workstation-peer"
+mkdir -p "$WS_HOME" "$WS_CLONES/site" "$WS_PEER"
+for WS_NAME in books wbt; do git init -q --bare "$WS_PEER/$WS_NAME.git"; done
+git init -q "$WS_CLONES/books"; git init -q "$WS_CLONES/site/wbt"
+git -C "$WS_CLONES/books" remote add origin "file://$GH/acme/books.git"
+git -C "$WS_CLONES/site/wbt" remote add origin "file://$GH/acme/wbt.git"
+WS_SSH="$WS_HOME/.ssh/config"
+wsconf() {
+  printf '%s\n' profile=workstation configs=no tmp_on_disk=no component_resource_guards=no group_dev_cloud=no \
+    component_oom_zram=no component_docker_rootless=no component_herdr=no component_uutils_ls=no \
+    component_ollama=no component_whisper=no component_mtga=no component_dictation=no component_ocr=no component_tts=no \
+    component_claude_code=no component_claude_skills=no component_aws_cli=no component_lid_ignore=no \
+    component_chatterbox=no component_clipboard=no component_git_hub=no \
+    "git_hub_repos=acme/books acme/wbt:site/wbt acme/absent" "git_hub_user=$ME" \
+    "git_hub_root=$WS_SERVER" "git_hub_upstream_base=file://$GH/" "$@" > "$TMP/workstation.conf"
+}
+runws() {
+  env PATH="$BIN:/usr/bin:/bin" HOME="$WS_HOME" GIT_HOME="$WS_CLONES" ROOT="${WS_PROBE_ROOT:-$WS_PEER}" \
+    HOST_CONF="$TMP/workstation.conf" KIT_LOG_DIR="$TMP" KIT_QUIET=0 \
+    bash "$KIT_DIR/profiles/workstation/07-components.sh" "${MODE:-check}" >"$TMP/out" 2>&1
+}
+wsurl() { git -C "$WS_CLONES/$1" remote get-url "${2:-origin}"; }
+wsstate() {
+  { find "$WS_HOME" "$WS_CLONES" -printf '%p %y %m %l\n' | sort
+    find "$WS_HOME" "$WS_CLONES" -type f -exec sha256sum {} + | sort
+  } | sha256sum
+}
+
+wsconf; WS_BEFORE="$(wsstate)"; MODE=install runws
+assert 'WS0. unset git_hub: install names off and leaves client files and remotes alone' \
+  'grep -q "OK.*git hub: off" "$TMP/out" && [[ "$(wsstate)" == "$WS_BEFORE" ]]'
+wsconf git_hub=hub-a.lan; WS_BEFORE="$(wsstate)"; runws
+assert 'WS1. server disabled, check reports the missing client alias' \
+  'grep -q "WARN.*git-hub alias.*hub-a.lan.*missing or drifted" "$TMP/out"'
+assert 'WS2. check reports both origins that do not point at the hub' \
+  'grep -q "WARN.*books origin.*want git-hub:books.git" "$TMP/out" && grep -q "WARN.*wbt origin.*want git-hub:wbt.git" "$TMP/out"'
+assert 'WS3. fresh check changes no client file, mode or remote' \
+  '[[ "$(wsstate)" == "$WS_BEFORE" ]]'
+: > "$TMP/ssh.calls"; MODE=install runws
+assert 'WS4. server disabled, install creates the client key and alias' \
+  '[[ -s "$WS_HOME/.ssh/git_hub" ]] && grep -A8 "^Host git-hub$" "$WS_SSH" | grep -q "HostName hub-a.lan" && grep -q "IdentityFile $WS_HOME/.ssh/git_hub" "$WS_SSH"'
+assert 'WS5. install routes both clone paths and keeps each old origin as github' \
+  '[[ "$(wsurl books)" == git-hub:books.git && "$(wsurl site/wbt)" == git-hub:wbt.git && "$(wsurl books github)" == "file://$GH/acme/books.git" && "$(wsurl site/wbt github)" == "file://$GH/acme/wbt.git" ]]'
+assert 'WS6. both client probes reach the hub through the alias' \
+  'grep -q "OK.*books: origin is the hub" "$TMP/out" && grep -q "OK.*wbt: origin is the hub" "$TMP/out" && [[ "$(grep -c "SSH.*git-hub.*git-upload-pack" "$TMP/ssh.calls")" == 2 ]]'
+assert 'WS7. a listed missing clone is named and skipped' \
+  'grep -q "WARN.*acme/absent has no clone" "$TMP/out" && [[ ! -e "$WS_CLONES/absent" ]]'
+assert 'WS8. client install enables neither the hub server nor the review relay' \
+  '[[ ! -e "$WS_SERVER" && ! -e "$WS_HOME/.config/systemd/user/git-hub-relay.timer" ]]'
+assert 'WS9. client routing sets no pushurl on either clone' \
+  '! git -C "$WS_CLONES/books" config --get-regexp "^remote\..*\.pushurl$" && ! git -C "$WS_CLONES/site/wbt" config --get-regexp "^remote\..*\.pushurl$"'
+WS_BEFORE="$(wsstate)"; MODE=install runws
+assert 'WS10. repeated client install changes no client file or remote' \
+  '[[ "$(wsstate)" == "$WS_BEFORE" ]]'
+sed -i 's/HostName hub-a.lan/HostName stale.lan/' "$WS_SSH"
+git -C "$WS_CLONES/books" remote set-url origin "file://$GH/drifted.git"
+WS_BEFORE="$(wsstate)"; runws
+assert 'WS11. check reports alias and origin drift without changing client files' \
+  'grep -q "WARN.*git-hub alias.*missing or drifted" "$TMP/out" && grep -q "WARN.*books origin.*want git-hub:books.git" "$TMP/out" && [[ "$(wsstate)" == "$WS_BEFORE" ]]'
+MODE=install runws
+assert 'WS12. install repairs alias and origin drift while preserving github' \
+  '[[ "$(grep -c "^Host git-hub$" "$WS_SSH")" == 1 && "$(wsurl books)" == git-hub:books.git && "$(wsurl books github)" == "file://$GH/acme/books.git" ]] && grep -q "HostName hub-a.lan" "$WS_SSH" && ! grep -q stale.lan "$WS_SSH"'
+
+# Reset the client drift before each flag combination so an earlier install
+# cannot make a missing profile call look successful.
+wsdrift() {
+  sed -i 's/HostName hub-a.lan/HostName stale.lan/' "$WS_SSH"
+  git -C "$WS_CLONES/books" remote set-url origin "file://$GH/acme/books.git"
+}
+wsdrift; wsconf git_hub=hub-a.lan component_git_hub=yes; WS_PROBE_ROOT="$WS_SERVER" MODE=install runws
+assert 'WS13. server enabled plus git_hub provisions the server before probing the client' \
+  '[[ "$(git --git-dir="$WS_SERVER/books.git" config core.bare)" == true && "$(wsurl books)" == git-hub:books.git ]] && grep -q "HostName hub-a.lan" "$WS_SSH" && grep -q "OK.*books: origin is the hub" "$TMP/out"'
+wsdrift; wsconf git_hub_gate=review.lan; WS_REMOTES="$(sha256sum "$WS_CLONES/books/.git/config" "$WS_CLONES/site/wbt/.git/config")"; MODE=install runws
+assert 'WS14. relay enabled with git_hub unset leaves clone remotes alone' \
+  '[[ "$(sha256sum "$WS_CLONES/books/.git/config" "$WS_CLONES/site/wbt/.git/config")" == "$WS_REMOTES" ]] && grep -q "^Host git-hub-gate$" "$WS_SSH" && [[ -f "$WS_HOME/.config/systemd/user/git-hub-relay.timer" ]]'
+wsconf git_hub=hub-a.lan component_git_hub=yes git_hub_gate=review.lan; MODE=install runws
+assert 'WS15. server and relay enabled together still reconcile the hub client' \
+  '[[ "$(git --git-dir="$WS_SERVER/books.git" config core.bare)" == true && "$(wsurl books)" == git-hub:books.git ]] && grep -q "HostName hub-a.lan" "$WS_SSH" && grep -q "^Host git-hub-gate$" "$WS_SSH"'
