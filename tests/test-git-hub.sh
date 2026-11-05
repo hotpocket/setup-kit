@@ -85,6 +85,8 @@ echo "SSH $*" >> "$TMP/ssh.calls"
 for arg in "$@"; do
   if [[ "$arg" == -G ]]; then
     [[ ! -e "$TMP/ws-ssh-g-fail" ]] || exit 255
+    [[ ! -e "$TMP/ws-empty-ssh-g" ]] || exit 0
+    if [[ -e "$TMP/ws-blank-ssh-g" ]]; then printf ' \n\t\n'; exit 0; fi
     if [[ -e "$TMP/ws-hide-identity" ]]; then
       /usr/bin/ssh -F "$HOME/.ssh/config" "$@" | awk '$1 != "identityfile" || $2 != ENVIRON["HOME"] "/.ssh/git_hub"'
       exit "${PIPESTATUS[0]}"

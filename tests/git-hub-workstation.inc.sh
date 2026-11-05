@@ -210,17 +210,17 @@ assert 'WS32. an effective dump missing the managed identity refuses routing' \
 wsfresh readonly-probe; MODE=install runws
 WS_BEFORE="$(wsstate)"; : > "$TMP/ssh.calls"; runws; WS_RC=$?
 assert 'WS33. workstation check probes refuse new host keys and disable updates' \
-  '(( WS_RC == 0 )) && [[ "$(wsstate)" == "$WS_BEFORE" && "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -v -- "-o StrictHostKeyChecking=yes -o UpdateHostKeys=no"'
+  '(( WS_RC == 0 )) && [[ "$(wsstate)" == "$WS_BEFORE" && "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -v -- "-o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o ControlPath=none -o ControlMaster=no -o PermitLocalCommand=no"'
 : > "$TMP/ssh.calls"; MODE=install runws; WS_RC=$?
 assert 'WS34. install probes retain accept-new rather than forcing check policy' \
-  '(( WS_RC == 0 )) && [[ "$(wsfield stricthostkeychecking)" == accept-new && "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -q -- "StrictHostKeyChecking=yes"'
+  '(( WS_RC == 0 )) && [[ "$(wsfield stricthostkeychecking)" == accept-new && "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -Eq -- "StrictHostKeyChecking=yes|ControlPath=none|ControlMaster=no|PermitLocalCommand=no"'
 wsconf git_hub=hub-a.lan profile=worker headless=yes reach=ssh git_auth=none
 : > "$TMP/ssh.calls"
 env PATH="$BIN:/usr/bin:/bin" HOME="$WS_HOME" GIT_HOME="$WS_CLONES" ROOT="$WS_PEER" \
   HOST_CONF="$TMP/workstation.conf" KIT_LOG_DIR="$TMP" KIT_QUIET=0 \
   bash "$KIT_DIR/profiles/worker/03-headless.sh" check > "$TMP/out" 2>&1; WS_RC=$?
 assert 'WS35. the worker uses the same read-only host-key probe policy' \
-  '(( WS_RC == 0 )) && [[ "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -v -- "-o StrictHostKeyChecking=yes -o UpdateHostKeys=no"'
+  '(( WS_RC == 0 )) && [[ "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -v -- "-o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o ControlPath=none -o ControlMaster=no -o PermitLocalCommand=no"'
 
 wsfresh known-hosts; wsconf git_hub=127.0.0.1
 WS_KNOWN_REPORT="$TMP/known-hosts-result.json"
@@ -228,7 +228,7 @@ env PATH="$BIN:/usr/bin:/bin" HOME="$WS_HOME" GIT_HOME="$WS_CLONES" ROOT="$WS_PE
   HOST_CONF="$TMP/workstation.conf" KIT_LOG_DIR="$TMP" KIT_QUIET=0 \
   python3 "$KIT_DIR/tests/git-hub-knownhosts.py" "$WS_KNOWN_REPORT" > "$TMP/out" 2>&1; WS_KNOWN_RC=$?
 if (( WS_KNOWN_RC == 77 )); then
-  echo "  SKIP WS36-WS38. real sshd unavailable: $(cat "$TMP/out")"
+  echo "  SKIP WS36-WS38,WS41-WS43. real sshd unavailable: $(cat "$TMP/out")"
 else
   assert 'WS36. real unknown-host check leaves all client state unchanged and names trust drift' \
     '(( WS_KNOWN_RC == 0 )) && jq -e ".server_ready and .check_readonly and .unknown_warning and .trusted_check_readonly" "$WS_KNOWN_REPORT" >/dev/null'
@@ -236,4 +236,19 @@ else
     '(( WS_KNOWN_RC == 0 )) && jq -e ".install_accepts_key and .detector_saw_write" "$WS_KNOWN_REPORT" >/dev/null'
   assert 'WS38. a changed host key stays unchanged and is not described as newly untrusted' \
     '(( WS_KNOWN_RC == 0 )) && jq -e ".changed_key_readonly and .changed_key_not_unknown" "$WS_KNOWN_REPORT" >/dev/null'
+  assert 'WS41. authenticated check leaves no control socket or persistent master' \
+    '(( WS_KNOWN_RC == 0 )) && jq -e ".authenticated and .control_check_readonly" "$WS_KNOWN_REPORT" >/dev/null'
+  assert 'WS42. authenticated check never executes inherited LocalCommand' \
+    '(( WS_KNOWN_RC == 0 )) && jq -e ".authenticated and .local_command_check_readonly" "$WS_KNOWN_REPORT" >/dev/null'
+  assert 'WS43. install still creates its configured master and runs LocalCommand' \
+    '(( WS_KNOWN_RC == 0 )) && jq -e ".install_control_observed and .install_local_command_observed" "$WS_KNOWN_REPORT" >/dev/null'
 fi
+
+wsfresh empty-dump; WS_REMOTES="$(wsremotes)"; : > "$TMP/ssh.calls"
+touch "$TMP/ws-empty-ssh-g"; MODE=install runws; WS_RC=$?; rm "$TMP/ws-empty-ssh-g"
+assert 'WS39. a successful empty SSH dump gives one clear refusal and changes no routes' \
+  '(( WS_RC != 0 )) && [[ "$(wsremotes)" == "$WS_REMOTES" && "$(grep -c "FAIL.*git hub" "$TMP/out")" == 1 ]] && grep -q "FAIL.*ssh -G git-hub.*no settings.*fix" "$TMP/out" && ! grep -q "effective git-hub.*unavailable" "$TMP/out" && ! grep -q git-upload-pack "$TMP/ssh.calls"'
+WS_BEFORE="$(wsstate)"
+touch "$TMP/ws-blank-ssh-g"; runws; WS_RC=$?; rm "$TMP/ws-blank-ssh-g"
+assert 'WS40. a whitespace-only SSH dump is refused without check-mode writes' \
+  '(( WS_RC != 0 )) && [[ "$(wsstate)" == "$WS_BEFORE" && "$(grep -c "FAIL.*git hub" "$TMP/out")" == 1 ]] && grep -q "FAIL.*ssh -G git-hub.*no settings.*fix" "$TMP/out" && ! grep -q "effective git-hub.*unavailable" "$TMP/out"'

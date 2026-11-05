@@ -175,7 +175,6 @@ hub_client_ensure() {
     return 1
   }
   if ! hub_client_config_check "$host"; then
-    fail "git hub client: SSH configuration is unusable; remotes unchanged"
     GIT_HUB_CLIENT_READY=0
     (( INSTALL )) && return 1
   fi
@@ -191,6 +190,11 @@ hub_client_config_check() {
   local -A want=() have=()
   if ! effective="$(ssh -G git-hub 2>/dev/null)"; then
     warn "git hub: effective SSH settings unavailable; fix ~/.ssh/config, then retry"
+    fail "git hub client: SSH configuration is unusable; remotes unchanged"
+    return 1
+  fi
+  if [[ -z "${effective//[[:space:]]/}" ]]; then
+    fail "git hub client: ssh -G git-hub returned no settings; fix SSH configuration or command, then retry; remotes unchanged"
     return 1
   fi
   while read -r key value; do
@@ -214,7 +218,11 @@ hub_client_config_check() {
     fi
     drift=1
   done
-  (( ! drift ))
+  if (( drift )); then
+    fail "git hub client: SSH configuration is unusable; remotes unchanged"
+    return 1
+  fi
+  return 0
 }
 
 GIT_HUB_KEY="$HOME/.ssh/git_hub"
@@ -269,7 +277,7 @@ hub_remote_ensure() {
   if (( ! INSTALL )); then
     # SSH keeps the first command-line value, ahead of both caller options and config.
     ssh_program="${ssh_command%%[[:space:]]*}"
-    ssh_command="$ssh_program -o StrictHostKeyChecking=yes -o UpdateHostKeys=no${ssh_command#"$ssh_program"}"
+    ssh_command="$ssh_program -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o ControlPath=none -o ControlMaster=no -o PermitLocalCommand=no${ssh_command#"$ssh_program"}"
   fi
   if probe_error="$(LC_ALL=C GIT_SSH_COMMAND="$ssh_command" hub_network_git 20 -C "$clone" ls-remote origin 2>&1 >/dev/null)"; then
     ok "$name: origin is the hub ($want)"

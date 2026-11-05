@@ -47,9 +47,17 @@ fi
 case "$*" in *'remote get-url origin') echo https://github.com/example/setup-kit.git ;; esac
 exit 0
 S
-for c in gh ssh ssh-keygen ssh-keyscan aws gpg pass scdaemon gsettings dconf gnome-extensions curl bun sudo sysctl lspci; do
+for c in gh ssh-keygen ssh-keyscan aws gpg pass scdaemon gsettings dconf gnome-extensions curl bun sudo sysctl lspci; do
   printf '#!/bin/bash\necho "%s $*" >> "$CALLS"\nexit 0\n' "$c" > "$BIN/$c"
 done
+cat > "$BIN/ssh" <<'S'
+#!/bin/bash
+echo "ssh $*" >> "$CALLS"
+for arg in "$@"; do
+  if [[ "$arg" == -G ]]; then exec /usr/bin/ssh -F "$HOME/.ssh/config" "$@"; fi
+done
+exit 0
+S
 cat > "$BIN/systemctl" <<'S'
 #!/bin/bash
 echo "systemctl $*" >> "$CALLS"
@@ -183,7 +191,7 @@ if [[ "${CASE:-all}" == all || "${CASE:-}" == archive ]]; then
   assert 'X1 archive skips remote inspection explicitly, without ancestor git discovery' 'grep -q "OK.*archive.*remote" "$TMP/out" && ! grep -q "git -C $K " "$CALLS"'
   conf git_hub=hub.test git_hub_repos=example/setup-kit
   run profiles/worker/03-headless.sh
-  assert 'X2 archive is a supported hub entry, without a remote probe' 'grep -q "OK.*setup-kit.*archive" "$TMP/out" && ! grep -q "git -C $K " "$CALLS"'
+  assert 'X2 archive is a supported hub entry, without a remote probe' '[[ $rc == 0 ]] && grep -q "OK.*setup-kit.*archive" "$TMP/out" && ! grep -q "git -C $K " "$CALLS"'
   : > "$CALLS"; SETUP_KIT_DIR="$K" bash "$K/get.sh" > "$TMP/out" 2>&1; rc=$?
   assert 'X3 get.sh can reuse an extracted archive without cloning over it' '[[ $rc == 0 ]] && grep -q "archive" "$TMP/out" && ! grep -q "^git " "$CALLS"'
 fi

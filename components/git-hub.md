@@ -111,8 +111,12 @@ The client checks every managed setting against `ssh -G git-hub` before routing
 or probing, including user, identity file, agent and host-key policy. Earlier
 `Host`, `Match`, or `Include` conflicts must be fixed before routing.
 Check mode still lists origin drift without probing an invalid alias.
+An empty successful SSH settings response refuses the phase with one diagnostic;
+it cannot establish that the alias is usable.
 Check probes force `StrictHostKeyChecking=yes` and `UpdateHostKeys=no` ahead
-of caller-supplied SSH options.
+of caller-supplied SSH options. They also force `ControlPath=none`,
+`ControlMaster=no`, and `PermitLocalCommand=no`, so checks create no master
+socket and execute no local SSH command.
 An unknown host key warns "host key not yet trusted; install accepts it" without
 writing known_hosts. Install retains the managed `accept-new` policy.
 A symlinked SSH config keeps its link; the writer reconciles its resolved target
