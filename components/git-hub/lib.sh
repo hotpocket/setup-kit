@@ -164,7 +164,7 @@ hub_user_ensure() {
 # ------------------------------------------------------------------ client side
 # Same routing for workers and workstations, independent of server/relay flags.
 hub_client_ensure() {
-  local host effective GIT_HUB_CLIENT_READY=1; host="$(conf_get git_hub '')"
+  local host GIT_HUB_CLIENT_READY=1; host="$(conf_get git_hub '')"
   section "git hub ($MODE)"
   if [[ -z "$host" ]]; then
     ok "git hub: off (git_hub unset) — remotes left as they are"
@@ -174,10 +174,7 @@ hub_client_ensure() {
     fail "git hub client: alias setup failed; fix the warning above and retry install"
     return 1
   }
-  # OpenSSH uses the first matching value, including earlier unmanaged blocks.
-  if ! effective="$(ssh -G git-hub 2>/dev/null | awk '$1 == "hostname" {print $2}')"; then effective=''; fi
-  if [[ "$effective" != "$host" ]]; then
-    warn "git hub: effective git-hub HostName is ${effective:-unavailable}, want $host; fix earlier Host/Match/Include settings in ~/.ssh/config, then retry"
+  if ! hub_client_config_check "$host"; then
     fail "git hub client: SSH configuration is unusable; remotes unchanged"
     GIT_HUB_CLIENT_READY=0
     (( INSTALL )) && return 1
@@ -185,6 +182,39 @@ hub_client_ensure() {
   [[ -z "$GIT_HUB_REPOS" ]] && warn "git hub: git_hub_repos empty — no clone routes through $host"
   # Check still lists origin drift, but never probes an invalid effective alias.
   hub_each hub_remote_ensure && (( GIT_HUB_CLIENT_READY ))
+}
+
+# Validate the effective settings against the same content that install writes.
+# OpenSSH keeps first matches for scalar settings; IdentityFile is additive.
+hub_client_config_check() {
+  local effective key value identity_found=0 drift=0
+  local -A want=() have=()
+  if ! effective="$(ssh -G git-hub 2>/dev/null)"; then
+    warn "git hub: effective SSH settings unavailable; fix ~/.ssh/config, then retry"
+    return 1
+  fi
+  while read -r key value; do
+    [[ -z "$key" || "$key" == '#' || "$key" == Host ]] && continue
+    want["${key,,}"]="$value"
+  done < <(hub_alias_want "$1")
+  while read -r key value; do
+    [[ -n "$key" ]] || continue
+    if [[ "$key" == identityfile ]]; then
+      [[ "$value" != '~/'* ]] || value="$HOME/${value#\~/}"
+      [[ "$value" != "${want[identityfile]}" ]] || identity_found=1
+    else have["$key"]="$value"; fi
+  done <<< "$effective"
+  for key in "${!want[@]}"; do
+    if [[ "$key" == identityfile ]]; then
+      (( identity_found )) && continue
+      warn "git hub: effective git-hub identityfile lacks ${want[$key]}; fix ~/.ssh/config, then retry"
+    else
+      [[ "${have[$key]:-}" == "${want[$key]}" ]] && continue
+      warn "git hub: effective git-hub $key is ${have[$key]:-unavailable}, want ${want[$key]}; fix earlier Host/Match/Include settings in ~/.ssh/config, then retry"
+    fi
+    drift=1
+  done
+  (( ! drift ))
 }
 
 GIT_HUB_KEY="$HOME/.ssh/git_hub"
@@ -235,8 +265,16 @@ hub_remote_ensure() {
     log "$name: origin → $want (was ${cur:-unset}; kept as remote github)"
   fi
   (( ${GIT_HUB_CLIENT_READY:-1} )) || return 0
-  if hub_network_git 20 -C "$clone" ls-remote origin >/dev/null 2>&1; then
+  local ssh_command="${GIT_SSH_COMMAND:-ssh}" ssh_program probe_error
+  if (( ! INSTALL )); then
+    # SSH keeps the first command-line value, ahead of both caller options and config.
+    ssh_program="${ssh_command%%[[:space:]]*}"
+    ssh_command="$ssh_program -o StrictHostKeyChecking=yes -o UpdateHostKeys=no${ssh_command#"$ssh_program"}"
+  fi
+  if probe_error="$(LC_ALL=C GIT_SSH_COMMAND="$ssh_command" hub_network_git 20 -C "$clone" ls-remote origin 2>&1 >/dev/null)"; then
     ok "$name: origin is the hub ($want)"
+  elif (( ! INSTALL )) && grep -Eq '^No .* host key is known for .* and you have requested strict checking[.]' <<< "$probe_error"; then
+    warn "git hub: $name — host key not yet trusted; install accepts it"
   else
     warn "git hub: $name — the hub does not answer for $want (key not in its pushers, repo missing, or unreachable)"
     miss "git-hub: $name unreachable through git-hub"

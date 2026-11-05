@@ -107,9 +107,14 @@ the old GitHub URL kept as remote `github` (fetch still works with a read-only P
 `check` reports missing or drifted aliases and origins without changing them;
 `install` reconciles them. Neither sets a `pushurl`.
 Failed key or alias setup fails the phase before changing any remote.
-The client checks `ssh -G git-hub` before routing or probing. If its effective
-hostname differs from `git_hub`, fix earlier `Host`, `Match`, or `Include`
-settings and retry. Check mode still lists origin drift without probing that alias.
+The client checks every managed setting against `ssh -G git-hub` before routing
+or probing, including user, identity file, agent and host-key policy. Earlier
+`Host`, `Match`, or `Include` conflicts must be fixed before routing.
+Check mode still lists origin drift without probing an invalid alias.
+Check probes force `StrictHostKeyChecking=yes` and `UpdateHostKeys=no` ahead
+of caller-supplied SSH options.
+An unknown host key warns "host key not yet trusted; install accepts it" without
+writing known_hosts. Install retains the managed `accept-new` policy.
 A symlinked SSH config keeps its link; the writer reconciles its resolved target
 with an atomic rename under the original `~/.ssh/config.lock`. An unavailable
 target fails the phase and leaves remotes alone.

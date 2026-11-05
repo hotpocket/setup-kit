@@ -24,6 +24,8 @@
 #      clones, probes the hub, and never sets pushurl. Failed key/alias setup or
 #      a conflicting effective SSH hostname refuses routing and fails the phase;
 #      symlinked SSH config is reconciled through its target under the same lock.
+#      All managed authentication settings must be effective; check probes
+#      cannot accept or update host keys, install retains accept-new.
 #   C. git-hub CLI: status names unforwarded branches; forward pushes to the
 #      upstream and clears them; stage refuses a dirty clone, fast-forwards a
 #      clean one and PRINTS the deploy command without running it.
@@ -83,9 +85,14 @@ echo "SSH $*" >> "$TMP/ssh.calls"
 for arg in "$@"; do
   if [[ "$arg" == -G ]]; then
     [[ ! -e "$TMP/ws-ssh-g-fail" ]] || exit 255
+    if [[ -e "$TMP/ws-hide-identity" ]]; then
+      /usr/bin/ssh -F "$HOME/.ssh/config" "$@" | awk '$1 != "identityfile" || $2 != ENVIRON["HOME"] "/.ssh/git_hub"'
+      exit "${PIPESTATUS[0]}"
+    fi
     exec /usr/bin/ssh -F "$HOME/.ssh/config" "$@"
   fi
 done
+if [[ -e "$TMP/ws-real-ssh" ]]; then exec /usr/bin/ssh -F "$HOME/.ssh/config" "$@"; fi
 cmd="${@: -1}"
 case "$cmd" in git-upload-pack*|git-receive-pack*) cd "$ROOT" && eval "exec $cmd" ;; esac
 exit 128

@@ -108,7 +108,7 @@ chmod +x "$BIN/flock" "$BIN/ssh-keygen"
 wsfresh lock-failure
 # The existing alias resolves correctly. Effective-host checking must not hide
 # a writer failure just because this previous configuration is still usable.
-printf 'Host git-hub\n  HostName hub-a.lan\n' > "$WS_SSH"
+printf 'Host git-hub\n  HostName hub-a.lan\n  User %s\n  IdentityFile %s/.ssh/git_hub\n  IdentitiesOnly yes\n  IdentityAgent none\n  StrictHostKeyChecking accept-new\n' "$ME" "$WS_HOME" > "$WS_SSH"
 WS_CONFIG_BEFORE="$(sha256sum "$WS_SSH")"; WS_REMOTES="$(wsremotes)"; : > "$TMP/ssh.calls"
 touch "$TMP/ws-flock-fail"; MODE=install runws; WS_RC=$?; rm "$TMP/ws-flock-fail"
 assert 'WS16. failed alias locking reports a failed workstation phase' \
@@ -172,3 +172,68 @@ MODE=install runws; WS_RC=$?
 assert 'WS26. an unresolved config symlink refuses routing and preserves the link' \
   '(( WS_RC != 0 )) && [[ -L "$WS_SSH" && ! -e "$WS_SSH" && "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "WARN.*symlink.*fix" "$TMP/out"'
 rm "$BIN/flock" "$BIN/ssh-keygen"
+
+# Real OpenSSH resolves the right hostname but earlier authentication settings.
+wsfield() { /usr/bin/ssh -F "$WS_SSH" -G git-hub 2>/dev/null | awk -v key="$1" '$1 == key { $1=""; sub(/^ /, ""); print }'; }
+wsfresh wrong-user
+printf 'Host git-hub\n  HostName hub-a.lan\n  User previous\n' > "$WS_SSH"
+WS_REMOTES="$(wsremotes)"; : > "$TMP/ssh.calls"; MODE=install runws; WS_RC=$?
+assert 'WS27. same-host wrong User refuses routing before any probe' \
+  '(( WS_RC != 0 )) && [[ "$(wseffective)" == hub-a.lan && "$(wsfield user)" == previous && "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "WARN.*effective.*user.*previous.*fix" "$TMP/out" && ! grep -q git-upload-pack "$TMP/ssh.calls"'
+wsfresh identities-only
+printf 'Host git-hub\n  HostName hub-a.lan\n  IdentitiesOnly no\n' > "$WS_SSH"
+WS_REMOTES="$(wsremotes)"; MODE=install runws; WS_RC=$?
+assert 'WS28. same-host IdentitiesOnly no refuses routing' \
+  '(( WS_RC != 0 )) && [[ "$(wseffective)" == hub-a.lan && "$(wsfield identitiesonly)" == no && "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "WARN.*effective.*identitiesonly.*fix" "$TMP/out"'
+wsfresh other-agent
+printf 'Host git-hub\n  HostName hub-a.lan\n  IdentityAgent /nonexistent-agent\n' > "$WS_SSH"
+WS_REMOTES="$(wsremotes)"; MODE=install runws; WS_RC=$?
+assert 'WS29. same-host another IdentityAgent refuses routing' \
+  '(( WS_RC != 0 )) && [[ "$(wseffective)" == hub-a.lan && "$(wsfield identityagent)" == /nonexistent-agent && "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "WARN.*effective.*identityagent.*fix" "$TMP/out"'
+wsfresh unsafe-host-policy
+printf 'Host git-hub\n  HostName hub-a.lan\n  StrictHostKeyChecking no\n' > "$WS_SSH"
+WS_REMOTES="$(wsremotes)"; MODE=install runws; WS_RC=$?
+assert 'WS30. an override of the managed host-key policy refuses routing' \
+  '(( WS_RC != 0 )) && [[ "$(wseffective)" == hub-a.lan && "$(wsfield stricthostkeychecking)" != accept-new && "$(wsremotes)" == "$WS_REMOTES" ]] && grep -q "WARN.*effective.*stricthostkeychecking.*fix" "$TMP/out"'
+wsfresh multiple-identities
+printf 'Host git-hub\n  HostName hub-a.lan\n  IdentityFile ~/.ssh/another-key\n' > "$WS_SSH"
+MODE=install runws; WS_RC=$?
+assert 'WS31. the managed identity may appear alongside another configured identity' \
+  '(( WS_RC == 0 )) && [[ "$(wsurl books)" == git-hub:books.git ]] && wsfield identityfile | grep -qx "$WS_HOME/.ssh/git_hub" && wsfield identityfile | grep -qx "~/.ssh/another-key"'
+# IdentityFile is additive in OpenSSH. Remove only the required identity from
+# its real dump to prove the validator rejects an incomplete successful query.
+wsfresh missing-identity; WS_REMOTES="$(wsremotes)"
+touch "$TMP/ws-hide-identity"; MODE=install runws; WS_RC=$?; rm "$TMP/ws-hide-identity"
+assert 'WS32. an effective dump missing the managed identity refuses routing' \
+  '(( WS_RC != 0 )) && [[ "$(wsremotes)" == "$WS_REMOTES" ]] && wsfield identityfile | grep -qx "$WS_HOME/.ssh/git_hub" && grep -q "WARN.*effective.*identityfile.*fix" "$TMP/out"'
+
+wsfresh readonly-probe; MODE=install runws
+WS_BEFORE="$(wsstate)"; : > "$TMP/ssh.calls"; runws; WS_RC=$?
+assert 'WS33. workstation check probes refuse new host keys and disable updates' \
+  '(( WS_RC == 0 )) && [[ "$(wsstate)" == "$WS_BEFORE" && "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -v -- "-o StrictHostKeyChecking=yes -o UpdateHostKeys=no"'
+: > "$TMP/ssh.calls"; MODE=install runws; WS_RC=$?
+assert 'WS34. install probes retain accept-new rather than forcing check policy' \
+  '(( WS_RC == 0 )) && [[ "$(wsfield stricthostkeychecking)" == accept-new && "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -q -- "StrictHostKeyChecking=yes"'
+wsconf git_hub=hub-a.lan profile=worker headless=yes reach=ssh git_auth=none
+: > "$TMP/ssh.calls"
+env PATH="$BIN:/usr/bin:/bin" HOME="$WS_HOME" GIT_HOME="$WS_CLONES" ROOT="$WS_PEER" \
+  HOST_CONF="$TMP/workstation.conf" KIT_LOG_DIR="$TMP" KIT_QUIET=0 \
+  bash "$KIT_DIR/profiles/worker/03-headless.sh" check > "$TMP/out" 2>&1; WS_RC=$?
+assert 'WS35. the worker uses the same read-only host-key probe policy' \
+  '(( WS_RC == 0 )) && [[ "$(grep -c git-upload-pack "$TMP/ssh.calls")" == 2 ]] && ! grep git-upload-pack "$TMP/ssh.calls" | grep -v -- "-o StrictHostKeyChecking=yes -o UpdateHostKeys=no"'
+
+wsfresh known-hosts; wsconf git_hub=127.0.0.1
+WS_KNOWN_REPORT="$TMP/known-hosts-result.json"
+env PATH="$BIN:/usr/bin:/bin" HOME="$WS_HOME" GIT_HOME="$WS_CLONES" ROOT="$WS_PEER" \
+  HOST_CONF="$TMP/workstation.conf" KIT_LOG_DIR="$TMP" KIT_QUIET=0 \
+  python3 "$KIT_DIR/tests/git-hub-knownhosts.py" "$WS_KNOWN_REPORT" > "$TMP/out" 2>&1; WS_KNOWN_RC=$?
+if (( WS_KNOWN_RC == 77 )); then
+  echo "  SKIP WS36-WS38. real sshd unavailable: $(cat "$TMP/out")"
+else
+  assert 'WS36. real unknown-host check leaves all client state unchanged and names trust drift' \
+    '(( WS_KNOWN_RC == 0 )) && jq -e ".server_ready and .check_readonly and .unknown_warning and .trusted_check_readonly" "$WS_KNOWN_REPORT" >/dev/null'
+  assert 'WS37. real install accepts the new host key, calibrating the write detector' \
+    '(( WS_KNOWN_RC == 0 )) && jq -e ".install_accepts_key and .detector_saw_write" "$WS_KNOWN_REPORT" >/dev/null'
+  assert 'WS38. a changed host key stays unchanged and is not described as newly untrusted' \
+    '(( WS_KNOWN_RC == 0 )) && jq -e ".changed_key_readonly and .changed_key_not_unknown" "$WS_KNOWN_REPORT" >/dev/null'
+fi
