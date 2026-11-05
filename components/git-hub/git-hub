@@ -466,9 +466,12 @@ release_prune() {  # release_prune <name> <bare> <head> <hubsha>: branches alrea
 release_lock() {  # one release or verdict at a time: base, lease and forward must agree
   mkdir -p "$STATE"; exec 9>"$STATE/release.lock"
   flock -w 900 9 || { echo "git-hub: another release or verdict holds the lock" >&2; return 1; }
-  # Every queue writer owns this lock; any leftover temp file belongs to a dead
-  # writer. Include dotfile repo names and names removed from the current config.
-  if [[ -d "$RSTATE" ]]; then find "$RSTATE" -maxdepth 1 -type f -name '*.tmp.*' -delete || return 1; fi
+  # atomic writes <state>.tmp.<pid>. Match the whole suffix, since a valid repo
+  # name can itself contain .tmp.; include hidden and no-longer-configured repos.
+  if [[ -d "$RSTATE" ]]; then
+    find "$RSTATE" -regextype posix-extended -maxdepth 1 -type f \
+      -regex '.*/[^/]+\.(request|lease|stuck)\.tmp\.[0-9]+' -delete || return 1
+  fi
 }
 cmd_release() {
   local e name

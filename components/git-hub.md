@@ -153,8 +153,8 @@ On the hub, install reconciles a marked block in the human user's
 Each supplied key gets `restrict` and a forced absolute `git-hub gate` command;
 options such as `from="192.0.2.1"` are preserved. A supplied `command=` option
 is refused. The SSH server's user/address policy belongs to the machine config.
-Managed reviewer blocks and gate aliases take an exclusive lock on
-`<file>.lock` before reading the target and hold it through the atomic rename.
+Managed reviewer blocks, worker hub aliases and gate aliases take an exclusive
+lock on `<file>.lock` before reading the target and hold it through the atomic rename.
 The sidecar remains in place. Other writers must use that same lock, including
 `~/.ssh/authorized_keys.lock` for control provisioning. Contention waits at most
 30 seconds, then install fails with a retry message. Check mode creates no lock.
@@ -259,8 +259,9 @@ and lease. Retry the same verdict; Git still refuses non-fast-forward pushes.
 The push log records timeout as one outcome. A push accepted just before a lost
 response is safe to retry with the same SHA.
 
-Under the release lock, abandoned queue temp files are removed and gate leases
-are checked against their request header, base ancestry and nonempty brief.
+Under the release lock, abandoned `<repo>.(request|lease|stuck).tmp.<numeric PID>`
+files are removed. Repository names containing `.tmp.` keep their normal state.
+Gate leases are checked against their request header, base ancestry and nonempty brief.
 A missing or mismatched request is rebuilt with the same issue id and attempt
 count. If that interrupted pair expired, its deadline is renewed without spending
 an attempt. A valid request whose lease expires still follows the two-attempt

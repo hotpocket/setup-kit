@@ -21,6 +21,7 @@ prefix = 'source "$KIT_DIR/lib.sh"; source "$KIT_DIR/components/git-hub/lib.sh";
 generic = 'hub_block_ensure "$1" "$2" "$3" "$4" "$5"'
 result = {}
 client = None
+worker = None
 
 
 def finish(p, bound):
@@ -111,6 +112,49 @@ exec /usr/bin/mv "$@"
                               stable_sidecar=lock.stat().st_ino == lock_inode,
                               mode_600=target.stat().st_mode & 0o777 == 0o600,
                               rc=code, detail=detail.splitlines()[-5:])
+            elif scenario == 'public':
+                fcntl.flock(held, fcntl.LOCK_UN)
+                target.write_text('# admin preserved\nHost admin-alias\n  HostName admin.example\n')
+                code, _, _, bounded = finish(start('hub_alias_ensure old-worker.example'), 5)
+                result['initial_alias'] = code == 0 and bounded
+                env['BLOCK_PAUSE_RENAME'] = '1'
+                client = start('hub_gate_ensure')
+                wait_for(lambda: (events / 'rename-started').exists(), client)
+                result['gate_prepared'] = (events / 'rename-started').exists()
+                with lock.open('a') as contender:
+                    try:
+                        fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        result['gate_holds_lock'] = False
+                    except BlockingIOError:
+                        result['gate_holds_lock'] = True
+                for marker in ('flock-started', 'read-started'):
+                    (events / marker).unlink(missing_ok=True)
+                worker = start('hub_alias_ensure new-worker.example')
+                wait_for(lambda: (events / 'flock-started').exists() or (events / 'read-started').exists(), worker)
+                result['worker_waited'] = (worker.poll() is None and
+                    (events / 'flock-started').exists() and not (events / 'read-started').exists())
+                premature = None
+                if not result['worker_waited']:
+                    premature = finish(worker, 5)
+                    result['worker_changed_while_locked'] = 'new-worker.example' in target.read_text()
+                (events / 'rename-go').touch()
+                gate_code, _, _, gate_bounded = finish(client, 5)
+                worker_code, _, _, worker_bounded = premature or finish(worker, 5)
+
+                def hostname(alias):
+                    p = subprocess.run(['/usr/bin/ssh', '-F', str(target), '-G', alias],
+                                       capture_output=True, text=True, timeout=5)
+                    return next((line.split()[1] for line in p.stdout.splitlines()
+                                 if line.startswith('hostname ')), '') if p.returncode == 0 else ''
+
+                content = target.read_text()
+                result.update(success=gate_code == worker_code == 0 and gate_bounded and worker_bounded,
+                              worker_updated=hostname('git-hub') == 'new-worker.example',
+                              gate_preserved=hostname('git-hub-gate') == 'control-new.lan',
+                              admin_preserved=hostname('admin-alias') == 'admin.example',
+                              unique_blocks=content.count('Host git-hub\n') == content.count('Host git-hub-gate\n') == 1,
+                              stable_sidecar=lock.stat().st_ino == lock_inode,
+                              mode_600=target.stat().st_mode & 0o777 == 0o600)
             else:
                 raise ValueError(scenario)
         with lock.open('a') as released:
@@ -124,9 +168,10 @@ exec /usr/bin/mv "$@"
         code, _, _, bounded = finish(start(generic, mode=0, file=absent), 5)
         result['check_readonly'] = code == 0 and bounded and not absent.parent.exists()
 finally:
-    if client is not None and client.poll() is None:
-        os.killpg(client.pid, signal.SIGKILL)
-        client.communicate()
+    for process in (client, worker):
+        if process is not None and process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
     target.write_bytes(before)
     target.chmod(before_mode)
 Path(output).write_text(json.dumps(result))

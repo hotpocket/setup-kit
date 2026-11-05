@@ -43,5 +43,5 @@ jq                                          #      0.1 MB  utils
 libbz2-dev                                  #      0.1 MB  libdevel
 tailscale                                   #      0.0 MB  ?
 python3-venv                                #      0.0 MB  python
-build-essential                             #      0.0 MB  devel
 libtss2-rc0t64                              #      0.0 MB  ?
+build-essential                             #      0.0 MB  devel

@@ -553,3 +553,54 @@ for lock_case in 'S79 timeout authorized_keys' 'S80 timeout config' 'S81 sequenc
       '(( lock_probe_rc == 0 )) && metrics_true "$lock_report" waited_before_read rename_seen held_through_rename success both_blocks stable_sidecar mode_600 lock_released check_readonly'
   fi
 done
+
+# F5: both real public SSH config writers must participate in the same lock.
+public_lock_report="$TMP/public-lock.json"
+env PATH="$BIN:/usr/bin:/bin" HOME="$HH" HOST_CONF="$CONF" KIT_LOG_DIR="$SL" \
+  python3 "$KIT_DIR/tests/git-hub-block-lock.py" public config "$public_lock_report" > "$TMP/out" 2>&1; public_lock_rc=$?
+assert 'S84. worker alias waits while the public gate writer holds config.lock' \
+  '(( public_lock_rc == 0 )) && metrics_true "$public_lock_report" initial_alias gate_prepared gate_holds_lock worker_waited'
+assert 'S85. concurrent public worker and gate writers preserve the new aliases and admin config' \
+  '(( public_lock_rc == 0 )) && metrics_true "$public_lock_report" success worker_updated gate_preserved admin_preserved unique_blocks stable_sidecar mode_600 lock_released check_readonly'
+
+# F6: a supported repo name containing .tmp. is persistent state, not a temp.
+dot_name=topic.tmp.repo
+git clone -q --bare "$GH/acme/books.git" "$ROOT/$dot_name.git"
+git clone -q --bare "$GH/acme/books.git" "$GH/acme/$dot_name.git"
+git clone -q "$ROOT/$dot_name.git" "$GIT_HOME/$dot_name"
+git --git-dir="$ROOT/$dot_name.git" config hub.upstream "file://$GH/acme/$dot_name.git"
+mkdir -p "$GIT_HOME/$dot_name/src"; echo code > "$GIT_HOME/$dot_name/src/cleanup.py"
+git -C "$GIT_HOME/$dot_name" add .; git -C "$GIT_HOME/$dot_name" commit -q -m cleanup-regression
+git -C "$GIT_HOME/$dot_name" push -q origin main
+dot_sha=$(git -C "$GIT_HOME/$dot_name" rev-parse HEAD)
+echo "git_hub_repos=acme/$dot_name" >> "$CONF"
+ccli release
+gate pending; dot_was_visible=$(grep -c "^=== $dot_name $dot_sha " "$TMP/out")
+read -r _ dot_exp dot_owner dot_sent _ < "$RS/$dot_name.lease"
+printf '%s\n' "$dot_sha $dot_exp $dot_owner $((dot_sent + 1)) 2" > "$RS/$dot_name.lease"
+dot_request_before=$(sha256sum "$RS/$dot_name.request"); dot_lease_before=$(sha256sum "$RS/$dot_name.lease")
+cleanup_genuine=("$RS/$dot_name.request.tmp.$$" "$RS/$dot_name.lease.tmp.$$" "$RS/$dot_name.stuck.tmp.$$")
+cleanup_keep=("$RS/$dot_name.request.tmp.not-a-pid" "$RS/$dot_name.request.tmp.$$.bak" "$RS/$dot_name.other.tmp.$$" "$RS/$dot_name.request.tmp.12.part")
+touch "${cleanup_genuine[@]}" "${cleanup_keep[@]}"
+ccli release
+assert 'S86. dotted repo request and attempt-two lease survive a release sweep' \
+  '[[ "$dot_was_visible" == 1 && "$(sha256sum "$RS/$dot_name.request")" == "$dot_request_before" && "$(sha256sum "$RS/$dot_name.lease")" == "$dot_lease_before" ]]'
+genuine_gone=1; for cleanup_file in "${cleanup_genuine[@]}"; do [[ ! -e "$cleanup_file" ]] || genuine_gone=0; done
+lookalikes_kept=1; for cleanup_file in "${cleanup_keep[@]}"; do [[ -e "$cleanup_file" ]] || lookalikes_kept=0; done
+assert 'S87. sweep removes complete numeric queue temps and preserves lookalikes' \
+  '[[ "$genuine_gone" == 1 && "$lookalikes_kept" == 1 ]]'
+# Terminal pause is independent of the preceding live-queue scenario.
+printf '%s\n' "$dot_sha 1 gate $dot_sent 2" > "$RS/$dot_name.lease"
+printf '%s\n' "$dot_sha" > "$RS/$dot_name.stuck"; rm -f "$RS/$dot_name.request"
+dot_stuck_before=$(sha256sum "$RS/$dot_name.stuck"); dot_lease_before=$(sha256sum "$RS/$dot_name.lease")
+ccli release; gate pending
+assert 'S88. dotted repo terminal pause survives release and stays absent from pending' \
+  '[[ "$(sha256sum "$RS/$dot_name.stuck")" == "$dot_stuck_before" && "$(sha256sum "$RS/$dot_name.lease")" == "$dot_lease_before" && ! -e "$RS/$dot_name.request" ]] && ! grep -q "^=== $dot_name " "$TMP/out"'
+# A verdict rejected after taking the lock must leave the queued review intact.
+rm -f "$RS/$dot_name.stuck" "$RS/$dot_name.lease" "$RS/$dot_name.request"
+ccli release
+dot_request_before=$(sha256sum "$RS/$dot_name.request"); dot_lease_before=$(sha256sum "$RS/$dot_name.lease")
+gate "verdict $dot_name ffffffffffffffffffffffffffffffffffffffff reject 'unknown commit'"; dot_verdict_rc=$?
+cp "$TMP/out" "$TMP/dot-verdict.out"; gate pending
+assert 'S89. verdict lock sweep preserves the dotted repo queue when the commit is unknown' \
+  '(( dot_verdict_rc == 2 )) && grep -q "no such commit" "$TMP/dot-verdict.out" && [[ "$(sha256sum "$RS/$dot_name.request")" == "$dot_request_before" && "$(sha256sum "$RS/$dot_name.lease")" == "$dot_lease_before" ]] && grep -q "^=== $dot_name $dot_sha " "$TMP/out"'

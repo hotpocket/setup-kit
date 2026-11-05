@@ -35,7 +35,7 @@ finally:
     flag.unlink(missing_ok=True)
 # Include stale names no longer in the current repo list, including dotfiles.
 queue.mkdir(parents=True, exist_ok=True)
-(queue / '.old-repo.lease.tmp.orphan').touch()
+(queue / f'.old-repo.lease.tmp.{p.pid}').touch()
 replay = subprocess.Popen(command + ['release'], stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL, start_new_session=True)
 try:

@@ -171,11 +171,9 @@ hub_alias_want() {
   printf '%s\nHost git-hub\n  HostName %s\n  User %s\n  IdentityFile %s\n  IdentitiesOnly yes\n  IdentityAgent none\n  StrictHostKeyChecking accept-new\n%s\n' \
     "$_HUB_BEGIN" "$1" "$GIT_HUB_USER" "$GIT_HUB_KEY" "$_HUB_END"
 }
-_hub_alias_have() { [[ -f "$1" ]] && sed -n "\|^$_HUB_BEGIN\$|,\|^$_HUB_END\$|p" "$1"; }
-
 # hub_alias_ensure <host>: key + block, by content; replaces the block in place
 hub_alias_ensure() {
-  local host="$1" cfg="$HOME/.ssh/config" want have
+  local host="$1" cfg="$HOME/.ssh/config" want
   if [[ -f "$GIT_HUB_KEY" ]]; then ok "git hub key ${GIT_HUB_KEY/#$HOME/\~}"
   else
     warn "git hub key ${GIT_HUB_KEY/#$HOME/\~} missing"
@@ -185,23 +183,8 @@ hub_alias_ensure() {
     fi
   fi
   [[ -f "$GIT_HUB_KEY.pub" ]] && hint "hub pushers file needs: $(cat "$GIT_HUB_KEY.pub")"
-  want="$(hub_alias_want "$host")"; have="$(_hub_alias_have "$cfg")"
-  if [[ "$have" == "$want" ]]; then ok "git-hub alias → $host"; return 0; fi
-  [[ -n "$have" ]] && warn "git-hub alias points elsewhere — reconciling to $host" \
-                   || warn "git-hub alias missing (→ $host)"
-  (( INSTALL )) || return 0
-  mkdir -p "$HOME/.ssh"; touch "$cfg"
-  if [[ -n "$have" ]]; then
-    local tmp; tmp="$(mktemp)"; printf '%s\n' "$want" > "$tmp.blk"
-    awk -v b="$_HUB_BEGIN" -v e="$_HUB_END" -v f="$tmp.blk" '
-      $0==b {skip=1; while ((getline l < f) > 0) print l; next}
-      $0==e {skip=0; next}
-      !skip' "$cfg" > "$tmp" && cat "$tmp" > "$cfg"
-    rm -f "$tmp" "$tmp.blk"
-  else
-    { [[ -s "$cfg" ]] && echo; printf '%s\n' "$want"; } >> "$cfg"
-  fi
-  chmod 600 "$cfg"; log "git-hub alias → $host"
+  want="$(hub_alias_want "$host")"
+  hub_block_ensure "$cfg" "$_HUB_BEGIN" "$_HUB_END" "$want" "git-hub alias → $host"
 }
 
 # hub_remote_ensure <name> <owner/repo> <clone>: origin → git-hub:<name>.git,
