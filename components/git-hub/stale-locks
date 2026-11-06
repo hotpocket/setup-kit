@@ -5,6 +5,8 @@ import stat
 import subprocess
 import sys
 
+SYSTEMCTL = '/usr/bin/systemctl'
+
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 TOP_LOCKS = ('HEAD.lock', 'packed-refs.lock', 'config.lock', 'shallow.lock', 'index.lock')
 OBJECT_LOCKS = {
@@ -112,7 +114,7 @@ def main():
         raise ValueError(refusal)
     try:
         owner = subprocess.run(
-            ['systemctl', 'show', 'git-hub-stale-locks.service', '-p', 'MainPID', '--value'],
+            [SYSTEMCTL, 'show', 'git-hub-stale-locks.service', '-p', 'MainPID', '--value'],
             capture_output=True, text=True, timeout=10,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -127,7 +129,7 @@ def main():
     for unit, label in (('basic.target', 'basic target'),
                         ('systemd-user-sessions.service', 'login barrier')):
         state = subprocess.run(
-            ['systemctl', 'show', unit, '-p', 'InactiveExitTimestampMonotonic', '--value'],
+            [SYSTEMCTL, 'show', unit, '-p', 'InactiveExitTimestampMonotonic', '--value'],
             capture_output=True, text=True, timeout=10,
         )
         if state.returncode or state.stdout.strip() != '0':

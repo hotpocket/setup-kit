@@ -51,9 +51,10 @@ slverify() {
 }
 UNIT="$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system/git-hub-stale-locks.service"
 SWEEP="$KIT_GIT_HUB_SYSTEM_ROOT/usr/local/libexec/git-hub-stale-locks"
+SWEEP_TEST="$SL/test-stale-locks"
 slsweep() {
   SWEEP_RC=0
-  if [[ -x "$SWEEP" ]]; then "$SWEEP" "$ROOT" > "$TMP/out" 2>&1 || SWEEP_RC=$?
+  if [[ -x "$SWEEP" ]]; then "$SWEEP_TEST" "$ROOT" > "$TMP/out" 2>&1 || SWEEP_RC=$?
   else echo 'boot sweep not installed; locks remain' > "$TMP/out"; SWEEP_RC=127; fi
 }
 slconf component_git_hub=no; slphase install
@@ -80,6 +81,19 @@ assert 'SL8. unit content drift is reported without writes' \
 : > "$SL/systemctl.calls"; slphase install
 assert 'SL9. changed unit is replaced whole and reloads system manager once' \
   '[[ -f "$UNIT" ]] && ! grep -q "# drift" "$UNIT" && [[ "$(grep -cx daemon-reload "$SL/systemctl.calls")" == 1 ]]'
+
+# Change only a private test copy's executable constant. The installed helper
+# keeps its trusted absolute executable; caller environment cannot select it.
+python3 - "$SWEEP" "$SWEEP_TEST" "$BIN/systemctl" <<'PY'
+from pathlib import Path
+import sys
+source, dest, executable = sys.argv[1:]
+text = Path(source).read_text()
+constant = "SYSTEMCTL = '/usr/bin/systemctl'"
+assert text.count(constant) == 1, 'test seam must rewrite exactly one fixed constant'
+Path(dest).write_text(text.replace(constant, f'SYSTEMCTL = {executable!r}'))
+Path(dest).chmod(0o755)
+PY
 
 W="$SL/work"; git init -q -b main "$W"; git -C "$W" commit -q --allow-empty -m initial
 git -C "$W" push -q "$ROOT/books.git" main > "$TMP/out" 2>&1
@@ -132,7 +146,7 @@ assert 'SL18. repeated sweep logs exactly one no-locks line' \
 # A kill after a logged removal must leave a restartable sweep. A pipe stops
 # the child once its stdout fills, giving a bounded, deterministic kill point.
 if [[ -x "$SWEEP" ]]; then
-  python3 - "$SWEEP" "$ROOT" > "$TMP/out" 2>&1 <<'PY'
+  python3 - "$SWEEP_TEST" "$ROOT" > "$TMP/out" 2>&1 <<'PY'
 import pathlib, subprocess, sys
 refs = pathlib.Path(sys.argv[2]) / 'books.git/refs/heads'
 for i in range(1200):
@@ -191,13 +205,13 @@ GRAPH_RC=$?
 assert 'SL25. systemd accepts the early boot graph without an ordering cycle' \
   '(( GRAPH_RC == 0 )) && ! grep -Eq "ordering cycle|deleted to break" "$TMP/out"'
 
-if [[ -x "$SWEEP" ]]; then "$SWEEP" "$SL/missing-root" > "$TMP/out" 2>&1; FAILURE_RC=$?; else FAILURE_RC=127; fi
+if [[ -x "$SWEEP" ]]; then "$SWEEP_TEST" "$SL/missing-root" > "$TMP/out" 2>&1; FAILURE_RC=$?; else FAILURE_RC=127; fi
 assert 'SL26. unavailable hub storage fails sweep with a diagnostic, not a false empty result' \
   '(( FAILURE_RC == 1 )) && grep -q "sweep failed" "$TMP/out" && ! grep -q "no stale Git locks" "$TMP/out"'
 
 printf preserve > "$ROOT/books.git/refs/heads/main.lock"
 ln -s "$ROOT" "$SL/root-link"
-if [[ -x "$SWEEP" ]]; then "$SWEEP" "$SL/root-link" > "$TMP/out" 2>&1; ROOT_LINK_RC=$?; else ROOT_LINK_RC=127; fi
+if [[ -x "$SWEEP" ]]; then "$SWEEP_TEST" "$SL/root-link" > "$TMP/out" 2>&1; ROOT_LINK_RC=$?; else ROOT_LINK_RC=127; fi
 assert 'SL27. symlinked hub root is refused without removing its target locks' \
   '(( ROOT_LINK_RC == 1 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]]'
 
@@ -230,12 +244,12 @@ for scenario in service-only-ssh git-daemon root-manager; do
 done
 
 touch "$SL/basic-started"
-python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP" "$SL/live-basic" > "$SL/live-basic.json"
+python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP_TEST" "$SL/live-basic" > "$SL/live-basic.json"
 LIVE_PROBE_RC=$?
 assert 'SL35. after basic.target a live prepared Git ref lock survives and commits' \
   '(( LIVE_PROBE_RC == 0 )) && python3 -c '\''import json,sys; sys.exit(not all(json.load(open(sys.argv[1])).values()))'\'' "$SL/live-basic.json"'
 rm "$SL/basic-started"; touch "$SL/no-basic-state"
-python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP" "$SL/live-unknown" > "$SL/live-unknown.json"
+python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP_TEST" "$SL/live-unknown" > "$SL/live-unknown.json"
 LIVE_PROBE_RC=$?
 assert 'SL36. unknown basic-target state preserves a live prepared Git ref lock' \
   '(( LIVE_PROBE_RC == 0 )) && python3 -c '\''import json,sys; sys.exit(not all(json.load(open(sys.argv[1])).values()))'\'' "$SL/live-unknown.json"'
@@ -264,8 +278,49 @@ assert 'SL41. helper as the service main PID with invocation ID sweeps before ba
   '(( SWEEP_RC == 0 )) && [[ ! -e "$ROOT/books.git/refs/heads/main.lock" ]]'
 
 touch "$SL/manual-run"
-python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP" "$SL/live-manual" > "$SL/live-manual.json"
+python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP_TEST" "$SL/live-manual" > "$SL/live-manual.json"
 LIVE_PROBE_RC=$?
 assert 'SL42. unmanaged early-boot helper preserves a real live ref transaction' \
   '(( LIVE_PROBE_RC == 0 )) && python3 -c '\''import json,sys; sys.exit(not all(json.load(open(sys.argv[1])).values()))'\'' "$SL/live-manual.json"'
 rm "$SL/manual-run"
+
+# Class: every sweep authorization/boot query must bypass caller PATH lookup.
+# Test the unmodified installed helper against a forged manager in PATH.
+mkdir -p "$SL/shadow"
+cat > "$SL/shadow/systemctl" <<'S'
+#!/bin/bash
+echo "$*" >> "$SL/shadow.calls"
+case "$*" in
+  *MainPID*) echo "$PPID";;
+  *) echo 0;;
+esac
+S
+chmod +x "$SL/shadow/systemctl"
+printf preserve > "$ROOT/books.git/refs/heads/main.lock"
+: > "$SL/shadow.calls"
+env INVOCATION_ID=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb SYSTEMCTL="$SL/shadow/systemctl" \
+  PATH="$SL/shadow:$BIN:/usr/bin:/bin" "$SWEEP" "$ROOT" > "$TMP/out" 2>&1
+SHADOW_RC=$?
+assert 'SL43. forged invocation ID and shadow systemctl cannot authorize the installed helper' \
+  '(( SHADOW_RC == 1 )) && [[ -f "$ROOT/books.git/refs/heads/main.lock" && "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve && ! -s "$SL/shadow.calls" ]] && grep -Fq "systemctl start git-hub-stale-locks.service" "$TMP/out"'
+
+env INVOCATION_ID=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb SYSTEMCTL="$SL/shadow/systemctl" \
+  PATH="$SL/shadow:$BIN:/usr/bin:/bin" python3 "$KIT_DIR/tests/git-hub-live-lock.py" \
+  "$SWEEP" "$SL/live-shadow" > "$SL/live-shadow.json"
+LIVE_PROBE_RC=$?
+assert 'SL44. shadow systemctl cannot remove a real prepared ref lock or prevent its commit' \
+  '(( LIVE_PROBE_RC == 0 )) && [[ ! -s "$SL/shadow.calls" ]] && python3 -c '\''import json,sys; sys.exit(not all(json.load(open(sys.argv[1])).values()))'\'' "$SL/live-shadow.json"'
+
+touch "$SL/basic-started"; printf preserve > "$ROOT/books.git/refs/heads/main.lock"
+: > "$SL/shadow.calls"
+env PATH="$SL/shadow:$BIN:/usr/bin:/bin" "$SWEEP_TEST" "$ROOT" > "$TMP/out" 2>&1
+SHADOW_RC=$?
+assert 'SL45. managed basic-target query ignores a PATH shadow that claims boot has not started' \
+  '(( SHADOW_RC == 1 )) && [[ -f "$ROOT/books.git/refs/heads/main.lock" && ! -s "$SL/shadow.calls" ]] && grep -q "basic target" "$TMP/out"'
+rm "$SL/basic-started"; touch "$SL/login-started"
+printf preserve > "$ROOT/books.git/refs/heads/main.lock"; : > "$SL/shadow.calls"
+env PATH="$SL/shadow:$BIN:/usr/bin:/bin" "$SWEEP_TEST" "$ROOT" > "$TMP/out" 2>&1
+SHADOW_RC=$?
+assert 'SL46. managed login-barrier query ignores a PATH shadow that claims boot has not started' \
+  '(( SHADOW_RC == 1 )) && [[ -f "$ROOT/books.git/refs/heads/main.lock" && ! -s "$SL/shadow.calls" ]] && grep -q "login barrier" "$TMP/out"'
+rm "$SL/login-started"
