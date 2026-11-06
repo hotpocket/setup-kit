@@ -99,6 +99,32 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
   - hub branches already in main are deleted. Feature branches are never merged or forwarded.
   - every outcome is one line in `~/.local/state/git-hub/release.log`.
 
+## Boot cleanup of stale Git locks
+
+Only the hub role (`component_git_hub=yes`) installs this. Client `git_hub` and review-relay `git_hub_gate` alone do not.
+
+System oneshot `/etc/systemd/system/git-hub-stale-locks.service` runs helper `/usr/local/libexec/git-hub-stale-locks` at boot only, never at install. `DefaultDependencies=no` avoids an early socket/basic ordering cycle. It has `Wants=local-fs.target`, `After=local-fs.target`, `Before=ssh.service ssh.socket systemd-user-sessions.service`, and `RemainAfterExit=yes`. `WantedBy=ssh.service ssh.socket systemd-user-sessions.service` creates only Wants links, so a failed sweep leaves SSH available.
+
+It removes regular lockfiles only inside immediate `*.git` bare repos under `git_hub_root` (default `/srv/git`): top-level `HEAD.lock`, `packed-refs.lock`, `config.lock`, `shallow.lock`, `index.lock`; `refs/**/*.lock`; `objects/info/packs.lock`, `objects/info/commit-graph.lock`, `objects/info/commit-graphs/commit-graph-chain.lock`; `objects/pack/multi-pack-index.lock`, `objects/pack/multi-pack-index.d/multi-pack-index-chain.lock`.
+
+It never follows symlinks. Hook/custom lockfiles, non-lock files, and quarantine/temp object directories survive. Each removal is logged to the journal with path, size and mtime; finding none logs one line. This scope removes Git files blocking ref/config/index/graph transactions without deleting application/hook locks; quarantines do not lock a ref.
+
+Verified on control VM 103 (Ubuntu 26.04): `ssh.socket` enabled and active; `user@.service` drop-in `10-login-barrier.conf` has `After=systemd-user-sessions.service`. A root user-manager exception exists; the hub owner is an ordinary user.
+
+Install is atomic by content; only changed files trigger `daemon-reload`. Install always verifies enabled; check reports drift; `verify.sh` reports a missing or disabled helper/unit. Not yet tested: live install or reboot.
+
+Never sweep manually on an active hub: live Git may own locks.
+
+Undo, for operator review only, do not run without review:
+
+```sh
+sudo systemctl disable git-hub-stale-locks.service
+sudo rm /etc/systemd/system/git-hub-stale-locks.service /usr/local/libexec/git-hub-stale-locks
+sudo systemctl daemon-reload
+```
+
+A future component install restores it. Set `component_git_hub=no` only when retiring the whole hub role.
+
 ## Client side (worker `03-headless` §7, workstation `07-components`)
 
 key → alias block → for each `git_hub_repos` clone: `origin` → `git-hub:<name>.git`,

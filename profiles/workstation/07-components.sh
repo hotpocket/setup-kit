@@ -297,6 +297,7 @@ source "$KIT_DIR/components/git-hub/lib.sh"
 
 if [[ "$(conf_get component_git_hub no)" == yes ]]; then
   section "git-hub ($MODE) — components/git-hub.md"
+  hub_stale_locks_ensure || { miss 'git-hub: boot lock recovery install failed'; exit 1; }
   hub_user_ensure
   if [[ ! -d "$GIT_HUB_ROOT" ]]; then
     warn "hub root $GIT_HUB_ROOT missing"

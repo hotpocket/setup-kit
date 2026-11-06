@@ -1,0 +1,149 @@
+#!/usr/bin/python3
+"""Recover Git-owned transaction locks before the hub's boot login barrier."""
+import os
+import stat
+import subprocess
+import sys
+
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+TOP_LOCKS = ('HEAD.lock', 'packed-refs.lock', 'config.lock', 'shallow.lock', 'index.lock')
+OBJECT_LOCKS = {
+    'objects/info': ('packs.lock', 'commit-graph.lock'),
+    'objects/info/commit-graphs': ('commit-graph-chain.lock',),
+    'objects/pack': ('multi-pack-index.lock',),
+    'objects/pack/multi-pack-index.d': ('multi-pack-index-chain.lock',),
+}
+
+
+def open_dir(parent, name):
+    """Open one real directory, never a symlink, relative to a held parent."""
+    try:
+        return os.open(name, DIR_FLAGS, dir_fd=parent)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+
+
+def open_path(parent, path):
+    fd = os.dup(parent)
+    for name in path.split('/'):
+        next_fd = open_dir(fd, name)
+        os.close(fd)
+        if next_fd is None:
+            return None
+        fd = next_fd
+    return fd
+
+
+def regular(fd, name):
+    try:
+        return stat.S_ISREG(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode)
+    except FileNotFoundError:
+        return False
+
+
+def remove_lock(fd, name, display):
+    try:
+        info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return 0
+    if not stat.S_ISREG(info.st_mode):
+        return 0
+    os.unlink(name, dir_fd=fd)
+    print(f'removed path={display!r} size={info.st_size} mtime={int(info.st_mtime)}', flush=True)
+    return 1
+
+
+def sweep_refs(fd, display):
+    removed = 0
+    for name in sorted(os.listdir(fd)):
+        path = f'{display}/{name}'
+        info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if stat.S_ISDIR(info.st_mode):
+            child = open_dir(fd, name)
+            if child is not None:
+                try:
+                    removed += sweep_refs(child, path)
+                finally:
+                    os.close(child)
+        elif name.endswith('.lock'):
+            removed += remove_lock(fd, name, path)
+    return removed
+
+
+def sweep_repo(fd, display):
+    # A bare repo has these markers directly inside <name>.git, unlike a
+    # working clone or an arbitrary folder that happens to end in .git.
+    if not regular(fd, 'HEAD') or not regular(fd, 'config'):
+        return 0
+    objects = open_dir(fd, 'objects')
+    refs = open_dir(fd, 'refs')
+    if objects is not None:
+        os.close(objects)
+    if refs is None or objects is None:
+        if refs is not None:
+            os.close(refs)
+        return 0
+    try:
+        removed = sweep_refs(refs, f'{display}/refs')
+    finally:
+        os.close(refs)
+    for name in TOP_LOCKS:
+        removed += remove_lock(fd, name, f'{display}/{name}')
+    for path, names in OBJECT_LOCKS.items():
+        child = open_path(fd, path)
+        if child is None:
+            continue
+        try:
+            for name in names:
+                removed += remove_lock(child, name, f'{display}/{path}/{name}')
+        finally:
+            os.close(child)
+    return removed
+
+
+def main():
+    if len(sys.argv) != 2 or not sys.argv[1].startswith('/'):
+        raise ValueError('expected one absolute git_hub_root')
+    # Wants preserves SSH on failure, but can retry a failed unit when another
+    # consumer starts. After the login barrier has ever started this boot,
+    # user managers may own live locks. Refuse even if that barrier later fails
+    # or stops. Root systemctl uses PID 1's private socket before D-Bus starts.
+    state = subprocess.run(
+        ['systemctl', 'show', 'systemd-user-sessions.service',
+         '-p', 'InactiveExitTimestampMonotonic', '--value'],
+        capture_output=True, text=True, timeout=10,
+    )
+    if state.returncode or state.stdout.strip() != '0':
+        raise ValueError('login barrier already started or state unavailable; boot cleanup refused')
+    root = os.path.normpath(sys.argv[1])
+    anchor = os.open('/', DIR_FLAGS)
+    try:
+        fd = open_path(anchor, root.lstrip('/')) if root != '/' else None
+    finally:
+        os.close(anchor)
+    if fd is None:
+        raise ValueError('git_hub_root must be an existing real directory below /')
+    removed = 0
+    try:
+        for name in sorted(os.listdir(fd)):
+            if not name.endswith('.git'):
+                continue
+            repo = open_dir(fd, name)
+            if repo is None:
+                continue
+            try:
+                removed += sweep_repo(repo, f'{root}/{name}')
+            finally:
+                os.close(repo)
+    finally:
+        os.close(fd)
+    if not removed:
+        print('no stale Git locks', flush=True)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f'git-hub stale-lock sweep failed: {exc}', file=sys.stderr, flush=True)
+        sys.exit(1)

@@ -131,6 +131,20 @@ if [[ "$(cv component_git_hub)" == yes ]]; then
 fi
 pass 'git fsync: other repositories local overrides are outside this check'
 
+# Only the server flag provisions local bare repos. Client and relay settings
+# must not require a system sweep. Keep these observations independent of lib.
+if [[ "$(cv component_git_hub)" == yes ]]; then
+  HUB_SYSTEM_ROOT="${KIT_GIT_HUB_SYSTEM_ROOT:-}"; HUB_SYSTEM_ROOT="${HUB_SYSTEM_ROOT%/}"
+  if [[ ! -f "$HUB_SYSTEM_ROOT/etc/systemd/system/git-hub-stale-locks.service" \
+     || ! -x "$HUB_SYSTEM_ROOT/usr/local/libexec/git-hub-stale-locks" ]]; then
+    failv 'git-hub stale-lock sweep missing; rerun the hub component install'
+  elif ! systemctl is-enabled -q git-hub-stale-locks.service 2>/dev/null; then
+    failv 'git-hub stale-lock sweep disabled; rerun the hub component install'
+  else
+    pass 'git-hub stale-lock sweep installed and enabled'
+  fi
+fi
+
 # Parse reach here independently (no lib.sh), by the same rule as lib.sh reach_mode (tests/test-reach.sh RR2):
 # the last `reach=` line's value up to any `#`, outer spaces and tabs trimmed, one pair of matching quotes removed.
 # Only an absent key keeps the tailnet default.
