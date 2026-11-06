@@ -104,6 +104,21 @@ def sweep_repo(fd, display):
 def main():
     if len(sys.argv) != 2 or not sys.argv[1].startswith('/'):
         raise ValueError('expected one absolute git_hub_root')
+    # Only this system unit's ordering holds basic.target back during cleanup.
+    # MainPID uses the same early-safe manager query as the boot guards below.
+    refusal = ('Refusing to run directly: only `git-hub-stale-locks.service` has the required boot ordering '
+               '— use `systemctl start git-hub-stale-locks.service` instead.')
+    if not os.environ.get('INVOCATION_ID'):
+        raise ValueError(refusal)
+    try:
+        owner = subprocess.run(
+            ['systemctl', 'show', 'git-hub-stale-locks.service', '-p', 'MainPID', '--value'],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(refusal) from exc
+    if owner.returncode or owner.stdout.strip() != str(os.getpid()):
+        raise ValueError(refusal)
     # Wants preserves SSH on failure, but can retry a failed unit when another
     # consumer starts. Ordinary services and root user managers may own Git
     # locks as soon as basic starts, before the later login barrier. Refuse if

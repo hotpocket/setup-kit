@@ -113,7 +113,7 @@ Verified on control VM 103 (Ubuntu 26.04): `ssh.socket` enabled and active; `use
 
 Install is atomic by content; only changed files trigger `daemon-reload`. Install always verifies enabled; check reports drift; `verify.sh` reports a missing or disabled helper/unit. Not yet tested: live install or reboot.
 
-Never sweep manually on an active hub: live Git may own locks.
+Never sweep by hand on a live hub; cleanup runs only early in boot, and starting it later will refuse.
 
 Undo, for operator review only, do not run without review:
 

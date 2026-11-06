@@ -3,6 +3,7 @@
 # Test the installed boot command and phase, using real local Git and fake root.
 SL="$TMP/stale"; mkdir -p "$SL/home" "$SL/bin" "$SL/hub" "$SL/system/proc"
 export KIT_GIT_HUB_SYSTEM_ROOT="$SL/system" KIT_MEMORY_ROOT="$SL/system"
+export INVOCATION_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 export ROOT="$SL/hub" HH="$SL/home" BIN="$SL/bin" SL
 printf 'MemTotal: 33554432 kB\n' > "$KIT_MEMORY_ROOT/proc/meminfo"
 cp "$TMP/bin/sudo" "$TMP/bin/loginctl" "$TMP/bin/ssh" "$BIN/"
@@ -10,6 +11,9 @@ cat > "$BIN/systemctl" <<'S'
 #!/bin/bash
 echo "$*" >> "$SL/systemctl.calls"
 case "$*" in
+  'show git-hub-stale-locks.service -p MainPID --value')
+    [[ ! -f "$SL/no-unit-state" ]] || exit 1
+    [[ -f "$SL/manual-run" ]] && echo 1 || echo "$PPID";;
   'show basic.target -p InactiveExitTimestampMonotonic --value')
     [[ ! -f "$SL/no-basic-state" ]] || exit 1
     [[ -f "$SL/basic-started" ]] && echo 12345 || echo 0;;
@@ -239,3 +243,29 @@ rm "$SL/no-basic-state"
 rm -f "$BASIC_WANT"; slverify
 assert 'SL37. independent verify rejects missing basic-target pull-in' \
   'grep -q "FAIL.*git-hub stale-lock sweep.*basic.target" "$TMP/out"'
+
+printf preserve > "$ROOT/books.git/refs/heads/main.lock"
+: > "$SL/systemctl.calls"
+touch "$SL/manual-run"; slsweep
+assert 'SL38. unmanaged invocation with inherited invocation ID refuses before boot queries' \
+  '(( SWEEP_RC == 1 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]] && grep -Fq "systemctl start git-hub-stale-locks.service" "$TMP/out" && ! grep -Fq "show basic.target" "$SL/systemctl.calls"'
+rm "$SL/manual-run"
+printf preserve > "$ROOT/books.git/refs/heads/main.lock"
+INVOCATION_ID= slsweep
+assert 'SL39. missing invocation ID refuses even if the manager names this PID' \
+  '(( SWEEP_RC == 1 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]] && grep -Fq "systemctl start git-hub-stale-locks.service" "$TMP/out"'
+printf preserve > "$ROOT/books.git/refs/heads/main.lock"
+touch "$SL/no-unit-state"; slsweep
+assert 'SL40. unavailable unit membership fails closed with the service command' \
+  '(( SWEEP_RC == 1 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]] && grep -Fq "systemctl start git-hub-stale-locks.service" "$TMP/out"'
+rm "$SL/no-unit-state"
+printf preserve > "$ROOT/books.git/refs/heads/main.lock"; slsweep
+assert 'SL41. helper as the service main PID with invocation ID sweeps before basic and login' \
+  '(( SWEEP_RC == 0 )) && [[ ! -e "$ROOT/books.git/refs/heads/main.lock" ]]'
+
+touch "$SL/manual-run"
+python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP" "$SL/live-manual" > "$SL/live-manual.json"
+LIVE_PROBE_RC=$?
+assert 'SL42. unmanaged early-boot helper preserves a real live ref transaction' \
+  '(( LIVE_PROBE_RC == 0 )) && python3 -c '\''import json,sys; sys.exit(not all(json.load(open(sys.argv[1])).values()))'\'' "$SL/live-manual.json"'
+rm "$SL/manual-run"
