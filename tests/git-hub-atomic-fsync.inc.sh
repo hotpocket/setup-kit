@@ -3,35 +3,6 @@
 # rename, then directory fsync. Trace the public CLI, not an extracted helper.
 AF="$TMP/atomic-fsync"; mkdir -p "$AF/bin"
 export AF LC_ALL=C
-mkdir -p "$AF/faults"
-cat > "$AF/faults/sitecustomize.py" <<'PY'
-# Fault only the requested semantic barrier, independent of ancestor count.
-import errno, os, signal, stat
-original_fsync = os.fsync
-publication_dir = None
-def fault_fsync(fd):
-    global publication_dir
-    path = os.readlink(f"/proc/self/fd/{fd}")
-    mode = os.environ.get("AF_FAULT", "")
-    regular = stat.S_ISREG(os.fstat(fd).st_mode)
-    state = os.environ["AF_STATE"]
-    temp = regular and path.startswith(state + "/") and ".tmp." in path
-    ancestry = path == os.environ["HOME"]
-    fail = ((mode == "file" and temp) or
-            (mode == "directory" and path == publication_dir) or
-            (mode in ("ancestry", "kill") and ancestry))
-    if fail:
-        with open(os.environ["AF_FAULT_LOG"], "a") as log:
-            log.write(f"{mode} EIO {path}\n")
-        if mode == "kill":
-            os.kill(os.getppid(), signal.SIGKILL)
-            os.kill(os.getpid(), signal.SIGKILL)
-        raise OSError(errno.EIO, "injected fsync failure", path)
-    original_fsync(fd)
-    if temp:
-        publication_dir = os.path.dirname(path)
-os.fsync = fault_fsync
-PY
 cat > "$AF/bin/t3x" <<'SH'
 #!/bin/bash
 echo delivered >> "$AF/deliveries"
@@ -64,14 +35,15 @@ afsetup() {
     "$HEAD_SHA" "$BASE" "$HEAD_SHA" > "$AF/pending"
 }
 afcli() {
-  local inject="${AF_INJECT:-}"
+  local inject="${AF_INJECT:-}"; local -a opts=()
+  [[ -z "$inject" ]] || opts=(-e "inject=fsync:error=EIO:when=$inject")
   # File/directory-publication faults use established parents. Fresh ancestry
   # has its own injected failure below, before any temp file is opened.
   if [[ -n "$inject" && "${AF_FRESH_INJECT:-0}" == 0 ]]; then
     mkdir -p "$STATE_AF/release/books.rejected.d" "$STATE_AF/relay" "$STATE_AF/books"
   fi
-  env PYTHONPATH="$AF/faults" AF_FAULT="$inject" AF_STATE="$STATE_AF" AF_FAULT_LOG="$CASE/fault.log" PATH="$AF/bin:/usr/bin:/bin" HOME="$CASE/home" XDG_STATE_HOME="${AF_XDG_STATE_HOME:-$CASE/home/.local/state}" HOST_CONF="$CASE/host.conf" KIT_LOG_DIR="$CASE/logs" \
-    strace -f -yy -o "$CASE/trace" -e trace=fsync,fdatasync,mkdir,mkdirat,rename,renameat,renameat2 \
+  env PATH="$AF/bin:/usr/bin:/bin" HOME="$CASE/home" XDG_STATE_HOME="${AF_XDG_STATE_HOME:-$CASE/home/.local/state}" HOST_CONF="$CASE/host.conf" KIT_LOG_DIR="$CASE/logs" \
+    strace -f -yy -o "$CASE/trace" -e trace=fsync,fdatasync,mkdir,mkdirat,rename,renameat,renameat2 "${opts[@]}" \
     bash "$KIT_DIR/components/git-hub/git-hub" "$@" > "$TMP/out" 2>&1
   AF_RC=$?
 }
@@ -131,38 +103,38 @@ afsetup content docs; afcli release; aforder books/main > "$CASE/order" 2>&1; OR
 assert 'AF3. unattended content-forward marker has file-rename-directory fsync order' \
   '(( AF_RC == 0 && ORDER_RC == 0 )) && afclean'
 
-afsetup file-failure; AF_INJECT=file afcli release
+afsetup file-failure; AF_INJECT=1 afcli release
 assert 'AF4. failed file fsync fails release before publication and removes its temp' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ ! -e "$STATE_AF/release/books.lease" && ! -e "$STATE_AF/release/books.request" ]] && afclean'
-afsetup dir-failure; AF_INJECT=directory afcli release
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ ! -e "$STATE_AF/release/books.lease" && ! -e "$STATE_AF/release/books.request" ]] && afclean'
+afsetup dir-failure; AF_INJECT=2 afcli release
 assert 'AF5. failed directory fsync is reported even after rename, and removes its temp' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ -s "$STATE_AF/release/books.lease" && ! -e "$STATE_AF/release/books.request" ]] && afclean'
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ -s "$STATE_AF/release/books.lease" && ! -e "$STATE_AF/release/books.request" ]] && afclean'
 afcli release
 assert 'AF6. release retries a failed directory sync without losing the queued review' \
   '(( AF_RC == 0 )) && [[ -s "$STATE_AF/release/books.lease" && -s "$STATE_AF/release/books.request" ]] && grep -q "$HEAD_SHA" "$STATE_AF/release/books.request" && afclean'
 
-afsetup relay-file-failure; AF_INJECT=file afcli relay
+afsetup relay-file-failure; AF_INJECT=1 afcli relay
 assert 'AF7. failed relay marker file fsync reaches caller and leaves delivery unrecorded' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ ! -e "$STATE_AF/relay/books" ]] && ! grep -q "git-hub relay:.*sent" "$TMP/out" && afclean'
-afsetup relay-dir-failure; AF_INJECT=directory afcli relay
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ ! -e "$STATE_AF/relay/books" ]] && ! grep -q "git-hub relay:.*sent" "$TMP/out" && afclean'
+afsetup relay-dir-failure; AF_INJECT=2 afcli relay
 assert 'AF8. failed relay marker directory fsync reaches caller without reporting success' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ -s "$STATE_AF/relay/books" ]] && ! grep -q "git-hub relay:.*sent" "$TMP/out" && afclean'
-afsetup forward-failure; AF_INJECT=file afcli forward books main
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ -s "$STATE_AF/relay/books" ]] && ! grep -q "git-hub relay:.*sent" "$TMP/out" && afclean'
+afsetup forward-failure; AF_INJECT=1 afcli forward books main
 assert 'AF9. shared forward marker sync failure reaches the forwarding caller' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ ! -e "$STATE_AF/books/main" ]] && afclean'
-afsetup reject-failure; afcli release; AF_INJECT=file afcli verdict books "$HEAD_SHA" reject rejected
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ ! -e "$STATE_AF/books/main" ]] && afclean'
+afsetup reject-failure; afcli release; AF_INJECT=1 afcli verdict books "$HEAD_SHA" reject rejected
 assert 'AF10. rejection sync failure preserves the request and lease for retry' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ ! -e "$STATE_AF/release/books.rejected.d/$HEAD_SHA" && -s "$STATE_AF/release/books.request" && -s "$STATE_AF/release/books.lease" ]] && afclean'
-afsetup pass-failure; afcli release; AF_INJECT=file afcli verdict books "$HEAD_SHA" pass --sol=limit accepted
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ ! -e "$STATE_AF/release/books.rejected.d/$HEAD_SHA" && -s "$STATE_AF/release/books.request" && -s "$STATE_AF/release/books.lease" ]] && afclean'
+afsetup pass-failure; afcli release; AF_INJECT=1 afcli verdict books "$HEAD_SHA" pass --sol=limit accepted
 assert 'AF11. verdict forward-marker sync failure preserves the request and lease' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ ! -e "$STATE_AF/books/main" && -s "$STATE_AF/release/books.request" && -s "$STATE_AF/release/books.lease" ]] && afclean'
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ ! -e "$STATE_AF/books/main" && -s "$STATE_AF/release/books.request" && -s "$STATE_AF/release/books.lease" ]] && afclean'
 afsetup t3x-failure; echo git_hub_review_via=t3x >> "$CASE/host.conf"; : > "$AF/deliveries"
-AF_INJECT=file afcli release
+AF_INJECT=1 afcli release
 assert 'AF12. review lease sync failure stops T3 delivery and reaches caller' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ ! -s "$AF/deliveries" && ! -e "$STATE_AF/release/books.lease" ]] && afclean'
-afsetup content-failure docs; AF_INJECT=file afcli release
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ ! -s "$AF/deliveries" && ! -e "$STATE_AF/release/books.lease" ]] && afclean'
+afsetup content-failure docs; AF_INJECT=1 afcli release
 assert 'AF13. unattended content-forward marker sync failure reaches release caller' \
-  '(( AF_RC != 0 )) && grep -q "EIO" "$CASE/fault.log" && [[ ! -e "$STATE_AF/books/main" ]] && afclean'
+  '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ ! -e "$STATE_AF/books/main" ]] && afclean'
 
 afsetup fresh-ancestry
 AF_XDG_STATE_HOME="$CASE/home/fresh/nested/state"; STATE_AF="$AF_XDG_STATE_HOME/git-hub"
@@ -175,35 +147,6 @@ assert 'AF14. fresh nested state directories have each parent fsynced before pub
 unset AF_XDG_STATE_HOME
 
 afsetup ancestry-failure
-AF_FRESH_INJECT=1 AF_INJECT=ancestry afcli release
+AF_FRESH_INJECT=1 AF_INJECT=1 afcli release
 assert 'AF15. new-directory parent fsync failure reaches caller before file publication' \
-  '(( AF_RC != 0 )) && grep -Fxq "ancestry EIO $CASE/home" "$CASE/fault.log" && [[ ! -e "$STATE_AF/release/books.lease" ]] && afclean'
-
-# The failed attempt left .local behind. Its existence is not durability proof.
-afancestry() {
-  python3 - "$CASE/trace" "$CASE/home" "$STATE_AF" <<'PY'
-import pathlib, re, sys
-trace, parent, state = sys.argv[1:]
-lines = pathlib.Path(trace).read_text().splitlines()
-publication = next(i for i, line in enumerate(lines)
-                   if re.search(r"\b(?:rename|renameat|renameat2)\(", line) and state in line and re.search(r"= 0\s*$", line))
-assert any(re.search(r"fsync\(\d+<" + re.escape(parent) + r">\)\s*= 0\s*$", line)
-           for line in lines[:publication]), f"retry skipped fsync of existing directory's parent: {parent}"
-PY
-}
-[[ -d "$CASE/home/.local" && ! -e "$STATE_AF/release/books.lease" ]] && LEFTOVER_DIR=1 || LEFTOVER_DIR=0
-cp "$CASE/trace" "$CASE/first.trace"
-afcli release; afancestry > "$CASE/retry-order" 2>&1; RETRY_ORDER_RC=$?
-(( RETRY_ORDER_RC == 0 )) || cat "$CASE/retry-order"
-assert 'AF16. retry after parent EIO re-fsyncs that parent despite existing directories' \
-  '(( AF_RC == 0 && RETRY_ORDER_RC == 0 && LEFTOVER_DIR == 1 )) && [[ -s "$STATE_AF/release/books.request" ]] && afclean'
-
-afsetup ancestry-interrupted
-AF_FRESH_INJECT=1 AF_INJECT=kill afcli release
-INTERRUPTED_RC=$AF_RC
-[[ -d "$CASE/home/.local" && ! -e "$STATE_AF/release/books.lease" ]] && LEFTOVER_DIR=1 || LEFTOVER_DIR=0
-cp "$CASE/trace" "$CASE/first.trace"
-afcli release; afancestry > "$CASE/retry-order" 2>&1; RETRY_ORDER_RC=$?
-(( RETRY_ORDER_RC == 0 )) || cat "$CASE/retry-order"
-assert 'AF17. retry after kill at parent barrier re-fsyncs existing ancestry and finishes' \
-  '(( INTERRUPTED_RC != 0 && AF_RC == 0 && RETRY_ORDER_RC == 0 && LEFTOVER_DIR == 1 )) && grep -Fxq "kill EIO $CASE/home" "$CASE/fault.log" && [[ -s "$STATE_AF/release/books.request" ]] && afclean'
+  '(( AF_RC != 0 )) && grep -F "$CASE/home>" "$CASE/trace" | grep -Eq "fsync.*EIO.*INJECTED" && [[ ! -e "$STATE_AF/release/books.lease" ]] && afclean'

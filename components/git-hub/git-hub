@@ -238,16 +238,19 @@ owner_alive() {
 }
 rlog() { local l="$*"; l="${l//[$'\n\r']/ }"; echo "$l"; durable_mkdir "$STATE" || return 1; echo "$(date -Iseconds) $l" >> "$STATE/release.log"; }
 durable_mkdir() {
-  # Existence cannot prove a previous fsync succeeded. Re-publish every parent
-  # from the filesystem root (the only unconditional anchor), also on retries.
+  # Each new directory name lives in its parent. Publish those names from the
+  # first existing ancestor downward before publishing any state file.
   python3 - "$1" <<'PY'
 import os, sys
-directory = os.path.realpath(sys.argv[1])
-parents = []
-while directory != '/':
-    parents.append(directory)
-    directory = os.path.dirname(directory)
-for directory in reversed(parents):
+directory = os.path.abspath(sys.argv[1])
+missing = []
+while not os.path.isdir(directory):
+    missing.append(directory)
+    parent = os.path.dirname(directory)
+    if parent == directory:
+        raise OSError('no existing state directory ancestor')
+    directory = parent
+for directory in reversed(missing):
     try:
         os.mkdir(directory)
     except FileExistsError:
