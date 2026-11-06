@@ -186,8 +186,9 @@ if [[ "$(cv component_git_hub)" == yes ]]; then
   if [[ ! -f "$HUB_SYSTEM_ROOT/etc/systemd/system/git-hub-stale-locks.service" \
      || ! -x "$HUB_SYSTEM_ROOT/usr/local/libexec/git-hub-stale-locks" ]]; then
     failv 'git-hub stale-lock sweep missing; rerun the hub component install'
-  elif ! systemctl is-enabled -q git-hub-stale-locks.service 2>/dev/null; then
-    failv 'git-hub stale-lock sweep disabled; rerun the hub component install'
+  elif ! systemctl is-enabled -q git-hub-stale-locks.service 2>/dev/null \
+      || [[ "$(readlink -f "$HUB_SYSTEM_ROOT/etc/systemd/system/basic.target.wants/git-hub-stale-locks.service")" != "$HUB_SYSTEM_ROOT/etc/systemd/system/git-hub-stale-locks.service" ]]; then
+    failv 'git-hub stale-lock sweep disabled or missing basic.target pull-in; rerun the hub component install'
   else
     pass 'git-hub stale-lock sweep installed and enabled'
   fi

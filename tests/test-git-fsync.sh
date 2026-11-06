@@ -19,6 +19,8 @@ export KIT_GIT_HUB_SYSTEM_ROOT="$TMP/hub-system"
 mkdir -p "$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system" "$KIT_GIT_HUB_SYSTEM_ROOT/usr/local/libexec"
 : > "$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system/git-hub-stale-locks.service"
 install -m 0755 /dev/null "$KIT_GIT_HUB_SYSTEM_ROOT/usr/local/libexec/git-hub-stale-locks"
+mkdir -p "$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system/basic.target.wants"
+ln -s ../git-hub-stale-locks.service "$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system/basic.target.wants/git-hub-stale-locks.service"
 cat > "$BIN/sudo" <<'SH'
 #!/bin/bash
 printf '%s\n' "$*" >> "$CALLS"

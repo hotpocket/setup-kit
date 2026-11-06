@@ -236,11 +236,37 @@ owner_alive() {
   (( BASH_REMATCH[1] > 0 )) || return 0                             # no such thread here: keep
   (( BASH_REMATCH[2] > 0 ))
 }
-rlog() { local l="$*"; l="${l//[$'\n\r']/ }"; echo "$l"; mkdir -p "$STATE"; echo "$(date -Iseconds) $l" >> "$STATE/release.log"; }
+rlog() { local l="$*"; l="${l//[$'\n\r']/ }"; echo "$l"; durable_mkdir "$STATE" || return 1; echo "$(date -Iseconds) $l" >> "$STATE/release.log"; }
+durable_mkdir() {
+  # Each new directory name lives in its parent. Publish those names from the
+  # first existing ancestor downward before publishing any state file.
+  python3 - "$1" <<'PY'
+import os, sys
+directory = os.path.abspath(sys.argv[1])
+missing = []
+while not os.path.isdir(directory):
+    missing.append(directory)
+    parent = os.path.dirname(directory)
+    if parent == directory:
+        raise OSError('no existing state directory ancestor')
+    directory = parent
+for directory in reversed(missing):
+    try:
+        os.mkdir(directory)
+    except FileExistsError:
+        if not os.path.isdir(directory):
+            raise
+    parent_fd = os.open(os.path.dirname(directory), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
+PY
+}
 atomic() {
   local f="$1" dir tmp; shift
   dir="$(dirname "$f")"; tmp="$f.tmp.$$"
-  mkdir -p "$dir" || return 1
+  durable_mkdir "$dir" || return 1
   # Ubuntu 26.04's uutils sync FILE calls global sync(), not fsync(FILE).
   # Use explicit syscalls for both barriers, independent of coreutils variants.
   if printf '%s\n' "$*" > "$tmp" && python3 - "$tmp" "$f" "$dir" <<'PY'
@@ -490,7 +516,8 @@ release_prune() {  # release_prune <name> <bare> <head> <hubsha>: branches alrea
 }
 
 release_lock() {  # one release or verdict at a time: base, lease and forward must agree
-  mkdir -p "$STATE"; exec 9>"$STATE/release.lock"
+  durable_mkdir "$STATE" || return 1
+  exec 9>"$STATE/release.lock"
   flock -w 900 9 || { echo "git-hub: another release or verdict holds the lock" >&2; return 1; }
   # atomic writes <state>.tmp.<pid>. Match the whole suffix, since a valid repo
   # name can itself contain .tmp.; include hidden and no-longer-configured repos.
@@ -557,7 +584,8 @@ cmd_gate() {
   local -a words=()
   if [[ "$cmd" == pending ]]; then
     # Shorter than relay's SSH timeout: leave no server-side waiters behind.
-    mkdir -p "$STATE"; exec 9>"$STATE/release.lock"
+    durable_mkdir "$STATE" || return 1
+    exec 9>"$STATE/release.lock"
     flock -w 20 9 2>/dev/null || return 0
     local e
     for e in $GIT_HUB_REPOS; do
@@ -613,7 +641,7 @@ cmd_relay() {
   [[ -n "$REVIEW_THREAD" ]] || { echo "git-hub: relay needs git_hub_review_thread" >&2; return 2; }
   local dir="$STATE/relay" tmp name sha line header="" body="" file commit_failed=0
   local -A open=()
-  mkdir -p "$dir" || return 1
+  durable_mkdir "$dir" || return 1
   exec 8>"$STATE/relay.lock"; flock -n 8 || return 0
   # An interrupted owner can leave a buffered response, never a completion marker.
   rm -f "$STATE"/.relay-pending.*

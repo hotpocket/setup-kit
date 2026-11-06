@@ -57,7 +57,7 @@ Description=Recover stale Git transaction locks before hub logins
 DefaultDependencies=no
 Wants=local-fs.target
 After=local-fs.target
-Before=ssh.service ssh.socket systemd-user-sessions.service
+Before=basic.target ssh.service ssh.socket systemd-user-sessions.service
 Conflicts=shutdown.target
 Before=shutdown.target
 [Service]
@@ -68,7 +68,7 @@ ExecStart=$helper \"$quoted\"
 StandardOutput=journal
 StandardError=journal
 [Install]
-WantedBy=ssh.service ssh.socket systemd-user-sessions.service"
+WantedBy=basic.target ssh.service ssh.socket systemd-user-sessions.service"
   path="$root$helper"
   if [[ ! -L "$path" && -x "$path" ]] && cmp -s "$KIT_DIR/components/git-hub/stale-locks" "$path"; then
     ok 'git-hub-stale-locks helper current'
@@ -99,8 +99,11 @@ WantedBy=ssh.service ssh.socket systemd-user-sessions.service"
     fi
   fi
   if (( changed )); then sudo systemctl daemon-reload || return 1; fi
-  if ! systemctl is-enabled -q "$unit" 2>/dev/null; then
-    warn 'git-hub-stale-locks unit not enabled'
+  # An old SSH-only enablement still reports enabled. Reconcile the basic
+  # pull-in separately, including an install interrupted after writing the unit.
+  if ! systemctl is-enabled -q "$unit" 2>/dev/null \
+      || [[ "$(readlink -f "$root/etc/systemd/system/basic.target.wants/$unit")" != "$path" ]]; then
+    warn 'git-hub-stale-locks unit not enabled before basic.target'
     (( ! INSTALL )) || sudo systemctl enable "$unit" || return 1
   fi
   return 0

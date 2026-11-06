@@ -105,16 +105,18 @@ def main():
     if len(sys.argv) != 2 or not sys.argv[1].startswith('/'):
         raise ValueError('expected one absolute git_hub_root')
     # Wants preserves SSH on failure, but can retry a failed unit when another
-    # consumer starts. After the login barrier has ever started this boot,
-    # user managers may own live locks. Refuse even if that barrier later fails
-    # or stops. Root systemctl uses PID 1's private socket before D-Bus starts.
-    state = subprocess.run(
-        ['systemctl', 'show', 'systemd-user-sessions.service',
-         '-p', 'InactiveExitTimestampMonotonic', '--value'],
-        capture_output=True, text=True, timeout=10,
-    )
-    if state.returncode or state.stdout.strip() != '0':
-        raise ValueError('login barrier already started or state unavailable; boot cleanup refused')
+    # consumer starts. Ordinary services and root user managers may own Git
+    # locks as soon as basic starts, before the later login barrier. Refuse if
+    # either has ever started, including failed/stopped units. Root systemctl
+    # uses PID 1's private socket and needs no running D-Bus service.
+    for unit, label in (('basic.target', 'basic target'),
+                        ('systemd-user-sessions.service', 'login barrier')):
+        state = subprocess.run(
+            ['systemctl', 'show', unit, '-p', 'InactiveExitTimestampMonotonic', '--value'],
+            capture_output=True, text=True, timeout=10,
+        )
+        if state.returncode or state.stdout.strip() != '0':
+            raise ValueError(f'{label} already started or state unavailable; boot cleanup refused')
     root = os.path.normpath(sys.argv[1])
     anchor = os.open('/', DIR_FLAGS)
     try:

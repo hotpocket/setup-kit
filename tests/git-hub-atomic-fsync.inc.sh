@@ -37,19 +37,33 @@ afsetup() {
 afcli() {
   local inject="${AF_INJECT:-}"; local -a opts=()
   [[ -z "$inject" ]] || opts=(-e "inject=fsync:error=EIO:when=$inject")
-  env PATH="$AF/bin:/usr/bin:/bin" HOME="$CASE/home" HOST_CONF="$CASE/host.conf" KIT_LOG_DIR="$CASE/logs" \
-    strace -f -yy -o "$CASE/trace" -e trace=fsync,fdatasync,rename,renameat,renameat2 "${opts[@]}" \
+  # File/directory-publication faults use established parents. Fresh ancestry
+  # has its own injected failure below, before any temp file is opened.
+  if [[ -n "$inject" && "${AF_FRESH_INJECT:-0}" == 0 ]]; then
+    mkdir -p "$STATE_AF/release/books.rejected.d" "$STATE_AF/relay" "$STATE_AF/books"
+  fi
+  env PATH="$AF/bin:/usr/bin:/bin" HOME="$CASE/home" XDG_STATE_HOME="${AF_XDG_STATE_HOME:-$CASE/home/.local/state}" HOST_CONF="$CASE/host.conf" KIT_LOG_DIR="$CASE/logs" \
+    strace -f -yy -o "$CASE/trace" -e trace=fsync,fdatasync,mkdir,mkdirat,rename,renameat,renameat2 "${opts[@]}" \
     bash "$KIT_DIR/components/git-hub/git-hub" "$@" > "$TMP/out" 2>&1
   AF_RC=$?
 }
 aforder() {
-  python3 - "$CASE/trace" "$STATE_AF" "$@" <<'PY'
+  python3 - "$CASE/trace" "$STATE_AF" "$CASE/home" "$@" <<'PY'
 import ast, pathlib, re, sys
 root = pathlib.Path(sys.argv[2])
-expected = {root / name for name in sys.argv[3:]}
+home = pathlib.Path(sys.argv[3])
+expected = {root / name for name in sys.argv[4:]}
 events, renamed = [], set()
 for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
     if not re.search(r'= 0\s*$', line):
+        continue
+    call = re.search(r'\b(?:mkdir|mkdirat)\(', line)
+    if call:
+        paths = re.findall(r'"(?:[^"\\]|\\.)*"', line)
+        if paths:
+            path = pathlib.Path(ast.literal_eval(paths[0]))
+            if home in path.parents and any(path in dest.parents for dest in expected):
+                events.append(('mkdir', path))
         continue
     call = re.search(r'\b(?:rename|renameat|renameat2)\(', line)
     if call:
@@ -63,16 +77,18 @@ for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
     match = re.search(r'\bfsync\(\d+<([^>]+)>\)', line)
     if match:
         path = pathlib.Path(match[1])
-        if path == root or root in path.parents:
+        if path == home or home in path.parents:
             events.append(('sync', path))
 assert renamed == expected, f'publications {renamed}, expected {expected}'
-assert len(events) == 3 * len(expected), f'expected file fsync, rename, dir fsync for every publication; got {events}'
-for offset in range(0, len(events), 3):
-    before, rename, after = events[offset:offset+3]
-    assert rename[0] == 'rename', f'publication order: {events}'
-    assert before == ('sync', rename[1]), f'temp not fsynced before rename: {events}'
-    assert after == ('sync', rename[2].parent), f'directory not fsynced after rename: {events}'
-print('every state publication: file fsync -> rename -> directory fsync')
+for offset, event in enumerate(events):
+    if event[0] == 'rename':
+        assert offset > 0 and events[offset-1] == ('sync', event[1]), f'temp not fsynced before rename: {events}'
+        assert offset+1 < len(events) and events[offset+1] == ('sync', event[2].parent), f'directory not fsynced after rename: {events}'
+    if event[0] == 'mkdir':
+        publication = next(i for i in range(offset+1, len(events))
+                           if events[i][0] == 'rename' and event[1] in events[i][2].parents)
+        assert ('sync', event[1].parent) in events[offset+1:publication], f'new directory parent not fsynced before publication: {event[1]}'
+print('every new directory entry and file publication has ordered fsync barriers')
 PY
 }
 afclean() { [[ -z "$(find "$STATE_AF" -type f -name '*.tmp.*' -print 2>/dev/null)" ]]; }
@@ -119,3 +135,18 @@ assert 'AF12. review lease sync failure stops T3 delivery and reaches caller' \
 afsetup content-failure docs; AF_INJECT=1 afcli release
 assert 'AF13. unattended content-forward marker sync failure reaches release caller' \
   '(( AF_RC != 0 )) && grep -Eq "fsync.*EIO.*INJECTED" "$CASE/trace" && [[ ! -e "$STATE_AF/books/main" ]] && afclean'
+
+afsetup fresh-ancestry
+AF_XDG_STATE_HOME="$CASE/home/fresh/nested/state"; STATE_AF="$AF_XDG_STATE_HOME/git-hub"
+git --git-dir="$CASE/hub/books.git" update-ref refs/heads/feature/deep/topic "$HEAD_SHA"
+afcli forward books feature/deep/topic
+aforder books/feature/deep/topic > "$CASE/order" 2>&1; ORDER_RC=$?
+(( ORDER_RC == 0 )) || cat "$CASE/order"
+assert 'AF14. fresh nested state directories have each parent fsynced before publication' \
+  '(( AF_RC == 0 && ORDER_RC == 0 )) && [[ -s "$STATE_AF/books/feature/deep/topic" ]] && afclean'
+unset AF_XDG_STATE_HOME
+
+afsetup ancestry-failure
+AF_FRESH_INJECT=1 AF_INJECT=1 afcli release
+assert 'AF15. new-directory parent fsync failure reaches caller before file publication' \
+  '(( AF_RC != 0 )) && grep -F "$CASE/home>" "$CASE/trace" | grep -Eq "fsync.*EIO.*INJECTED" && [[ ! -e "$STATE_AF/release/books.lease" ]] && afclean'

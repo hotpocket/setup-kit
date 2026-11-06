@@ -10,11 +10,20 @@ cat > "$BIN/systemctl" <<'S'
 #!/bin/bash
 echo "$*" >> "$SL/systemctl.calls"
 case "$*" in
+  'show basic.target -p InactiveExitTimestampMonotonic --value')
+    [[ ! -f "$SL/no-basic-state" ]] || exit 1
+    [[ -f "$SL/basic-started" ]] && echo 12345 || echo 0;;
   'show systemd-user-sessions.service -p InactiveExitTimestampMonotonic --value')
     [[ ! -f "$SL/no-barrier-state" ]] || exit 1
     [[ -f "$SL/login-started" ]] && echo 12345 || echo 0;;
   'is-enabled -q git-hub-stale-locks.service') [[ -f "$SL/enabled" ]];;
-  'enable git-hub-stale-locks.service') touch "$SL/enabled";;
+  'enable git-hub-stale-locks.service')
+    touch "$SL/enabled"
+    ud="$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system"
+    for target in $(sed -n 's/^WantedBy=//p' "$ud/git-hub-stale-locks.service"); do
+      mkdir -p "$ud/$target.wants"
+      ln -sfn ../git-hub-stale-locks.service "$ud/$target.wants/git-hub-stale-locks.service"
+    done;;
   *git-hub-stale-locks*) exit 98;;
 esac
 S
@@ -52,7 +61,7 @@ slphase install
 assert 'SL3. hub installs executable and enabled system oneshot without starting it' \
   '[[ -x "$SWEEP" && -f "$UNIT" && -f "$SL/enabled" ]] && ! grep -Eq "(start|restart|--now).*git-hub-stale-locks" "$SL/systemctl.calls"'
 assert 'SL4. boot unit precedes SSH service/socket and user-session barrier after local filesystems' \
-  'grep -qx "DefaultDependencies=no" "$UNIT" && grep -qx "After=local-fs.target" "$UNIT" && grep -qx "Wants=local-fs.target" "$UNIT" && grep -qx "Before=ssh.service ssh.socket systemd-user-sessions.service" "$UNIT" && grep -qx "WantedBy=ssh.service ssh.socket systemd-user-sessions.service" "$UNIT" && grep -qx "Type=oneshot" "$UNIT" && grep -qx "RemainAfterExit=yes" "$UNIT" && ! grep -q "^Requires=" "$UNIT" && grep -Fqx "ExecStart=/usr/local/libexec/git-hub-stale-locks \"$ROOT\"" "$UNIT"'
+  'grep -qx "DefaultDependencies=no" "$UNIT" && grep -qx "After=local-fs.target" "$UNIT" && grep -qx "Wants=local-fs.target" "$UNIT" && grep -qx "Before=basic.target ssh.service ssh.socket systemd-user-sessions.service" "$UNIT" && grep -qx "WantedBy=basic.target ssh.service ssh.socket systemd-user-sessions.service" "$UNIT" && grep -qx "Type=oneshot" "$UNIT" && grep -qx "RemainAfterExit=yes" "$UNIT" && ! grep -q "^Requires=" "$UNIT" && grep -Fqx "ExecStart=/usr/local/libexec/git-hub-stale-locks \"$ROOT\"" "$UNIT"'
 : > "$SL/systemctl.calls"; slphase install
 assert 'SL5. identical install does not reload system manager' '! grep -qx daemon-reload "$SL/systemctl.calls"'
 rm -f "$SL/enabled"; slphase check
@@ -197,3 +206,36 @@ rm "$SL/login-started"; printf preserve > "$ROOT/books.git/refs/heads/main.lock"
 touch "$SL/no-barrier-state"; slsweep
 assert 'SL29. unavailable boot-barrier state refuses cleanup' \
   '(( SWEEP_RC == 1 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]] && grep -q "login barrier" "$TMP/out"'
+rm "$SL/no-barrier-state"
+
+# An old SSH-only enablement must not hide a missing basic.target pull-in.
+BASIC_WANT="$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system/basic.target.wants/git-hub-stale-locks.service"
+rm -f "$BASIC_WANT"; slconf component_git_hub=yes; slphase check
+assert 'SL30. check reports missing basic-target pull-in despite SSH enablement' \
+  'grep -q "WARN.*git-hub-stale-locks.*basic.target" "$TMP/out" && [[ ! -e "$BASIC_WANT" ]]'
+slphase install
+assert 'SL31. install repairs interrupted basic-target enablement with current files' \
+  '[[ "$(readlink -f "$BASIC_WANT")" == "$UNIT" ]]'
+
+python3 "$KIT_DIR/tests/git-hub-boot-order.py" "$UNIT" "$SL/boot-order" > "$SL/boot-order.json"
+BOOT_PROBE_RC=$?
+for scenario in service-only-ssh git-daemon root-manager; do
+  case "$scenario" in service-only-ssh) graph_id=SL32;; git-daemon) graph_id=SL33;; root-manager) graph_id=SL34;; esac
+  assert "$graph_id. sweep is before $scenario without a login or socket barrier; old ordering is detected" \
+    '(( BOOT_PROBE_RC == 0 )) && python3 -c '\''import json,sys; r=json.load(open(sys.argv[1]))[sys.argv[2]]; sys.exit(not all(r.values()))'\'' "$SL/boot-order.json" "$scenario"'
+done
+
+touch "$SL/basic-started"
+python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP" "$SL/live-basic" > "$SL/live-basic.json"
+LIVE_PROBE_RC=$?
+assert 'SL35. after basic.target a live prepared Git ref lock survives and commits' \
+  '(( LIVE_PROBE_RC == 0 )) && python3 -c '\''import json,sys; sys.exit(not all(json.load(open(sys.argv[1])).values()))'\'' "$SL/live-basic.json"'
+rm "$SL/basic-started"; touch "$SL/no-basic-state"
+python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP" "$SL/live-unknown" > "$SL/live-unknown.json"
+LIVE_PROBE_RC=$?
+assert 'SL36. unknown basic-target state preserves a live prepared Git ref lock' \
+  '(( LIVE_PROBE_RC == 0 )) && python3 -c '\''import json,sys; sys.exit(not all(json.load(open(sys.argv[1])).values()))'\'' "$SL/live-unknown.json"'
+rm "$SL/no-basic-state"
+rm -f "$BASIC_WANT"; slverify
+assert 'SL37. independent verify rejects missing basic-target pull-in' \
+  'grep -q "FAIL.*git-hub stale-lock sweep.*basic.target" "$TMP/out"'
