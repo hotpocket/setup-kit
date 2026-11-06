@@ -62,12 +62,70 @@ echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 # this check, and verification deliberately does not share installer helpers.
 for pair in core.fsync=committed core.fsyncMethod=fsync; do
   key="${pair%%=*}"; want="${pair#*=}"
-  if [[ "$(git config --system --includes --get "$key" 2>/dev/null)" == "$want" ]]; then
+  if [[ "$(git --git-dir=/dev/null config --system --includes --get "$key" 2>/dev/null)" == "$want" ]]; then
     pass "git fsync: system $key=$want"
   else
     failv "git fsync: system $key must be $want; rerun workstation or worker install"
   fi
 done
+
+# Evaluate coverage independently of the installer's Bash bitmask. Git adds
+# positive components after subtracting negatives from the Linux default.
+fsync_covers_committed() {
+  printf '%s\n' "$1" | awk '
+    { text = text (NR > 1 ? "\n" : "") $0 }
+    END {
+      basepack = 1
+      while (length(text)) {
+        sub(/^[, \t\r\n]+/, "", text)
+        if (text == "none") { basepack = 0; break }
+        comma = index(text, ",")
+        if (comma) { token = substr(text, 1, comma - 1); text = substr(text, comma + 1) }
+        else { token = text; text = "" }
+        if (token == "") break
+        negated = substr(token, 1, 1) == "-"
+        if (negated) token = substr(token, 2)
+        if (token !~ /^(loose-object|pack|reference|objects|committed|added|all|pack-metadata|commit-graph|index|derived-metadata|none)$/) { bad = 1; break }
+        if (negated) {
+          if (token ~ /^(pack|objects|committed|added|all)$/) offpack = 1
+        } else {
+          if (token ~ /^(loose-object|objects|committed|added|all)$/) loose = 1
+          if (token ~ /^(pack|objects|committed|added|all)$/) pack = 1
+          if (token ~ /^(reference|committed|added|all)$/) reference = 1
+        }
+      }
+      if (bad || !loose || !reference || !(pack || (basepack && !offpack))) exit 1
+    }'
+}
+verify_fsync_effective() {
+  local label="$1" repo="$2" key value origin good want
+  local -a record
+  for key in core.fsync core.fsyncMethod; do
+    mapfile -d '' -t record < <(git --git-dir="$repo" config --null --includes --show-origin --get "$key" 2>/dev/null)
+    origin="${record[0]:-unavailable}"; value="${record[1]:-}"; good=0; want=fsync
+    [[ "$key" != core.fsync ]] || want=committed
+    if (( ${#record[@]} == 2 )); then
+      if [[ "$key" == core.fsync ]]; then fsync_covers_committed "$value" && good=1
+      elif [[ "$value" == fsync ]]; then good=1; fi
+    fi
+    if (( good )); then pass "git fsync: $label $key=$value from $origin"
+    else failv "git fsync: $label $key lacks required durability from $origin; set $key=$want there"; fi
+  done
+}
+# Suppress only the incidental checkout. Normal system, HOME/XDG and command
+# scopes remain active; each declared bare hub repo is then checked explicitly.
+verify_fsync_effective 'invoking user' /dev/null
+if [[ "$(cv component_git_hub)" == yes ]]; then
+  FSYNC_HUB_ROOT="$(cv git_hub_root | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+  FSYNC_HUB_ROOT="${FSYNC_HUB_ROOT:-/srv/git}"
+  FSYNC_HUB_REPOS="$(cv git_hub_repos | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+  for entry in $FSYNC_HUB_REPOS; do
+    slug="${entry%%:*}"; name="${slug##*/}"; repo="$FSYNC_HUB_ROOT/$name.git"
+    if [[ -f "$repo/HEAD" ]]; then verify_fsync_effective "hub $name.git" "$repo"
+    else failv "git fsync: hub $name.git not initialized; effective settings not checked"; fi
+  done
+fi
+pass 'git fsync: other repositories local overrides are outside this check'
 
 # Parse reach here independently (no lib.sh), by the same rule as lib.sh reach_mode (tests/test-reach.sh RR2):
 # the last `reach=` line's value up to any `#`, outer spaces and tabs trimmed, one pair of matching quotes removed.

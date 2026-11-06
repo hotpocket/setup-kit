@@ -73,7 +73,8 @@ Re-runs are idempotent: flip a group in `hosts/<name>.conf` (e.g.
 
 Both workstation and worker always set system Git durability in phase
 `00-identity.sh`: `core.fsync=committed` and `core.fsyncMethod=fsync`.
-The doctor and independent verifier report missing or different values.
+The doctor and independent verifier report missing system settings and weaker
+effective user or configured hub-repo overrides, with their source files.
 See [Git fsync](components/git-fsync.md) for the power-cut evidence and reversal.
 
 Dotfiles/user config are NOT duplicated here — the workstation profile

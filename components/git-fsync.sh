@@ -2,15 +2,69 @@
 # System policy covers user clones and bare repos alike. Keep unrelated keys.
 section "git fsync ($MODE)"
 git_fsync_changed=0; git_fsync_failed=0
+# Required bits: loose objects, packs, references. Git adds positive components
+# after removing negative components from its platform default (pack here).
+# Git 2.53: environment.c parse_fsync_components, write-or-die.h definitions.
+git_fsync_covers_committed() {
+  local rest="$1" token bits positive=0 negative=0 base=2 negate
+  while [[ -n "$rest" ]]; do
+    rest="${rest#"${rest%%[!$' ,\t\n\r']*}"}"
+    [[ -n "$rest" ]] || break
+    if [[ "$rest" == none ]]; then base=0; break; fi
+    token="${rest%%,*}"
+    if [[ "$rest" == *,* ]]; then rest="${rest#*,}"; else rest=; fi
+    negate=0; [[ "$token" != -* ]] || { negate=1; token="${token#-}"; }
+    case "$token" in
+      loose-object) bits=1 ;; pack) bits=2 ;; reference) bits=4 ;;
+      objects) bits=3 ;; committed|added|all) bits=7 ;;
+      pack-metadata|commit-graph|index|derived-metadata|none) bits=0 ;;
+      *) return 1 ;;
+    esac
+    if (( negate )); then negative=$((negative | bits)); else positive=$((positive | bits)); fi
+  done
+  (( ((base & ~negative) | positive) == 7 ))
+}
+
+# /dev/null prevents the caller's incidental checkout from adding local config.
+# NUL-separated origins preserve spaces and avoid Git's filename quoting.
+git_fsync_effective() {
+  local label="$1" repo="$2" key value origin good
+  local -a record
+  for key in core.fsync core.fsyncMethod; do
+    mapfile -d '' -t record < <(git --git-dir="$repo" config --null --includes --show-origin --get "$key" 2>/dev/null)
+    origin="${record[0]:-unavailable}"; value="${record[1]:-}"; good=0
+    if (( ${#record[@]} == 2 )); then
+      if [[ "$key" == core.fsync ]]; then git_fsync_covers_committed "$value" && good=1
+      elif [[ "$value" == fsync ]]; then good=1; fi
+    fi
+    if (( good )); then
+      ok "git fsync: $label $key=$value from $origin"
+    else
+      fail "git fsync: $label $key lacks required durability from $origin; set $key=$([[ "$key" == core.fsync ]] && echo committed || echo fsync) there"
+      git_fsync_failed=1
+    fi
+  done
+}
+
+git_fsync_system_file="$(git var GIT_CONFIG_SYSTEM 2>/dev/null)"
+git_fsync_system_file="${git_fsync_system_file:-${GIT_CONFIG_SYSTEM:-/etc/gitconfig}}"
 for git_fsync_pair in core.fsync=committed core.fsyncMethod=fsync; do
   git_fsync_key="${git_fsync_pair%%=*}"; git_fsync_want="${git_fsync_pair#*=}"
-  if [[ "$(git config --system --includes --get "$git_fsync_key" 2>/dev/null)" == "$git_fsync_want" ]]; then
+  mapfile -d '' -t git_fsync_record < <(git --git-dir=/dev/null config --system --null --includes --show-origin --get "$git_fsync_key" 2>/dev/null)
+  if [[ "${git_fsync_record[1]:-}" == "$git_fsync_want" ]]; then
     continue
   fi
   git_fsync_changed=1
+  git_fsync_origin="${git_fsync_record[0]:-}"
+  if [[ "$git_fsync_origin" == file:* && "$git_fsync_origin" != "file:$git_fsync_system_file" \
+      && ! "${git_fsync_origin#file:}" -ef "$git_fsync_system_file" ]]; then
+    fail "git fsync: system $git_fsync_key from include ${git_fsync_origin#file:}; set $git_fsync_key=$git_fsync_want there"
+    git_fsync_failed=1
+    continue
+  fi
   warn "git fsync: system $git_fsync_key missing or different; want $git_fsync_want"
   if do_or_say sudo git config --system --replace-all "$git_fsync_key" "$git_fsync_want" \
-      && { (( ! INSTALL )) || [[ "$(git config --system --includes --get "$git_fsync_key" 2>/dev/null)" == "$git_fsync_want" ]]; }; then
+      && { (( ! INSTALL )) || [[ "$(git --git-dir=/dev/null config --system --includes --get "$git_fsync_key" 2>/dev/null)" == "$git_fsync_want" ]]; }; then
     :
   else
     fail "git fsync: cannot set system $git_fsync_key; rerun install with working sudo"
@@ -18,6 +72,22 @@ for git_fsync_pair in core.fsync=committed core.fsyncMethod=fsync; do
     git_fsync_failed=1
   fi
 done
+
+git_fsync_effective 'invoking user' /dev/null
+if [[ "$(conf_get component_git_hub no)" == yes ]]; then
+  git_fsync_root="$(conf_get git_hub_root /srv/git)"
+  for git_fsync_entry in $(conf_get git_hub_repos ''); do
+    git_fsync_slug="${git_fsync_entry%%:*}"; git_fsync_name="${git_fsync_slug##*/}"
+    git_fsync_repo="$git_fsync_root/$git_fsync_name.git"
+    if [[ -f "$git_fsync_repo/HEAD" ]]; then
+      git_fsync_effective "hub $git_fsync_name.git" "$git_fsync_repo"
+    else
+      warn "git fsync: hub $git_fsync_name.git not initialized; effective settings not checked"
+    fi
+  done
+fi
+ok "git fsync: other repositories local overrides are outside this check"
+
 if (( git_fsync_failed )); then
   return 1
 elif (( ! git_fsync_changed )); then

@@ -6,7 +6,8 @@ require_user
 init_mode "${1:-}"
 
 # Always on for both workstation and worker, whose phase is a symlink here.
-source "$KIT_DIR/components/git-fsync.sh" || exit 1
+GIT_FSYNC_RC=0
+source "$KIT_DIR/components/git-fsync.sh" || GIT_FSYNC_RC=$?
 
 section "identity ($MODE)"
 
@@ -77,3 +78,6 @@ for g in docker kvm libvirt dialout; do
     (( INSTALL )) && hint "log out/in (or 'newgrp $g') to take effect"
   fi
 done
+
+# A durability failure must not prevent timezone, author or guest setup.
+exit "$GIT_FSYNC_RC"

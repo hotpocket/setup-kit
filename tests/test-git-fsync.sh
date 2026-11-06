@@ -38,7 +38,10 @@ done
 chmod +x "$BIN"/*
 reset() {
   rm -f "$GIT_CONFIG_SYSTEM" "$GIT_CONFIG_SYSTEM.lock" "$TMP/before"
+  rm -rf "$HOME" "$TMP/xdg" "$TMP/hub with spaces"
   mkdir -p "$HOME"
+  export GIT_CONFIG_GLOBAL="$TMP/global" XDG_CONFIG_HOME="$TMP/xdg"
+  unset GIT_CONFIG_NOSYSTEM
   printf '%s\n' profile=workstation headless=yes configs=no cond_nvidia=no \
     lang_python=no lang_node=no lang_flutter=no component_oom_zram=no \
     component_resource_guards=no component_clipboard=no tmp_on_disk=no > "$HOST_CONF"
@@ -137,8 +140,127 @@ case_verify_correct() {
   assert 'verify: correct system policy passes without writes' \
     '(( RC == 0 )) && same && contains "PASS  git fsync: system core.fsync=committed" && contains "PASS  git fsync: system core.fsyncMethod=fsync" && [[ "$(cat "$CALLS")" == "-n true" ]]'
 }
+case_global_fsync() {
+  seed; git config --global core.fsync none; verify
+  assert 'F1 verify: global fsync override fails with its origin' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: invoking user core.fsync" && contains "file:$GIT_CONFIG_GLOBAL" && [[ "$(git config --global core.fsync)" == none ]]'
+}
+case_global_method() {
+  seed; git config --global core.fsyncMethod writeout-only; verify
+  assert 'F1 verify: global method override fails with its origin' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: invoking user core.fsyncMethod" && contains "file:$GIT_CONFIG_GLOBAL"'
+}
+case_doctor_global_fsync() {
+  seed; git config --global core.fsync none; phase check
+  assert 'F1 doctor: global fsync override fails, identity still runs' \
+    '(( RC != 0 )) && contains "[FAIL]  git fsync: invoking user core.fsync" && contains "file:$GIT_CONFIG_GLOBAL" && contains "timezone America/Los_Angeles" && [[ ! -s "$CALLS" ]]'
+}
+case_doctor_global_method() {
+  seed; git config --global core.fsyncMethod batch; phase check
+  assert 'F1 doctor: global method override fails with its origin' \
+    '(( RC != 0 )) && contains "[FAIL]  git fsync: invoking user core.fsyncMethod" && contains "file:$GIT_CONFIG_GLOBAL" && [[ ! -s "$CALLS" ]]'
+}
+case_xdg_override() {
+  seed; unset GIT_CONFIG_GLOBAL; mkdir -p "$XDG_CONFIG_HOME/git"
+  printf '[core]\nfsync=none\n' > "$XDG_CONFIG_HOME/git/config"; verify
+  assert 'F1 verify: XDG override fails with its origin' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: invoking user core.fsync" && contains "file:$XDG_CONFIG_HOME/git/config"'
+}
+hub() {
+  seed; mkdir -p "$TMP/hub with spaces"
+  git init -q --bare "$TMP/hub with spaces/source.git"
+  printf '\ncomponent_git_hub=yes\ngit_hub_root="%s"\ngit_hub_repos="acme/source:nested/clone"\n' "$TMP/hub with spaces" >> "$HOST_CONF"
+}
+case_local_fsync() {
+  hub; git --git-dir="$TMP/hub with spaces/source.git" config core.fsync none; verify
+  assert 'F1 verify: managed bare repo local fsync override fails with origin' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: hub source.git core.fsync" && contains "file:$TMP/hub with spaces/source.git/config" && [[ "$(git --git-dir="$TMP/hub with spaces/source.git" config --local core.fsync)" == none ]]'
+}
+case_local_method() {
+  hub; git --git-dir="$TMP/hub with spaces/source.git" config core.fsyncMethod writeout-only; verify
+  assert 'F1 verify: managed bare repo local method override fails' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: hub source.git core.fsyncMethod" && contains "file:$TMP/hub with spaces/source.git/config"'
+}
+case_doctor_local() {
+  hub; git --git-dir="$TMP/hub with spaces/source.git" config core.fsync none; phase check
+  assert 'F1 doctor: managed bare repo local override fails without repair' \
+    '(( RC != 0 )) && contains "[FAIL]  git fsync: hub source.git core.fsync" && contains "file:$TMP/hub with spaces/source.git/config" && [[ ! -s "$CALLS" ]]'
+}
+case_local_include() {
+  hub; printf '[core]\nfsync=objects\n' > "$TMP/repo policy.inc"
+  git --git-dir="$TMP/hub with spaces/source.git" config include.path "$TMP/repo policy.inc"; verify
+  assert 'F1 verify: managed repo include weakening coverage reports included origin' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: hub source.git core.fsync" && contains "file:$TMP/repo policy.inc"'
+}
+case_hub_correct() {
+  hub; verify
+  assert 'F1 verify: managed bare repo inherits correct policy' \
+    '(( RC == 0 )) && contains "PASS  git fsync: hub source.git core.fsync" && contains "PASS  git fsync: hub source.git core.fsyncMethod"'
+}
+case_hub_disabled() {
+  hub; git --git-dir="$TMP/hub with spaces/source.git" config core.fsync none
+  printf '\ncomponent_git_hub=no\n' >> "$HOST_CONF"; verify
+  assert 'F1 verify: disabled hub is outside managed-repo checks, scope reported' \
+    '(( RC == 0 )) && ! contains "hub source.git core.fsync" && contains "other repositories local overrides are outside this check"'
+}
+case_weak_coverage() {
+  seed
+  local value
+  for value in objects pack 'loose-object,pack' 'pack,reference' '-committed' 'none,loose-object'; do
+    [[ -z "${FSYNC_COVERAGE_ONLY:-}" || "$value" == "$FSYNC_COVERAGE_ONLY" ]] || continue
+    git config --global core.fsync "$value"; verify
+    assert "F1 verify: incomplete committed coverage rejected ($value)" \
+      '(( RC != 0 )) && contains "FAIL  git fsync: invoking user core.fsync" && contains "file:$GIT_CONFIG_GLOBAL"' || return 1
+    phase check
+    assert "F1 doctor: incomplete committed coverage rejected ($value)" \
+      '(( RC != 0 )) && contains "[FAIL]  git fsync: invoking user core.fsync" && contains "file:$GIT_CONFIG_GLOBAL"' || return 1
+  done
+}
+case_strong_coverage() {
+  seed
+  local value
+  for value in committed added all 'loose-object,pack,reference' 'objects,reference' 'none,loose-object,pack,reference' 'loose-object,reference' 'committed,-loose-object'; do
+    [[ -z "${FSYNC_COVERAGE_ONLY:-}" || "$value" == "$FSYNC_COVERAGE_ONLY" ]] || continue
+    git config --global core.fsync "$value"; verify
+    assert "F1 verify: full committed coverage accepted ($value)" \
+      '(( RC == 0 )) && contains "PASS  git fsync: invoking user core.fsync" && contains "file:$GIT_CONFIG_GLOBAL"' || return 1
+    phase check
+    assert "F1 doctor: full committed coverage accepted ($value)" \
+      '(( RC == 0 )) && contains "[ OK ]  git fsync: invoking user core.fsync" && contains "file:$GIT_CONFIG_GLOBAL"' || return 1
+  done
+}
+include_policy() {
+  seed
+  printf '[core]\n%s = %s\n' "$1" "$2" > "$TMP/system policy.inc"
+  git config --system "core.$1" "$2"
+  git config --system include.path "$TMP/system policy.inc"
+  cp "$GIT_CONFIG_SYSTEM" "$TMP/before"
+  cp "$TMP/system policy.inc" "$TMP/include.before"
+}
+case_include_install() {
+  include_policy fsync none
+  printf '\ngit_user_name=Fixture\ngit_user_email=fixture@example.invalid\n' >> "$HOST_CONF"
+  phase install
+  assert 'F2 install: conflicting trailing include named, files untouched, identity completed' \
+    '(( RC != 0 )) && same && cmp -s "$TMP/include.before" "$TMP/system policy.inc" && [[ ! -s "$CALLS" && "$(git config --global user.name)" == Fixture ]] && contains "system policy.inc" && contains "set core.fsync=committed there" && contains "timezone America/Los_Angeles"'
+}
+case_include_check() {
+  include_policy fsync none; phase check
+  assert 'F2 doctor: conflicting system include fails without skipping identity' \
+    '(( RC != 0 )) && same && [[ ! -s "$CALLS" ]] && contains "system policy.inc" && contains "set core.fsync=committed there" && contains "timezone America/Los_Angeles"'
+}
+case_include_method() {
+  include_policy fsyncMethod writeout-only; phase install
+  assert 'F2 install: conflicting included method named without main-file rewrite' \
+    '(( RC != 0 )) && same && [[ ! -s "$CALLS" ]] && contains "system policy.inc" && contains "set core.fsyncMethod=fsync there" && contains "timezone America/Los_Angeles"'
+}
+case_include_correct() {
+  include_policy fsync committed; phase install
+  assert 'F2 install: correct included system setting accepted unchanged' \
+    '(( RC == 0 )) && same && [[ ! -s "$CALLS" ]] && contains "system settings already correct; nothing to change"'
+}
 pass=0; fail=0
-for name in fresh_fsync fresh_method preserve unchanged wrong_fsync wrong_method check_missing check_wrong worker write_failure verify_missing_fsync verify_missing_method verify_wrong_fsync verify_wrong_method verify_correct; do
+for name in fresh_fsync fresh_method preserve unchanged wrong_fsync wrong_method check_missing check_wrong worker write_failure verify_missing_fsync verify_missing_method verify_wrong_fsync verify_wrong_method verify_correct global_fsync global_method doctor_global_fsync doctor_global_method xdg_override local_fsync local_method doctor_local local_include hub_correct hub_disabled weak_coverage strong_coverage include_install include_check include_method include_correct; do
   [[ -z "${1:-}" || "$name" == "$1" ]] || continue
   reset
   if "case_$name"; then ((pass++)); else ((fail++)); fi
