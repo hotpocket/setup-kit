@@ -13,6 +13,12 @@ export HOST_CONF="$TMP/host.conf" KIT_HOST_CONF="$TMP/host.conf"
 export KIT_LOG_DIR="$TMP/logs" KIT_VERBOSE=1 CALLS="$TMP/calls"
 export GIT_CONFIG_SYSTEM="$TMP/gitconfig" GIT_CONFIG_GLOBAL="$TMP/global"
 unset GIT_CONFIG_NOSYSTEM GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS KIT_RUN_LOG
+# Hub fixtures also meet verify's stale-lock sweep check (components/git-hub.md);
+# a present sweep (the systemctl stub below answers enabled) keeps these cases about fsync alone.
+export KIT_GIT_HUB_SYSTEM_ROOT="$TMP/hub-system"
+mkdir -p "$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system" "$KIT_GIT_HUB_SYSTEM_ROOT/usr/local/libexec"
+: > "$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system/git-hub-stale-locks.service"
+install -m 0755 /dev/null "$KIT_GIT_HUB_SYSTEM_ROOT/usr/local/libexec/git-hub-stale-locks"
 cat > "$BIN/sudo" <<'SH'
 #!/bin/bash
 printf '%s\n' "$*" >> "$CALLS"
