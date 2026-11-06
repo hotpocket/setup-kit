@@ -9,6 +9,10 @@ H="$TMP/home"; BIN="$TMP/bin"; mkdir -p "$H" "$BIN"
 export HOME="$H" HOST_CONF="$TMP/host.conf" PATH="$BIN:/usr/bin:/bin" USER=agents
 # Confine every write: logs, XDG and git's global file all live under $TMP.
 export KIT_LOG_DIR="$TMP/logs" XDG_CONFIG_HOME="$H/.config" GIT_CONFIG_GLOBAL="$H/.gitconfig" GIT_CONFIG_NOSYSTEM=1
+# The shared identity phase also checks system Git durability. Keep its policy
+# healthy and confined here while this suite tests only the user author.
+export GIT_CONFIG_SYSTEM="$TMP/system.gitconfig"
+printf '[core]\n  fsync = committed\n  fsyncMethod = fsync\n' > "$GIT_CONFIG_SYSTEM"
 unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL KIT_RUN_LOG
 for c in timedatectl systemd-detect-virt sudo dpkg locale-gen update-locale; do
   printf '#!/bin/bash\ncase "$*" in "show -p Timezone --value") echo America/Los_Angeles ;; esac\nexit 0\n' > "$BIN/$c"; chmod +x "$BIN/$c"

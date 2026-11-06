@@ -5,6 +5,9 @@ source "$(dirname "$0")/../../lib.sh"
 require_user
 init_mode "${1:-}"
 
+# Always on for both workstation and worker, whose phase is a symlink here.
+source "$KIT_DIR/components/git-fsync.sh" || exit 1
+
 section "identity ($MODE)"
 
 TZ_WANT="$(conf_get timezone America/Los_Angeles)"

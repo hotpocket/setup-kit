@@ -11,7 +11,7 @@ cp "$KIT_DIR/verify.sh" "$K/verify.sh"
 cp -a "$KIT_DIR/manifests" "$K/manifests"
 # A closed PATH makes absence of python3 observable even on a Python-equipped
 # dev VM. Shell commands used by the verifier are real traditional tools.
-for tool in awk basename date dirname grep head mkdir sed sort tail wc; do
+for tool in awk basename date dirname git grep head mkdir sed sort tail wc; do
   ln -s "$(command -v "$tool")" "$BIN/$tool"
 done
 ln -s "$(command -v python3)" "$BIN/python3"
@@ -22,6 +22,10 @@ done
 printf '#!/bin/bash\nexit 1\n' > "$BIN/sudo"
 printf '#!/bin/bash\necho fixture-python\n' > "$BIN/hostname"
 chmod +x "$BIN/sudo" "$BIN/hostname"
+# The full verifier also requires system Git durability; isolate that healthy
+# baseline so only the Python policy changes between these cases.
+export GIT_CONFIG_SYSTEM="$TMP/gitconfig"
+printf '[core]\n  fsync = committed\n  fsyncMethod = fsync\n' > "$GIT_CONFIG_SYSTEM"
 conf() {
   printf '%s\n' profile=worker headless=yes configs=no cond_nvidia=no \
     lang_node=no lang_flutter=no component_oom_zram=no \

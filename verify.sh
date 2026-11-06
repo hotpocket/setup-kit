@@ -58,6 +58,17 @@ dflt() { local v; v="$(cv "$1")"; echo "${v:-$CFG_DEF}"; }
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 [[ -f "$CONF" ]] || { echo "no $CONF — nothing to verify against"; exit 1; }
 
+# System Git policy also protects bare hubs. User/repo values cannot satisfy
+# this check, and verification deliberately does not share installer helpers.
+for pair in core.fsync=committed core.fsyncMethod=fsync; do
+  key="${pair%%=*}"; want="${pair#*=}"
+  if [[ "$(git config --system --includes --get "$key" 2>/dev/null)" == "$want" ]]; then
+    pass "git fsync: system $key=$want"
+  else
+    failv "git fsync: system $key must be $want; rerun workstation or worker install"
+  fi
+done
+
 # Parse reach here independently (no lib.sh), by the same rule as lib.sh reach_mode (tests/test-reach.sh RR2):
 # the last `reach=` line's value up to any `#`, outer spaces and tabs trimmed, one pair of matching quotes removed.
 # Only an absent key keeps the tailnet default.

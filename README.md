@@ -71,6 +71,11 @@ passes unaided until nothing changes and runs the independent verifier
 Re-runs are idempotent: flip a group in `hosts/<name>.conf` (e.g.
 `group_dev_go=yes`) and re-run install.
 
+Both workstation and worker always set system Git durability in phase
+`00-identity.sh`: `core.fsync=committed` and `core.fsyncMethod=fsync`.
+The doctor and independent verifier report missing or different values.
+See [Git fsync](components/git-fsync.md) for the power-cut evidence and reversal.
+
 Dotfiles/user config are NOT duplicated here — the workstation profile
 ends by cloning `github.com:hotpocket/.configs` and running its
 `setup.sh install`.

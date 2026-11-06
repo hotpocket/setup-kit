@@ -18,6 +18,10 @@
 set -uo pipefail
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+# Independent verification also checks system Git durability. Keep that
+# baseline healthy in a fixture rather than depending on this box's policy.
+export GIT_CONFIG_SYSTEM="$TMP/gitconfig"
+printf '[core]\n  fsync = committed\n  fsyncMethod = fsync\n' > "$GIT_CONFIG_SYSTEM"
 KIT_DIR="$TMP/kit"; mkdir -p "$KIT_DIR"
 cp -a "$SOURCE_DIR"/{lib.sh,bootstrap.sh,verify.sh,profiles,components,manifests,hosts,CLAUDE.md} "$KIT_DIR/"
 pass=0; fail=0
