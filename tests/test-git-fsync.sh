@@ -16,6 +16,11 @@ unset GIT_CONFIG_NOSYSTEM GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS KIT_RUN_LOG
 cat > "$BIN/sudo" <<'SH'
 #!/bin/bash
 printf '%s\n' "$*" >> "$CALLS"
+if [[ "$*" == '-n -H -u fixture-writer -- env -i '* ]]; then
+  [[ ! -e "${CALLS%/*}/writer-denied" ]] || exit 1
+  shift 5
+  exec "$@"
+fi
 [[ "$1" == git && "$2" == config && "$3" == --system ]] || exit 99
 [[ "$GIT_CONFIG_SYSTEM" == "${HOME%/*}/gitconfig" ]] || exit 98
 [[ "${FSYNC_WRITE_FAIL:-0}" == 0 ]] || exit 1
@@ -31,14 +36,26 @@ cat > "$BIN/locale" <<'SH'
 SH
 printf '#!/bin/bash\necho none\n' > "$BIN/systemd-detect-virt"
 printf '#!/bin/bash\nexit 2\n' > "$BIN/getent"
+# The writer probe must discard GIT_CONFIG_SYSTEM too. A Git executable fixture
+# supplies the private system file independently of the calling environment.
+printf '#!/bin/bash\nexport GIT_CONFIG_SYSTEM=%q\nif [[ "$HOME" == %q ]]; then printf "writer global=%%s count=%%s parameters=%%s\\n" "${GIT_CONFIG_GLOBAL+set}" "${GIT_CONFIG_COUNT+set}" "${GIT_CONFIG_PARAMETERS+set}" >> %q; fi\nexec /usr/bin/git "$@"\n' \
+  "$GIT_CONFIG_SYSTEM" "$TMP/writer-home" "$TMP/writer.trace" > "$BIN/git"
+printf '#!/bin/bash\nif [[ "$1" == passwd && "$2" == fixture-writer && -f %q ]]; then printf "fixture-writer:x:%%s:1000::%%s:/usr/bin/git-shell\\n" "$(cat %q)" %q; else exit 2; fi\n' \
+  "$TMP/writer.uid" "$TMP/writer.uid" "$TMP/writer-home" > "$BIN/getent"
+printf '#!/bin/bash\nif [[ "$*" == -u && "$HOME" == %q ]]; then cat %q; else exec /usr/bin/id "$@"; fi\n' \
+  "$TMP/writer-home" "$TMP/writer.uid" > "$BIN/id"
 printf '#!/bin/bash\necho fixture-host\n' > "$BIN/hostname"
 for tool in lspci systemctl journalctl coredumpctl dpkg gh; do
   printf '#!/bin/bash\nexit 0\n' > "$BIN/$tool"
 done
 chmod +x "$BIN"/*
+cp "$BIN/git" "$TMP/git-command"
 reset() {
+  cp "$TMP/git-command" "$BIN/git"
   rm -f "$GIT_CONFIG_SYSTEM" "$GIT_CONFIG_SYSTEM.lock" "$TMP/before"
-  rm -rf "$HOME" "$TMP/xdg" "$TMP/hub with spaces"
+  chmod 700 "$TMP/writer-home" 2>/dev/null || true
+  rm -rf "$HOME" "$TMP/xdg" "$TMP/hub with spaces" "$TMP/writer-home"
+  rm -f "$TMP/writer.uid" "$TMP/writer.trace" "$TMP/writer-denied"
   mkdir -p "$HOME"
   export GIT_CONFIG_GLOBAL="$TMP/global" XDG_CONFIG_HOME="$TMP/xdg"
   unset GIT_CONFIG_NOSYSTEM
@@ -49,6 +66,7 @@ reset() {
   printf '[core]\n\tfsync = committed\n\tfsyncMethod = fsync\n' > "$GIT_CONFIG_GLOBAL"
   : > "$CALLS"; : > "$TMP/out"
   PROFILE=workstation; FSYNC_WRITE_FAIL=0; export FSYNC_WRITE_FAIL
+  unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_PARAMETERS
 }
 seed() { printf '[core]\n\tfsync = committed\n\tfsyncMethod = fsync\n' > "$GIT_CONFIG_SYSTEM"; }
 # RC and before are read by assertion expressions below.
@@ -169,7 +187,8 @@ case_xdg_override() {
 hub() {
   seed; mkdir -p "$TMP/hub with spaces"
   git init -q --bare "$TMP/hub with spaces/source.git"
-  printf '\ncomponent_git_hub=yes\ngit_hub_root="%s"\ngit_hub_repos="acme/source:nested/clone"\n' "$TMP/hub with spaces" >> "$HOST_CONF"
+  mkdir -p "$TMP/writer-home"; /usr/bin/id -u > "$TMP/writer.uid"
+  printf '\ncomponent_git_hub=yes\ngit_hub_user=fixture-writer\ngit_hub_root="%s"\ngit_hub_repos="acme/source:nested/clone"\n' "$TMP/hub with spaces" >> "$HOST_CONF"
 }
 case_local_fsync() {
   hub; git --git-dir="$TMP/hub with spaces/source.git" config core.fsync none; verify
@@ -259,8 +278,104 @@ case_include_correct() {
   assert 'F2 install: correct included system setting accepted unchanged' \
     '(( RC == 0 )) && same && [[ ! -s "$CALLS" ]] && contains "system settings already correct; nothing to change"'
 }
+conditional_system() {
+  hub
+  printf '[core]\nfsync=none\n' > "$TMP/system-conditional.inc"
+  git config --system "includeIf.gitdir:$TMP/hub with spaces/*.git.path" "$TMP/system-conditional.inc"
+  cp "$GIT_CONFIG_SYSTEM" "$TMP/before"
+}
+case_conditional_system_verify() {
+  conditional_system; verify
+  assert 'R1 verify: repo conditional system include cannot hide behind caller globals' \
+    '(( RC != 0 )) && same && contains "FAIL  git fsync: hub source.git system core.fsync" && contains "file:$TMP/system-conditional.inc"'
+}
+case_conditional_system_doctor() {
+  conditional_system; phase check
+  assert 'R1 doctor: conditional system include fails, identity still runs' \
+    '(( RC != 0 )) && same && contains "[FAIL]  git fsync: hub source.git system core.fsync" && contains "file:$TMP/system-conditional.inc" && contains "timezone America/Los_Angeles"'
+}
+transient_local() {
+  hub; git --git-dir="$TMP/hub with spaces/source.git" config core.fsync none
+}
+case_transient_count_verify() {
+  transient_local
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsync GIT_CONFIG_VALUE_0=committed
+  verify
+  assert 'R1 verify: command environment cannot mask persistent local none' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: hub source.git core.fsync" && contains "file:$TMP/hub with spaces/source.git/config" && grep -qx "writer global= count= parameters=" "$TMP/writer.trace"'
+}
+case_transient_count_doctor() {
+  transient_local
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsync GIT_CONFIG_VALUE_0=committed
+  phase check
+  assert 'R1 doctor: command environment cannot mask persistent local none' \
+    '(( RC != 0 )) && contains "[FAIL]  git fsync: hub source.git core.fsync" && contains "file:$TMP/hub with spaces/source.git/config"'
+}
+case_transient_parameters() {
+  transient_local; export GIT_CONFIG_PARAMETERS="'core.fsync=committed'"
+  verify
+  assert 'R1 verify: GIT_CONFIG_PARAMETERS cannot mask local none' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: hub source.git core.fsync" && contains "file:$TMP/hub with spaces/source.git/config"'
+}
+case_writer_globals() {
+  hub; printf '[core]\nfsync=none\n' > "$TMP/writer-home/.gitconfig"; verify
+  assert 'R1 verify: writer passwd HOME replaces caller HOME/global override' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: hub source.git core.fsync" && contains "file:$TMP/writer-home/.gitconfig"'
+}
+case_writer_xdg() {
+  hub; mkdir -p "$TMP/writer-home/.config/git"
+  printf '[core]\nfsync=none\n' > "$TMP/writer-home/.config/git/config"; verify
+  assert 'R1 verify: writer XDG globals replace caller XDG' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: hub source.git core.fsync" && contains "file:$TMP/writer-home/.config/git/config"'
+}
+case_other_writer_verify() {
+  hub; echo "$(( $(/usr/bin/id -u) + 1 ))" > "$TMP/writer.uid"; verify
+  assert 'R1 verify: noninteractive writer probe passes for a git-shell writer' \
+    '(( RC == 0 )) && contains "PASS  git fsync: hub source.git core.fsync=" && contains "PASS  git fsync: hub source.git core.fsyncMethod=fsync" && grep -q -- "-n -H -u fixture-writer -- env -i" "$CALLS" && grep -qx "writer global= count= parameters=" "$TMP/writer.trace"'
+}
+case_writer_probe_denied_verify() {
+  hub; echo "$(( $(/usr/bin/id -u) + 1 ))" > "$TMP/writer.uid"; touch "$TMP/writer-denied"; verify
+  assert 'R1 verify: denied noninteractive writer probe fails as not checked' \
+    '(( RC != 0 )) && contains "not checked: hub source.git" && contains "fixture-writer" && grep -q -- "-n -H -u fixture-writer -- env -i" "$CALLS" && ! contains "PASS  git fsync: hub source.git core.fsync"'
+}
+case_writer_probe_weak_verify() {
+  hub; echo "$(( $(/usr/bin/id -u) + 1 ))" > "$TMP/writer.uid"
+  printf '[core]\nfsync=none\n' > "$TMP/writer-home/.gitconfig"
+  cp "$TMP/writer-home/.gitconfig" "$TMP/before-writer"
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsync GIT_CONFIG_VALUE_0=committed
+  verify
+  assert 'R1 verify: noninteractive probe rejects writer none with its origin' \
+    '(( RC != 0 )) && contains "FAIL  git fsync: hub source.git core.fsync lacks required durability from file:$TMP/writer-home/.gitconfig" && ! contains "not checked: hub source.git" && grep -q -- "-n -H -u fixture-writer -- env -i" "$CALLS" && grep -qx "writer global= count= parameters=" "$TMP/writer.trace" && cmp -s "$TMP/before-writer" "$TMP/writer-home/.gitconfig"'
+}
+case_writer_home_unreadable() {
+  hub; chmod 000 "$TMP/writer-home"; verify; chmod 700 "$TMP/writer-home"
+  assert 'R1 verify: unreadable writer home is not checked, not a pass' \
+    '(( RC != 0 )) && contains "not checked: hub source.git" && ! contains "PASS  git fsync: hub source.git core.fsync"'
+}
+case_other_writer_doctor() {
+  hub; echo "$(( $(/usr/bin/id -u) + 1 ))" > "$TMP/writer.uid"
+  phase check
+  assert 'R1 doctor: read-only noninteractive writer probe uses the requested identity' \
+    '(( RC == 0 )) && contains "[ OK ]  git fsync: hub source.git core.fsync" && grep -q -- "-n -H -u fixture-writer -- env -i" "$CALLS" && grep -qx "writer global= count= parameters=" "$TMP/writer.trace"'
+}
+case_writer_probe_denied() {
+  hub; echo "$(( $(/usr/bin/id -u) + 1 ))" > "$TMP/writer.uid"; touch "$TMP/writer-denied"
+  phase check
+  assert 'R1 doctor: denied writer probe fails as not checked and preserves identity setup' \
+    '(( RC != 0 )) && contains "not checked: hub source.git" && contains "timezone America/Los_Angeles"'
+}
+case_failed_query_origin() {
+  seed; printf '#!/bin/bash\nexit 127\n' > "$BIN/git"; verify
+  assert 'R1 verify: failed query status is never reported as a config origin' \
+    '(( RC != 0 )) && contains "invoking user core.fsync lacks required durability from unavailable" && ! contains "from 127"'
+}
+case_failed_query_origin_doctor() {
+  seed; printf '#!/bin/bash\nexit 127\n' > "$BIN/git"; phase check
+  assert 'R1 doctor: failed query has unavailable origin, identity still runs' \
+    '(( RC != 0 )) && contains "invoking user core.fsync lacks required durability from unavailable" && ! contains "from 127" && contains "timezone America/Los_Angeles"'
+}
 pass=0; fail=0
-for name in fresh_fsync fresh_method preserve unchanged wrong_fsync wrong_method check_missing check_wrong worker write_failure verify_missing_fsync verify_missing_method verify_wrong_fsync verify_wrong_method verify_correct global_fsync global_method doctor_global_fsync doctor_global_method xdg_override local_fsync local_method doctor_local local_include hub_correct hub_disabled weak_coverage strong_coverage include_install include_check include_method include_correct; do
+for name in fresh_fsync fresh_method preserve unchanged wrong_fsync wrong_method check_missing check_wrong worker write_failure verify_missing_fsync verify_missing_method verify_wrong_fsync verify_wrong_method verify_correct global_fsync global_method doctor_global_fsync doctor_global_method xdg_override local_fsync local_method doctor_local local_include hub_correct hub_disabled weak_coverage strong_coverage include_install include_check include_method include_correct conditional_system_verify conditional_system_doctor transient_count_verify transient_count_doctor transient_parameters writer_globals writer_xdg other_writer_verify writer_probe_denied_verify writer_probe_weak_verify writer_home_unreadable other_writer_doctor writer_probe_denied failed_query_origin failed_query_origin_doctor; do
   [[ -z "${1:-}" || "$name" == "$1" ]] || continue
   reset
   if "case_$name"; then ((pass++)); else ((fail++)); fi

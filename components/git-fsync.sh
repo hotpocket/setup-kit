@@ -27,23 +27,59 @@ git_fsync_covers_committed() {
 
 # /dev/null prevents the caller's incidental checkout from adding local config.
 # NUL-separated origins preserve spaces and avoid Git's filename quoting.
+git_fsync_writer_query() {
+  local repo="$1" key="$2" scope="$3"
+  local -a query=(git --git-dir="$repo" config --null --includes --show-origin)
+  [[ "$scope" != system ]] || query+=(--system)
+  query+=(--get "$key")
+  [[ "$git_fsync_uid" =~ ^[0-9]+$ && "$git_fsync_home" == /* ]] || return 77
+  local -a probe=(env -i "HOME=$git_fsync_home" "XDG_CONFIG_HOME=$git_fsync_home/.config" "PATH=$PATH" /bin/sh -c '
+    expected=$1; shift
+    [ "$(id -u)" = "$expected" ] || exit 77
+    for directory in "$HOME" "$HOME/.config" "$HOME/.config/git"; do
+      if [ "$directory" = "$HOME" ] || [ -e "$directory" ]; then
+        [ -d "$directory" ] && [ -r "$directory" ] && [ -x "$directory" ] || exit 77
+      fi
+    done
+    for config in "$HOME/.gitconfig" "$HOME/.config/git/config"; do
+      [ ! -e "$config" ] || [ -r "$config" ] || exit 77
+    done
+    exec "$@"
+  ' kit-fsync "$git_fsync_uid" "${query[@]}")
+  if [[ "$git_fsync_uid" != "$(id -u)" ]]; then
+    probe=(sudo -n -H -u "$git_fsync_writer" -- "${probe[@]}")
+  fi
+  "${probe[@]}" 2>/dev/null
+}
 git_fsync_effective() {
-  local label="$1" repo="$2" key value origin good
+  local label="$1" repo="$2" scope="${3:-}" key value origin good display="$1"
+  [[ "$scope" != system ]] || display+=" system"
   local -a record
   for key in core.fsync core.fsyncMethod; do
-    mapfile -d '' -t record < <(git --git-dir="$repo" config --null --includes --show-origin --get "$key" 2>/dev/null)
+    mapfile -d '' -t record < <(
+      if [[ -n "$scope" ]]; then git_fsync_writer_query "$repo" "$key" "$scope"
+      else git --git-dir="$repo" config --null --includes --show-origin --get "$key" 2>/dev/null; fi
+      printf '%s\0' "$?"
+    )
+    if [[ -n "$scope" ]] && { (( ${#record[@]} != 3 )) || [[ "${record[2]:-}" != 0 ]]; }; then
+      fail "not checked: $label for writer $git_fsync_writer in $repo. Check noninteractive probe permissions and that the writer HOME and HOME/.config are readable, then rerun."
+      git_fsync_failed=1
+      return 1
+    fi
     origin="${record[0]:-unavailable}"; value="${record[1]:-}"; good=0
-    if (( ${#record[@]} == 2 )); then
+    if (( ${#record[@]} != 3 )); then origin=unavailable; value=; fi
+    if (( ${#record[@]} == 3 )) && [[ "${record[2]}" == 0 ]]; then
       if [[ "$key" == core.fsync ]]; then git_fsync_covers_committed "$value" && good=1
       elif [[ "$value" == fsync ]]; then good=1; fi
     fi
     if (( good )); then
-      ok "git fsync: $label $key=$value from $origin"
+      ok "git fsync: $display $key=$value from $origin"
     else
-      fail "git fsync: $label $key lacks required durability from $origin; set $key=$([[ "$key" == core.fsync ]] && echo committed || echo fsync) there"
+      fail "git fsync: $display $key lacks required durability from $origin; set $key=$([[ "$key" == core.fsync ]] && echo committed || echo fsync) there"
       git_fsync_failed=1
     fi
   done
+  return 0
 }
 
 git_fsync_system_file="$(git var GIT_CONFIG_SYSTEM 2>/dev/null)"
@@ -76,11 +112,16 @@ done
 git_fsync_effective 'invoking user' /dev/null
 if [[ "$(conf_get component_git_hub no)" == yes ]]; then
   git_fsync_root="$(conf_get git_hub_root /srv/git)"
+  git_fsync_writer="$(conf_get git_hub_user git)"
+  git_fsync_passwd="$(getent passwd "$git_fsync_writer")"
+  IFS=: read -r _ _ git_fsync_uid _ _ git_fsync_home _ <<< "$git_fsync_passwd"
   for git_fsync_entry in $(conf_get git_hub_repos ''); do
     git_fsync_slug="${git_fsync_entry%%:*}"; git_fsync_name="${git_fsync_slug##*/}"
     git_fsync_repo="$git_fsync_root/$git_fsync_name.git"
     if [[ -f "$git_fsync_repo/HEAD" ]]; then
-      git_fsync_effective "hub $git_fsync_name.git" "$git_fsync_repo"
+      if git_fsync_effective "hub $git_fsync_name.git" "$git_fsync_repo" system; then
+        git_fsync_effective "hub $git_fsync_name.git" "$git_fsync_repo" effective || true
+      fi
     else
       warn "git fsync: hub $git_fsync_name.git not initialized; effective settings not checked"
     fi

@@ -101,20 +101,55 @@ fsync_covers_committed() {
       if (bad || !loose || !reference || !(pack || (basepack && !offpack))) exit 1
     }'
 }
+verify_fsync_writer_query() {
+  local repo="$1" key="$2" scope="$3"
+  # A read-only noninteractive probe also supports git-shell writers.
+  [[ "$FSYNC_WRITER_UID" =~ ^[0-9]+$ && "$FSYNC_WRITER_HOME" == /* ]] || return 77
+  local -a command=(git --git-dir="$repo" config --null --includes --show-origin)
+  [[ "$scope" != system ]] || command+=(--system)
+  command+=(--get "$key")
+  local -a probe=(env -i "HOME=$FSYNC_WRITER_HOME" "XDG_CONFIG_HOME=$FSYNC_WRITER_HOME/.config" "PATH=$PATH" /bin/sh -c '
+    uid=$1; shift
+    [ "$(id -u)" = "$uid" ] || exit 77
+    [ -d "$HOME" ] && [ -r "$HOME" ] && [ -x "$HOME" ] || exit 77
+    for path in "$HOME/.config" "$HOME/.config/git"; do
+      [ ! -e "$path" ] || { [ -d "$path" ] && [ -r "$path" ] && [ -x "$path" ]; } || exit 77
+    done
+    for file in "$HOME/.gitconfig" "$HOME/.config/git/config"; do
+      [ ! -e "$file" ] || [ -r "$file" ] || exit 77
+    done
+    exec "$@"
+  ' verify-fsync "$FSYNC_WRITER_UID" "${command[@]}")
+  if [[ "$FSYNC_WRITER_UID" != "$(id -u)" ]]; then
+    probe=(sudo -n -H -u "$FSYNC_WRITER" -- "${probe[@]}")
+  fi
+  "${probe[@]}" 2>/dev/null
+}
 verify_fsync_effective() {
-  local label="$1" repo="$2" key value origin good want
+  local label="$1" repo="$2" scope="${3:-}" key value origin good want display="$1"
+  [[ "$scope" != system ]] || display+=" system"
   local -a record
   for key in core.fsync core.fsyncMethod; do
-    mapfile -d '' -t record < <(git --git-dir="$repo" config --null --includes --show-origin --get "$key" 2>/dev/null)
+    mapfile -d '' -t record < <(
+      if [[ -n "$scope" ]]; then verify_fsync_writer_query "$repo" "$key" "$scope"
+      else git --git-dir="$repo" config --null --includes --show-origin --get "$key" 2>/dev/null; fi
+      printf '%s\0' "$?"
+    )
+    if [[ -n "$scope" ]] && { (( ${#record[@]} != 3 )) || [[ "${record[2]:-}" != 0 ]]; }; then
+      failv "not checked: $label for writer $FSYNC_WRITER in $repo. Check noninteractive probe permissions and that the writer HOME and HOME/.config are readable, then rerun."
+      return 1
+    fi
     origin="${record[0]:-unavailable}"; value="${record[1]:-}"; good=0; want=fsync
+    if (( ${#record[@]} != 3 )); then origin=unavailable; value=; fi
     [[ "$key" != core.fsync ]] || want=committed
-    if (( ${#record[@]} == 2 )); then
+    if (( ${#record[@]} == 3 )) && [[ "${record[2]}" == 0 ]]; then
       if [[ "$key" == core.fsync ]]; then fsync_covers_committed "$value" && good=1
       elif [[ "$value" == fsync ]]; then good=1; fi
     fi
-    if (( good )); then pass "git fsync: $label $key=$value from $origin"
-    else failv "git fsync: $label $key lacks required durability from $origin; set $key=$want there"; fi
+    if (( good )); then pass "git fsync: $display $key=$value from $origin"
+    else failv "git fsync: $display $key lacks required durability from $origin; set $key=$want there"; fi
   done
+  return 0
 }
 # Suppress only the incidental checkout. Normal system, HOME/XDG and command
 # scopes remain active; each declared bare hub repo is then checked explicitly.
@@ -123,9 +158,16 @@ if [[ "$(cv component_git_hub)" == yes ]]; then
   FSYNC_HUB_ROOT="$(cv git_hub_root | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
   FSYNC_HUB_ROOT="${FSYNC_HUB_ROOT:-/srv/git}"
   FSYNC_HUB_REPOS="$(cv git_hub_repos | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+  FSYNC_WRITER="$(cv git_hub_user | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+  FSYNC_WRITER="${FSYNC_WRITER:-git}"
+  FSYNC_PASSWD="$(getent passwd "$FSYNC_WRITER")"
+  IFS=: read -r _ _ FSYNC_WRITER_UID _ _ FSYNC_WRITER_HOME _ <<< "$FSYNC_PASSWD"
   for entry in $FSYNC_HUB_REPOS; do
     slug="${entry%%:*}"; name="${slug##*/}"; repo="$FSYNC_HUB_ROOT/$name.git"
-    if [[ -f "$repo/HEAD" ]]; then verify_fsync_effective "hub $name.git" "$repo"
+    if [[ -f "$repo/HEAD" ]]; then
+      if verify_fsync_effective "hub $name.git" "$repo" system; then
+        verify_fsync_effective "hub $name.git" "$repo" effective || true
+      fi
     else failv "git fsync: hub $name.git not initialized; effective settings not checked"; fi
   done
 fi

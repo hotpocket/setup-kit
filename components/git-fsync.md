@@ -31,14 +31,7 @@ lists with the required coverage pass. Coverage follows Git 2.53's
 [component definitions](https://github.com/git/git/blob/v2.53.0/write-or-die.h).
 Unknown list tokens fail closed.
 
-On a hub box with `component_git_hub=yes`, both checks inspect the existing
-bare repos named by `git_hub_repos`, at `<git_hub_root>/<basename>.git`.
-The root defaults to `/srv/git`; `:clone/path` does not change a bare repo's
-name. Local overrides and includes in those repos must satisfy the same
-coverage. Checks use the invoking account and never rewrite its overrides.
-The doctor names repos not initialized yet; verification fails on them.
-Other repositories' local overrides, including the incidental checkout, are
-outside these checks. Another account's globals need a check as that account.
+Only when component_git_hub=yes, check each existing bare repo listed in git_hub_repos at git_hub_root/<basename>.git, with git_hub_root defaulting to /srv/git. An optional :clone/path suffix does not change the bare repo name. In each repo context, audit system includes and persistent effective values for the configured git_hub_user (default git). That user's passwd home sets the global and XDG config locations (HOME and HOME/.config). Remove caller transient Git environment first, including command overrides and HOME or global config overrides, and keep a separate neutral caller environment check. When the caller UID differs from that writer, both the verifier and the doctor attempt a read-only noninteractive probe, sudo -n -H -u <writer> -- env -i ..., with the environment stripped, running Git --show-origin in the managed bare-repo context. The git-shell writer need not run the verifier interactively. Report FAIL not checked and never pass only if the probe is unavailable, the writer identity cannot be validated, or the writer home or config cannot be read. In the doctor, remaining identity setup still runs and the phase keeps the failure. Never rewrite an offending repo, include, or global file. Local overrides in other repos stay out of scope.
 
 To undo, remove both keys:
 
