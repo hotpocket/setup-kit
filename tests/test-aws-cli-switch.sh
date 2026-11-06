@@ -151,8 +151,52 @@ case_converges() {
   phase install
   assert 'second component install performs no AWS actions' '(( RC == 0 )) && [[ ! -s "$CALLS" ]] && contains "aws-cli v2.32.30"'
 }
+case_resolution() {
+  # Class: every verifier setting resolved differently from its installer.
+  # The operator runs all three real phases, rather than testing a new getter.
+  local scenario expected
+  for scenario in absent empty quoted_yes single_quoted_yes quoted_empty quoted_no explicit_yes explicit_no explicit_empty explicit_quoted_no leading_space trailing_comment repeated_group repeated_component; do
+    [[ -z "${AWS_SCENARIO_ONLY:-}" || "$scenario" == "$AWS_SCENARIO_ONLY" ]] || continue
+    reset; expected=yes
+    case "$scenario" in
+      absent) conf group_worker=yes ;;
+      empty) conf group_worker=yes group_dev_cloud= ;;
+      quoted_yes) conf group_worker=yes 'group_dev_cloud="yes"' ;;
+      single_quoted_yes) conf group_worker=yes "group_dev_cloud='yes'" ;;
+      quoted_empty) conf group_worker=yes 'group_dev_cloud=""' ;;
+      quoted_no) expected=no; conf group_worker=yes 'group_dev_cloud="no"' ;;
+      explicit_yes) conf group_worker=yes group_dev_cloud=no component_aws_cli=yes ;;
+      explicit_no) expected=no; conf group_worker=yes group_dev_cloud=yes component_aws_cli=no ;;
+      explicit_empty) expected=no; conf group_worker=yes group_dev_cloud=no component_aws_cli= ;;
+      explicit_quoted_no) expected=no; conf group_worker=yes group_dev_cloud=yes 'component_aws_cli="no"' ;;
+      leading_space) expected=no; conf group_worker=yes 'group_dev_cloud= yes' ;;
+      trailing_comment) conf group_worker=yes 'group_dev_cloud="yes"  # default' ;;
+      repeated_group) expected=no; conf group_worker=yes group_dev_cloud=yes group_dev_cloud=no ;;
+      repeated_component) conf group_worker=yes group_dev_cloud=yes component_aws_cli=no component_aws_cli= ;;
+    esac
+    phase install
+    if [[ "$expected" == yes ]]; then
+      assert "R2 $scenario: installer selects v2" '(( RC == 0 )) && [[ -f "$STATE/bundle-installed" && ! -e "$STATE/apt-v1" ]]' || return 1
+    else
+      assert "R2 $scenario: installer leaves v2 off" '(( RC == 0 )) && [[ ! -e "$STATE/bundle-installed" && -e "$STATE/apt-v1" ]]' || return 1
+    fi
+    rm -f "$STATE/apt-v1"; apt_phase
+    if [[ "$expected" == yes ]]; then
+      assert "R2 $scenario: apt agrees with v2 selection" '(( RC == 0 )) && contains "wanted packages installed"' || return 1
+    else
+      assert "R2 $scenario: apt retains v1 requirement" '(( RC == 0 )) && grep -qx "  awscli" "$TMP/out"' || return 1
+      touch "$STATE/apt-v1"
+    fi
+    verify
+    if [[ "$expected" == yes ]]; then
+      assert "R2 $scenario: verifier agrees and checks v2" '(( RC == 0 )) && contains "PASS  aws-cli v2 present" && ! contains "FAIL  apt: awscli"' || return 1
+    else
+      assert "R2 $scenario: verifier agrees and skips v2" '(( RC == 0 )) && ! contains "PASS  aws-cli v2 present" && ! contains "FAIL  aws is"' || return 1
+    fi
+  done
+}
 pass=0; fail=0
-for name in install_on install_off default_on default_off verify_on_v1 verify_on_v2 verify_off verify_default_on verify_default_off apt_on apt_off apt_default_on verify_apt_on verify_apt_off converges; do
+for name in install_on install_off default_on default_off verify_on_v1 verify_on_v2 verify_off verify_default_on verify_default_off apt_on apt_off apt_default_on verify_apt_on verify_apt_off converges resolution; do
   [[ -z "${1:-}" || "$name" == "$1" ]] || continue
   reset
   if "case_$name"; then ((pass++)); else ((fail++)); fi

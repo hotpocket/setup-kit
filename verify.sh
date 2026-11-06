@@ -54,10 +54,16 @@ CONFIGS_ROLE="$(cv configs_role | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1
 # that default applied.
 CFG_DEF=yes; [[ "$(cv configs)" == no ]] && CFG_DEF=no
 dflt() { local v; v="$(cv "$1")"; echo "${v:-$CFG_DEF}"; }
-# Independent component resolution. An absent switch preserves this verifier's
-# existing group gate; phase 07 keeps its existing group default in lib.sh.
-AWS_CLI_WANT="$(cv component_aws_cli | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
-AWS_CLI_WANT="${AWS_CLI_WANT:-$(cv group_dev_cloud)}"
+# Class: every verifier setting resolved differently from its installer.
+# Keep this reader independent, matching conf_get for these two AWS keys only:
+# last line, comment/trailing-space removal, outer quotes, then empty fallback.
+aws_config_value() {
+  local value
+  value="$(sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -1 \
+    | sed 's/[[:space:]]*#.*//; s/[[:space:]]*$//; s/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+  printf '%s\n' "${value:-$2}"
+}
+AWS_CLI_WANT="$(aws_config_value component_aws_cli "$(aws_config_value group_dev_cloud yes)")"
 
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 [[ -f "$CONF" ]] || { echo "no $CONF — nothing to verify against"; exit 1; }

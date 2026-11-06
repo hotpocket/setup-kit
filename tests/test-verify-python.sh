@@ -27,7 +27,7 @@ chmod +x "$BIN/sudo" "$BIN/hostname"
 export GIT_CONFIG_SYSTEM="$TMP/gitconfig"
 printf '[core]\n  fsync = committed\n  fsyncMethod = fsync\n' > "$GIT_CONFIG_SYSTEM"
 conf() {
-  printf '%s\n' profile=worker headless=yes configs=no cond_nvidia=no \
+  printf '%s\n' profile=worker headless=yes configs=no cond_nvidia=no group_dev_cloud=no \
     lang_node=no lang_flutter=no component_oom_zram=no \
     component_resource_guards=no component_clipboard=no tmp_on_disk=no \
     "$@" > "$CONF"

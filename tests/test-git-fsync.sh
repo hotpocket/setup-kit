@@ -59,7 +59,7 @@ reset() {
   mkdir -p "$HOME"
   export GIT_CONFIG_GLOBAL="$TMP/global" XDG_CONFIG_HOME="$TMP/xdg"
   unset GIT_CONFIG_NOSYSTEM
-  printf '%s\n' profile=workstation headless=yes configs=no cond_nvidia=no \
+  printf '%s\n' profile=workstation headless=yes configs=no cond_nvidia=no group_dev_cloud=no \
     lang_python=no lang_node=no lang_flutter=no component_oom_zram=no \
     component_resource_guards=no component_clipboard=no tmp_on_disk=no > "$HOST_CONF"
   # Correct user values must never hide missing or wrong SYSTEM values.
