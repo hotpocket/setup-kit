@@ -360,9 +360,9 @@ else
 fi
 
 # ------------------------------------------------------------- aws-cli v2
-# Same flag as the dev-cloud apt group; apt's awscli is v1 and cannot do the
-# sso_session logins .configs/bin/sso needs, so v2 comes from Amazon's bundle.
-if [[ "$(conf_get group_dev_cloud yes)" == yes ]]; then
+# The component can override its dev-cloud default on a lean worker. apt's
+# awscli is v1; phase 02 excludes it whenever this v2 component is wanted.
+if aws_cli_v2_wanted; then
   section "aws-cli v2 ($MODE) — components/aws-cli.md"
   AWS_VER="$(command -v aws >/dev/null 2>&1 && aws --version 2>&1 | sed -n 's|^aws-cli/\([0-9.]*\).*|\1|p')"
   if dpkg -s awscli >/dev/null 2>&1; then
@@ -375,7 +375,7 @@ if [[ "$(conf_get group_dev_cloud yes)" == yes ]]; then
          do_or_say aws_cli_v2_install || miss "aws-cli v2: bundle install failed (components/aws-cli.md)" ;;
   esac
 else
-  ok "aws-cli: group_dev_cloud is off — skipped"
+  ok "aws-cli: disabled, skipping install and checks"
 fi
 
 # ------------------------------------------------------------- whisper

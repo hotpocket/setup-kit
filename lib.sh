@@ -279,6 +279,9 @@ nvidia_wanted() {
   ubuntu-drivers devices 2>/dev/null | grep 'nvidia-driver' >/dev/null
 }
 # aws-cli v2 comes from Amazon's bundle, not apt (components/aws-cli.md).
+aws_cli_v2_wanted() {
+  [[ "$(conf_get component_aws_cli "$(conf_get group_dev_cloud yes)")" == yes ]]
+}
 aws_cli_v2_url() {
   case "${1:-$(uname -m)}" in
     x86_64|aarch64) echo "https://awscli.amazonaws.com/awscli-exe-linux-${1:-$(uname -m)}.zip" ;;
@@ -466,6 +469,12 @@ apt_wanted_pkgs() {
     fi
   else
     echo "@ok conditional virtualbox: skipped (opt-in: cond_virtualbox=yes)"
+  fi
+  # Every apt selector, including the worker list, must defer to the v2
+  # component. Otherwise phase 02 reinstalls what phase 07 just removed.
+  if aws_cli_v2_wanted && (( ${#WANT[@]} )); then
+    mapfile -t WANT < <(printf '%s\n' "${WANT[@]}" | grep -Fxv awscli)
+    echo "@ok AWS CLI v2 is selected, so the apt awscli v1 package is skipped to prevent reinstall and removal loops."
   fi
   # permanent skips recorded by the size review
   SKIPS="$(conf_get skip_pkgs "")"

@@ -54,6 +54,10 @@ CONFIGS_ROLE="$(cv configs_role | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1
 # that default applied.
 CFG_DEF=yes; [[ "$(cv configs)" == no ]] && CFG_DEF=no
 dflt() { local v; v="$(cv "$1")"; echo "${v:-$CFG_DEF}"; }
+# Independent component resolution. An absent switch preserves this verifier's
+# existing group gate; phase 07 keeps its existing group default in lib.sh.
+AWS_CLI_WANT="$(cv component_aws_cli | sed 's/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/')"
+AWS_CLI_WANT="${AWS_CLI_WANT:-$(cv group_dev_cloud)}"
 
 echo "=== independent verify: $(hostname) — $(date -Iseconds) ==="
 [[ -f "$CONF" ]] || { echo "no $CONF — nothing to verify against"; exit 1; }
@@ -236,6 +240,7 @@ if (( ${#FILES[@]} > 0 )); then
   CUR_DRV=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'nvidia-driver-*' 2>/dev/null | awk '/^ii /{print $2; exit}')
   while IFS= read -r p; do
     [[ "$REACH" == ssh && "$p" == tailscale ]] && continue
+    [[ "$AWS_CLI_WANT" == yes && "$p" == awscli ]] && continue
     [[ "$p" =~ ^(winehq|wine)-stable$ ]] && p="${p%-stable}-$WB"
     [[ "$SKIPS" == *" $p "* ]] && continue
     [[ "$p" =~ ^nvidia-driver-[0-9]+ && -n "$CUR_DRV" && "$p" != "$CUR_DRV" ]] && continue
@@ -456,9 +461,9 @@ if gon dev_cloud && [[ "$SKIPS" != *" google-cloud-cli "* ]]; then
   command -v gcloud >/dev/null && pass "gcloud present" || failv "gcloud missing"
 fi
 # aws must be v2 from Amazon's bundle (components/aws-cli.md); apt's awscli is v1.
-# Only when the group is on: a worker (group off) gets apt's v1 from worker.list,
-# which section 1 already verifies.
-if gon dev_cloud; then
+# An absent switch inherits the group; an explicit worker opt-in also exempts
+# worker.list's v1 in section 1 above. gcloud keeps its separate group gate.
+if [[ "$AWS_CLI_WANT" == yes ]]; then
   AWS_V="$(command -v aws >/dev/null 2>&1 && aws --version 2>&1 | sed -n 's|^aws-cli/\([0-9.]*\).*|\1|p')"
   case "$AWS_V" in
     2.*) pass "aws-cli v2 present ($AWS_V)" ;;
