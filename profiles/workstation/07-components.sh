@@ -1,5 +1,5 @@
 #!/bin/bash
-# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/t3code/codex/muse/whisper/lid-ignore (opt-in), dictation/ocr/tts.
+# Components: oom-zram/uutils-ls/aws-cli (default ON), docker, herdr/ollama/t3code/codex/whisper/lid-ignore (opt-in), dictation/ocr/tts.
 # Specs live in components/*.md — keep behavior in sync with them.
 SCRIPT_NAME="ws-07-components"
 source "$(dirname "$0")/../../lib.sh"
@@ -357,13 +357,6 @@ if [[ "$CODEX_WANT" == yes ]]; then
   fi
 else
   ok "codex: opt-in, currently '$CODEX_WANT' (flip component_codex=yes to enable)"
-fi
-
-# ------------------------------------------------------------- muse
-if [[ "$(conf_get component_muse no)" == yes ]]; then
-  source "$KIT_DIR/components/muse.sh"
-else
-  ok "muse: opt-in, currently '$(conf_get component_muse no)' (flip component_muse=yes to enable)"
 fi
 
 # ------------------------------------------------------------- aws-cli v2
