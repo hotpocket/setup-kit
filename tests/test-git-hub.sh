@@ -120,6 +120,11 @@ chmod +x "$BIN"/*
 export TMP ROOT
 export KIT_GIT_HUB_SYSTEM_ROOT="$TMP/system"
 
+if [[ "${GIT_HUB_GATE_SETUP_ONLY:-0}" == 1 ]]; then
+  source "$KIT_DIR/tests/git-hub-gate-setup.inc.sh"
+  echo "  $pass passed, $fail failed"; (( fail == 0 )); exit $?
+fi
+
 if [[ "${GIT_HUB_ATOMIC_FSYNC_ONLY:-0}" == 1 ]]; then
   source "$KIT_DIR/tests/git-hub-atomic-fsync.inc.sh"
   echo "  $pass passed, $fail failed"; (( fail == 0 )); exit $?
@@ -620,6 +625,8 @@ assert "T7. no token file: nothing to warn about" '! grep -q "forward token" "$T
 source "$KIT_DIR/tests/git-hub-control.inc.sh"
 
 source "$KIT_DIR/tests/git-hub-stale-locks.inc.sh"
+
+source "$KIT_DIR/tests/git-hub-gate-setup.inc.sh"
 
 source "$KIT_DIR/tests/git-hub-atomic-fsync.inc.sh"
 

@@ -73,10 +73,10 @@ wsdrift() {
 wsdrift; wsconf git_hub=hub-a.lan component_git_hub=yes; WS_PROBE_ROOT="$WS_SERVER" MODE=install runws
 assert 'WS13. server enabled plus git_hub provisions the server before probing the client' \
   '[[ "$(git --git-dir="$WS_SERVER/books.git" config core.bare)" == true && "$(wsurl books)" == git-hub:books.git ]] && grep -q "HostName hub-a.lan" "$WS_SSH" && grep -q "OK.*books: origin is the hub" "$TMP/out"'
-wsdrift; wsconf git_hub_gate=review.lan; WS_REMOTES="$(sha256sum "$WS_CLONES/books/.git/config" "$WS_CLONES/site/wbt/.git/config")"; MODE=install runws
+wsdrift; wsconf git_hub_gate=review.lan git_hub_review_thread=beast-vm:reviews; WS_REMOTES="$(sha256sum "$WS_CLONES/books/.git/config" "$WS_CLONES/site/wbt/.git/config")"; MODE=install runws
 assert 'WS14. relay enabled with git_hub unset leaves clone remotes alone' \
   '[[ "$(sha256sum "$WS_CLONES/books/.git/config" "$WS_CLONES/site/wbt/.git/config")" == "$WS_REMOTES" ]] && grep -q "^Host git-hub-gate$" "$WS_SSH" && [[ -f "$WS_HOME/.config/systemd/user/git-hub-relay.timer" ]]'
-wsconf git_hub=hub-a.lan component_git_hub=yes git_hub_gate=review.lan; MODE=install runws
+wsconf git_hub=hub-a.lan component_git_hub=yes git_hub_gate=review.lan git_hub_review_thread=beast-vm:reviews; MODE=install runws
 assert 'WS15. server and relay enabled together still reconcile the hub client' \
   '[[ "$(git --git-dir="$WS_SERVER/books.git" config core.bare)" == true && "$(wsurl books)" == git-hub:books.git ]] && grep -q "HostName hub-a.lan" "$WS_SSH" && grep -q "^Host git-hub-gate$" "$WS_SSH"'
 

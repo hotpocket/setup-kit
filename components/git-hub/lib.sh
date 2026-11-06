@@ -514,6 +514,18 @@ $end"
 
 hub_relay_units_ensure() {
   local ud="$HOME/.config/systemd/user" u want drift=0
+  if [[ -z "$(conf_get git_hub_review_thread '')" ]]; then
+    ok 'relay off: no git_hub_review_thread'
+    if systemctl --user is-enabled -q git-hub-relay.timer 2>/dev/null \
+        || systemctl --user is-active -q git-hub-relay.timer 2>/dev/null; then
+      warn 'drift: git-hub-relay.timer enabled or running with no git_hub_review_thread'
+      if (( INSTALL )); then
+        systemctl --user disable --now git-hub-relay.timer || return 1
+        log 'git-hub-relay.timer disabled and stopped'
+      fi
+    fi
+    return 0
+  fi
   local -A units=(
     [git-hub-relay.service]='[Unit]
 Description=Relay git-hub review requests into the standing review thread

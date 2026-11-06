@@ -185,16 +185,11 @@ Content classification, base-defined checks and exact-sha forwarding still apply
 | `git_hub_review_via` | hub | `t3x`, default, or `gate`. |
 | `git_hub_reviewers` | hub | Public keys allowed to use the forced review command. Relative paths resolve beside the host conf's real file, as with `git_hub_pushers`. |
 | `git_hub_review_lease_hours` | hub | Review lease duration before retry. |
-| `git_hub_gate` | reviewer | Hub address. Enables the `git-hub-gate` SSH alias and relay timer without provisioning local bare repos. |
+| `git_hub_gate` | reviewer | Hub address. Installs the isolated key, SSH alias and `git-hub` CLI, with no local bare repos. |
 | `git_hub_gate_user` | reviewer | SSH user, default `control`. |
-| `git_hub_review_thread` | reviewer | Standing T3 thread to receive requests from the relay. |
+| `git_hub_review_thread` | reviewer | Standing T3 thread to receive requests from the relay. Nonempty installs and enables the relay service/timer and linger. |
 
-Run the review box's profile install after setting its gate address and thread.
-Install creates `~/.ssh/git_hub_gate`, prints its public key for the hub's
-reviewers file, and reconciles the SSH alias. It uses only that key, no agent,
-and `StrictHostKeyChecking accept-new`. Install also enables user linger and
-`git-hub-relay.timer`, at boot and every two minutes. `check` reports drift
-without writing files, keys, units or enablement.
+Run the review box's profile install after setting its gate address. Install creates `~/.ssh/git_hub_gate`, prints its public key for the hub's reviewers file, and reconciles the SSH alias. It uses only that key, no agent, and `StrictHostKeyChecking accept-new`. When enabled, `git-hub-relay.timer` runs at boot and every two minutes. With no `git_hub_review_thread`, it reports `relay off: no git_hub_review_thread`; install then disables and stops an earlier enabled or active timer, retaining unit files, key, alias and CLI. `check` reports that timer as drift without writing files, keys, units or enablement; already disabled and inactive leftover files are allowed.
 
 On the hub, install reconciles a marked block in the human user's
 `~/.ssh/authorized_keys`, preserving cloud-init/admin lines outside the block.
