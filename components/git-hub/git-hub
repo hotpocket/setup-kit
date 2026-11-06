@@ -152,7 +152,7 @@ cmd_forward() {
     echo "$name $b ${sha:0:9} → $up$([[ ( -s "$TOKEN_FILE" || -e "$TOKEN_FILE.cred" ) && "$up" == git@github.com:* ]] && echo " (token)")"
     # no --force, ever: a non-fast-forward is refused upstream and merged by hand
     if push_up "$d" "$up" "refs/heads/$b:refs/heads/$b" manual; then
-      atomic "$STATE/$name/$b" "$sha"   # b may hold a slash: atomic makes its own parent
+      atomic "$STATE/$name/$b" "$sha" || return 1   # b may hold a slash: atomic makes its own parent
     else rc=1; echo "git-hub: $name $b not forwarded (upstream refused — fetch it, merge, push to the hub)" >&2; fi
   done < <(hg "$d" for-each-ref --format='%(refname:short) %(objectname)' refs/heads)
   return "$rc"
@@ -237,7 +237,33 @@ owner_alive() {
   (( BASH_REMATCH[2] > 0 ))
 }
 rlog() { local l="$*"; l="${l//[$'\n\r']/ }"; echo "$l"; mkdir -p "$STATE"; echo "$(date -Iseconds) $l" >> "$STATE/release.log"; }
-atomic() { local f="$1"; shift; mkdir -p "$(dirname "$f")"; printf '%s\n' "$*" > "$f.tmp.$$" && mv -f "$f.tmp.$$" "$f"; }
+atomic() {
+  local f="$1" dir tmp; shift
+  dir="$(dirname "$f")"; tmp="$f.tmp.$$"
+  mkdir -p "$dir" || return 1
+  # Ubuntu 26.04's uutils sync FILE calls global sync(), not fsync(FILE).
+  # Use explicit syscalls for both barriers, independent of coreutils variants.
+  if printf '%s\n' "$*" > "$tmp" && python3 - "$tmp" "$f" "$dir" <<'PY'
+import os, subprocess, sys
+temp, final, directory = sys.argv[1:]
+file_fd = os.open(temp, os.O_RDONLY)
+try:
+    os.fsync(file_fd)
+finally:
+    os.close(file_fd)
+subprocess.run(['mv', '-f', '--', temp, final], check=True)
+directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(directory_fd)
+finally:
+    os.close(directory_fd)
+PY
+  then return 0; fi
+  # A failed directory sync can leave the complete final file visible. Report
+  # failure even then; do not erase that final or claim it survived power loss.
+  rm -f -- "$tmp"
+  return 1
+}
 # content: changes nobody needs to read before they leave. vault/ and docs/
 # everywhere, plus git_hub_content="name=glob,glob ..." (bash globs; * crosses /).
 # CLAUDE.md is NOT content: it instructs the next agent that reads the repo.
@@ -384,7 +410,7 @@ release_one() {  # release_one <name>
   why="$(suspicious "$d" "$base" "$hub")" || why="${why:-secret scan failed}"   # fails closed
   if [[ -z "$held" && -z "$why" ]] && is_content "$name" "$d" "$base" "$hub"; then
     if push_up "$d" "$up" "$hub:refs/heads/$b" "content only" >/dev/null 2>&1; then
-      atomic "$STATE/$name/$b" "$hub"
+      atomic "$STATE/$name/$b" "$hub" || return 1
     fi
     return 0
   fi
@@ -421,7 +447,7 @@ release_one() {  # release_one <name>
     owner_alive "$lthread" "$lsent" && return 0
     if [[ "$lsha" == "$hub" ]] && (( ${ltries:-1} >= 2 )); then
       # ended twice without a verdict: likely a question only Brandon can answer -- say so once, don't loop
-      atomic "$RSTATE/$name.stuck" "$hub"
+      atomic "$RSTATE/$name.stuck" "$hub" || return 1
       rlog "$name $b ${hub:0:9}: review ended twice without a verdict in $lthread -- needs a human"
       return 0
     fi
@@ -444,7 +470,7 @@ release_one() {  # release_one <name>
     return 0
   fi
   # lease first: a crash after the start costs one duplicate thread after expiry, never a lost review
-  atomic "$RSTATE/$name.lease" "$hub $(( $(date +%s) + LEASE_H * 3600 )) $REVIEW_THREAD $(date +%s) $tries"
+  atomic "$RSTATE/$name.lease" "$hub $(( $(date +%s) + LEASE_H * 3600 )) $REVIEW_THREAD $(date +%s) $tries" || return 1
   local err
   if err="$(timeout 120 t3x send "$REVIEW_THREAD" --from "git-hub release" \
        "$(review_brief "$name" "$b" "$base" "$hub")${why:+$'\n'"Held from unattended forward: $why."}" 2>&1 >/dev/null 9>&-)"; then
@@ -474,11 +500,11 @@ release_lock() {  # one release or verdict at a time: base, lease and forward mu
   fi
 }
 cmd_release() {
-  local e name
+  local e name rc=0
   release_lock || return 1
   # All Git transport bounds live in hub_network_git, including manual commands.
-  for e in $GIT_HUB_REPOS; do e="${e%%:*}"; release_one "${e##*/}"; done
-  return 0
+  for e in $GIT_HUB_REPOS; do e="${e%%:*}"; release_one "${e##*/}" || rc=1; done
+  return "$rc"
 }
 
 cmd_verdict() {
@@ -506,7 +532,7 @@ cmd_verdict() {
     if ! push_up "$d" "$up" "$sha:refs/heads/$b" "after review -- $solnote -- $line"; then
       return 1
     fi
-    atomic "$STATE/$name/$b" "$sha"
+    atomic "$STATE/$name/$b" "$sha" || return 1
     [[ "${lsha:-}" == "$sha" ]] && rm -f "$RSTATE/$name.lease" "$RSTATE/$name.request"
     rm -f "$RSTATE/$name.stuck"
     local r   # clear only the rejections this pass covers: a newer rejected head stays rejected
@@ -515,7 +541,8 @@ cmd_verdict() {
     done
     if deploy_of "$name" >/dev/null; then echo "runs live: git-hub stage $name $sha, then: $(deploy_of "$name")"; fi
   else
-    atomic "$RSTATE/$name.rejected.d/$sha" "$line"; rm -f "$RSTATE/$name.stuck"
+    atomic "$RSTATE/$name.rejected.d/$sha" "$line" || return 1
+    rm -f "$RSTATE/$name.stuck"
     [[ "${lsha:-}" == "$sha" ]] && rm -f "$RSTATE/$name.lease" "$RSTATE/$name.request"
     rlog "$name $b ${sha:0:9}: rejected -- $line"
   fi
@@ -584,7 +611,7 @@ PYGATE
 cmd_relay() {
   [[ -n "$(conf_get git_hub_gate '')" ]] || { echo "git-hub: set git_hub_gate before relay" >&2; return 2; }
   [[ -n "$REVIEW_THREAD" ]] || { echo "git-hub: relay needs git_hub_review_thread" >&2; return 2; }
-  local dir="$STATE/relay" tmp name sha line header="" body="" file
+  local dir="$STATE/relay" tmp name sha line header="" body="" file commit_failed=0
   local -A open=()
   mkdir -p "$dir" || return 1
   exec 8>"$STATE/relay.lock"; flock -n 8 || return 0
@@ -611,6 +638,7 @@ cmd_relay() {
     [[ -f "$file" ]] || continue; name="${file##*/}"
     [[ -n "${open[$name]:-}" ]] || rm -f "$file"
   done
+  return "$commit_failed"
 }
 relay_send() {  # locals dir and open belong to cmd_relay, under the relay lock
   local header="$1" body="$2" name sha issued extra rn branch base rs
@@ -622,7 +650,7 @@ relay_send() {  # locals dir and open belong to cmd_relay, under the relay lock
   [[ "$(cat "$dir/$name" 2>/dev/null)" == "$sha $issued" ]] && return 0
   if timeout 120 t3x send "$REVIEW_THREAD" --from "git-hub relay" "Review request issue: $issued.
 ${body#*$'\n'}" >/dev/null 2>&1 8>&-; then
-    atomic "$dir/$name" "$sha $issued"
+    atomic "$dir/$name" "$sha $issued" || { commit_failed=1; return 1; }
     echo "git-hub relay: $name ${sha:0:9} sent"
   else echo "git-hub relay: $name ${sha:0:9} send failed; next timer run retries" >&2; fi
 }

@@ -38,6 +38,74 @@ hub_each() {
 }
 
 # ------------------------------------------------------------------ hub side
+# Boot cleanup is installed only by the server role, never run at install.
+# KIT_GIT_HUB_SYSTEM_ROOT is the fake-root seam, like KIT_MEMORY_ROOT.
+hub_stale_locks_ensure() {
+  local root="${KIT_GIT_HUB_SYSTEM_ROOT:-}" unit=git-hub-stale-locks.service
+  local helper=/usr/local/libexec/git-hub-stale-locks changed=0 dir path tmp want quoted
+  root="${root%/}"
+  # systemd command arguments need both C-style quoting and literal percent
+  # and dollar escapes. Reject control characters rather than writing a unit
+  # with an unexpected second directive.
+  if [[ "$GIT_HUB_ROOT" != /* || "$GIT_HUB_ROOT" == / || "$GIT_HUB_ROOT" == *[$'\n\r\t']* ]]; then
+    fail 'git-hub-stale-locks: git_hub_root must be an absolute directory below /'; return 1
+  fi
+  quoted="${GIT_HUB_ROOT//\\/\\\\}"; quoted="${quoted//\"/\\\"}"
+  quoted="${quoted//%/%%}"; quoted="${quoted//\$/\$\$}"
+  want="[Unit]
+Description=Recover stale Git transaction locks before hub logins
+DefaultDependencies=no
+Wants=local-fs.target
+After=local-fs.target
+Before=ssh.service ssh.socket systemd-user-sessions.service
+Conflicts=shutdown.target
+Before=shutdown.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=60
+ExecStart=$helper \"$quoted\"
+StandardOutput=journal
+StandardError=journal
+[Install]
+WantedBy=ssh.service ssh.socket systemd-user-sessions.service"
+  path="$root$helper"
+  if [[ ! -L "$path" && -x "$path" ]] && cmp -s "$KIT_DIR/components/git-hub/stale-locks" "$path"; then
+    ok 'git-hub-stale-locks helper current'
+  else
+    warn 'git-hub-stale-locks helper missing or drifted'
+    if (( INSTALL )); then
+      dir="$(dirname "$path")"
+      sudo mkdir -p "$dir" || return 1
+      tmp="$(sudo mktemp "$path.tmp.XXXXXX")" || return 1
+      sudo install -m 0755 "$KIT_DIR/components/git-hub/stale-locks" "$tmp" && sudo mv -f "$tmp" "$path" \
+        || { sudo rm -f "$tmp"; return 1; }
+      changed=1
+    fi
+  fi
+  path="$root/etc/systemd/system/$unit"
+  if [[ ! -L "$path" && -f "$path" && "$(cat "$path")" == "$want" ]]; then
+    ok 'git-hub-stale-locks unit current'
+  else
+    warn 'git-hub-stale-locks unit missing or drifted'
+    if (( INSTALL )); then
+      dir="$(dirname "$path")"
+      sudo mkdir -p "$dir" || return 1
+      tmp="$(sudo mktemp "$path.tmp.XXXXXX")" || return 1
+      printf '%s\n' "$want" | sudo tee "$tmp" >/dev/null \
+        && sudo chmod 0644 "$tmp" && sudo mv -f "$tmp" "$path" \
+        || { sudo rm -f "$tmp"; return 1; }
+      changed=1
+    fi
+  fi
+  if (( changed )); then sudo systemctl daemon-reload || return 1; fi
+  if ! systemctl is-enabled -q "$unit" 2>/dev/null; then
+    warn 'git-hub-stale-locks unit not enabled'
+    (( ! INSTALL )) || sudo systemctl enable "$unit" || return 1
+  fi
+  return 0
+}
+
 # hub_keys_render <pushers file>: authorized_keys content. Every key gets
 # `restrict` (no pty, no forwarding); options already on the line are kept.
 hub_keys_render() {
