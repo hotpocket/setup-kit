@@ -359,7 +359,7 @@ review_brief() {  # review_brief <name> <head-branch> <base> <sha>
     "3. Every release gets Sol, whatever its size: delegate_task as a child of this thread, provider codex, model gpt-6.1-sol, reasoning xhigh, runtimeMode inherit, a read-only brief with the range and $source. Only if Sol is at its usage limit may you go on without it, and you say so. Never call a Haiku review verified." \
     "4. Record the outcome, one line why: $verdict $name $sha pass --sol=<Sol task id> \"<line>\"  (or --sol=limit if Sol was at its limit)   or   $verdict $name $sha reject \"<line>\"" \
     "   pass forwards exactly $sha to GitHub. Nothing else forwards it." \
-    "5. Pass and the repo runs live: git-hub stage $name $sha (the reviewed sha, not newer main), then its deploy. AWS SSO expired: sso --phone landry and put the link in your reply." \
+    "5. Pass and the repo runs live: git-hub stage $name $sha (the reviewed sha, not newer main), then its deploy. AWS SSO expired: sso --phone landry --for \"deploy $name ${sha:0:9} after release review\" and put the link in your reply." \
     "6. Reject: t3x send the ai-3090 thread that works $name (t3x threads --server ai-3090) what failed and how to fix it. Ask Brandon only for a decision that is his." \
     "This thread is reused for every release review: do the review here, start no threads, reply with one line per outcome. No broadcasts."
 }
