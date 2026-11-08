@@ -130,6 +130,11 @@ if [[ "${GIT_HUB_ATOMIC_FSYNC_ONLY:-0}" == 1 ]]; then
   echo "  $pass passed, $fail failed"; (( fail == 0 )); exit $?
 fi
 
+if [[ "${GIT_HUB_REVIEW_ONLY_ONLY:-0}" == 1 ]]; then
+  source "$KIT_DIR/tests/git-hub-review-only.inc.sh"
+  echo "  $pass passed, $fail failed"; (( fail == 0 )); exit $?
+fi
+
 if [[ "${GIT_HUB_STALE_LOCKS_ONLY:-0}" == 1 ]]; then
   source "$KIT_DIR/tests/git-hub-stale-locks.inc.sh"
   echo "  $pass passed, $fail failed"; (( fail == 0 )); exit $?
@@ -631,5 +636,7 @@ source "$KIT_DIR/tests/git-hub-stale-locks.inc.sh"
 source "$KIT_DIR/tests/git-hub-gate-setup.inc.sh"
 
 source "$KIT_DIR/tests/git-hub-atomic-fsync.inc.sh"
+
+source "$KIT_DIR/tests/git-hub-review-only.inc.sh"
 
 echo "  $pass passed, $fail failed"; (( fail == 0 ))

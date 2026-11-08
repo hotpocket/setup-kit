@@ -150,3 +150,13 @@ afsetup ancestry-failure
 AF_FRESH_INJECT=1 AF_INJECT=1 afcli release
 assert 'AF15. new-directory parent fsync failure reaches caller before file publication' \
   '(( AF_RC != 0 )) && grep -F "$CASE/home>" "$CASE/trace" | grep -Eq "fsync.*EIO.*INJECTED" && [[ ! -e "$STATE_AF/release/books.lease" ]] && afclean'
+
+afsetup review-only-pass; echo git_hub_review_only=books >> "$CASE/host.conf"
+afcli release; afcli verdict books "$HEAD_SHA" pass --sol=fixture accepted
+aforder books/main > "$CASE/order" 2>&1; ORDER_RC=$?
+assert 'AF16. review-only PASS uses ordered fsync barriers for its release mark' \
+  '(( AF_RC == 0 && ORDER_RC == 0 )) && [[ "$(cat "$STATE_AF/books/main" 2>/dev/null)" == "$HEAD_SHA" ]] && afclean'
+afsetup review-only-content docs; echo git_hub_review_only=books >> "$CASE/host.conf"
+afcli release; aforder books/main > "$CASE/order" 2>&1; ORDER_RC=$?
+assert 'AF17. review-only content uses ordered fsync barriers for its release mark' \
+  '(( AF_RC == 0 && ORDER_RC == 0 )) && [[ "$(cat "$STATE_AF/books/main" 2>/dev/null)" == "$HEAD_SHA" ]] && afclean'

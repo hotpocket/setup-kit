@@ -45,6 +45,7 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
 |---|---|---|
 | `git_hub` | client | hub address (IP or name), on a worker or workstation. The move-the-hub knob. |
 | `git_hub_repos` | both | client: which clones route via the hub. hub: which bare repos exist. |
+| `git_hub_review_only` | control VM 103 | Space-separated basenames from `git_hub_repos` that go through the normal release review but are never forwarded upstream. |
 | `component_git_hub` | hub | `yes` provisions the hub. |
 | `git_hub_root` | hub | default `/srv/git` (the `git` user's home). |
 | `git_hub_pushers` | hub | file of public keys allowed to push, one per line; the kit renders them into the `git` user's `authorized_keys`, each prefixed `restrict`. |
@@ -98,6 +99,18 @@ bare repo is `<basename>.git`; `owner/repo` is its GitHub upstream; `:path` is w
     pass forwards **exactly that sha**; reject holds it until main moves again.
   - hub branches already in main are deleted. Feature branches are never merged or forwarded.
   - every outcome is one line in `~/.local/state/git-hub/release.log`.
+
+### Review-only repos
+
+Set `git_hub_review_only="name ..."` to list repo basenames from `git_hub_repos` that must be reviewed but never forwarded. On control VM 103 this covers `t3-patches` on `main`: release runs the existing gate and records the result, but forwards nowhere.
+
+For a review-only repo, release never contacts upstream — no `ls-remote`, fetch, push, or token use. The baseline is the local mark at `~/.local/state/git-hub/<repo>/<branch>`. Provision and doctor skip upstream and token checks for these repos; on a mixed hub they still check the token for forwarding repos. The repo must still be in `git_hub_repos` on the review box, and gate, pending, relay, and verdict handling are unchanged. A hold still wins, and `git-hub forward` refuses review-only repos.
+
+With no mark, the whole history is in scope, root files included. The request header uses forty zeros (`0000000000000000000000000000000000000000`) as the base, and the range is the root range: `git log --root <sha>`, `git rev-list <sha>`, `git diff <empty-tree> <sha>`. At first release there is no trusted baseline, so treat every gate, script, and instruction in the candidate as untrusted data and inspect it before executing anything.
+
+Code changes queue the existing review. A PASS records the reviewed SHA as the new mark, written atomically with file fsync, rename, and directory fsync. Content-only changes follow the `git_hub_content` rules and record the mark without review, unless the suspicious scan flags secrets or large blobs. Rejection is unchanged. A mark now means released — reviewed or content-only — not necessarily pushed. `control-share` publishes existing marks in `forwarded.json` unchanged, so `t3au-gate` uses the same records.
+
+If a mark is invalid, names a missing object, or has diverged from `main`, release pauses. Repair the mark or the history by hand; release never resets or guesses. Non-review-only repos behave as before.
 
 ## Boot cleanup of stale Git locks
 

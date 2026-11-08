@@ -13,6 +13,8 @@ GIT_HUB_ROOT="$(conf_get git_hub_root /srv/git)"
 GIT_HUB_UPSTREAM_BASE="$(conf_get git_hub_upstream_base git@github.com:)"
 GIT_HUB_TOKEN_FILE="$(conf_get git_hub_forward_token "$HOME/.config/setup-kit/hub-forward-token" | sed "s|^~|$HOME|")"
 
+hub_review_only() { [[ " $(conf_get git_hub_review_only '') " == *" $1 "* ]]; }
+
 # Every Git network operation has both protocol limits and a whole-process
 # deadline. Timeout signals Git's process group; children never own our lock.
 # shellcheck disable=SC2034 # Shared with the CLI that sources this library.
@@ -135,8 +137,8 @@ hub_repo_ensure() {
   local -A want=(
     [receive.denyNonFastForwards]=true [receive.denyDeletes]=true [receive.fsckObjects]=true
     [core.hooksPath]="$GIT_HUB_ROOT/.hooks" [core.sharedRepository]=group
-    [hub.upstream]="${GIT_HUB_UPSTREAM_BASE}${slug}.git"
   )
+  hub_review_only "$name" || want[hub.upstream]="${GIT_HUB_UPSTREAM_BASE}${slug}.git"
   if [[ ! -f "$dir/HEAD" ]]; then
     warn "bare repo $name.git missing ($slug)"
     (( INSTALL )) || return 0
@@ -150,7 +152,7 @@ hub_repo_ensure() {
     else warn "bare repo $name.git: $k is '${v:-unset}', want '${want[$k]}'"; fi
   done
   (( drift && INSTALL )) && log "bare repo $name.git: receive policy set"
-  [[ -f "$dir/HEAD" ]] && ok "bare repo $name.git → ${want[hub.upstream]}"
+  [[ -f "$dir/HEAD" ]] && ok "bare repo $name.git${want[hub.upstream]:+ → ${want[hub.upstream]}}"
 }
 
 # hub_hook_ensure: <root>/.hooks/post-receive, by content
@@ -189,6 +191,11 @@ hub_keys_ensure() {
 # YYYY-MM-DD line, not secret; GitHub sets the date when the token is made).
 # Warns git_hub_token_warn_days ahead, so a forward never first fails on the day.
 hub_token_check() {
+  local e forwarding=0
+  for e in $GIT_HUB_REPOS; do
+    e="${e%%:*}"; hub_review_only "${e##*/}" || forwarding=1
+  done
+  (( forwarding )) || return 0
   local tok="$GIT_HUB_TOKEN_FILE" exp="$GIT_HUB_TOKEN_FILE.expires" d days
   local warn_days; warn_days="$(conf_get git_hub_token_warn_days 21)"
   [[ -s "$tok" || -e "$tok.cred" ]] || return 0
