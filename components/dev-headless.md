@@ -18,5 +18,6 @@ this group or enabling browser installation.
 
 Test: `bash tests/test-dev-headless.sh`.
 
-Run all agent-tool calibrations with `bash tests/run-agent-tools.sh`. It owns
-the shared heavy-job lock and requires no model, network access or sudo.
+Run all agent-tool calibrations with `bash tests/run-agent-tools.sh`. It takes
+no lock and runs them only on dev via dev-run. If dev-run fails or is missing,
+it fails; nothing runs. Needs no model, sudo or network beyond reaching dev.
