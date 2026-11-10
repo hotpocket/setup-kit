@@ -546,6 +546,8 @@ assert "R37a. the brief has no size-based Sol skip: every review gets Sol, at li
   'B="$(tail -1 "$TMP/t3x.calls")"; grep -q "Every release gets Sol, whatever its size" <<<"$B" && grep -q "reasoning xhigh" <<<"$B" && grep -q "Only if Sol is at its usage limit" <<<"$B" && grep -q -- "--sol=" <<<"$B" && ! grep -qiE "judge it yourself|narrow" <<<"$B"'
 assert "R37a2. the brief's SSO step gives a reason (sso --phone refuses without --for), naming repo and sha" \
   'B="$(tail -1 "$TMP/t3x.calls")"; grep -qF "sso --phone landry --for \"deploy books ${CN:0:9} after release review\"" <<<"$B" && ! grep -qE "sso --phone landry( and|\.|$)" <<<"$B"'
+assert "R37a3. the brief runs the gate on dev through dev-run, never on Beast, and never falls back to Beast" \
+  'B="$(tail -1 "$TMP/t3x.calls")"; grep -qF "\$GIT_HOME/proxmox_setup_plan/scripts/dev-run sh -c" <<<"$B" && grep -q "never on Beast" <<<"$B" && grep -q "never fall back to Beast" <<<"$B" && grep -q "no dev-heavy" <<<"$B"'
 cli verdict books "$CN" pass "narrow, judged it myself"; rc=$?
 assert "R37b. pass without naming its Sol review is refused: nothing forwarded" '(( rc != 0 )) && [[ "$(upsha)" == "$U5" ]] && grep -q -- "--sol" "$TMP/out"'
 cli verdict books "$CN" pass "--sol=limit because unavailable" "x"; r1=$?; cli verdict books "$CN" pass "--sol= " "x"; r2=$?
