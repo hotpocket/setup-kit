@@ -1,0 +1,3 @@
+# Expected command transcripts, not credentials.
+tests/fixtures/agent-default-calls/03-token
+tests/fixtures/agent-default-calls/preamble-token

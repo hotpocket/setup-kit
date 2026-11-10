@@ -21,7 +21,7 @@ for runtime in flutter chromium engine; do
   rm -f "$STATE/download-started" "$STATE/stage-path"
   if [[ "$runtime" == flutter ]]; then
     conf_tools component_flutter_headless=yes
-    phase=07-components; export PAUSE_URL=flutter_linux_3.47.2-stable.tar.xz
+    phase=07-components; export PAUSE_URL=${FLUTTER_RELEASE_URL##*/}
     target="$HOME/development/flutter/bin/cache/dart-sdk/bin/dart"
   elif [[ "$runtime" == engine ]]; then
     conf_tools component_flutter_headless=yes

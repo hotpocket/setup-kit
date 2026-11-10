@@ -1,5 +1,7 @@
 #!/bin/bash
 source "$(dirname "${BASH_SOURCE[0]}")/memory-fixture.sh"
+source "$KIT_DIR/manifests/tool-versions.conf"
+export FLUTTER_VERSION FLUTTER_REVISION FLUTTER_DART_VERSION FLUTTER_ENGINE_REVISION
 export KIT_TOOL_ROOT="$ROOT" GIT_HOME="$HOME/repos" FIXTURE="$TMP"
 mkdir -p "$GIT_HOME" "$ROOT/usr/lib/jvm/java-21-openjdk-amd64/bin"
 printf '#!/bin/sh\nexit 0\n' > "$ROOT/usr/lib/jvm/java-21-openjdk-amd64/bin/java"
@@ -25,9 +27,10 @@ elif name=='sha256sum':
 elif name=='git':
  if 'clone' in args:
   d=p(args[-1]); (d/'.git').mkdir(parents=True); (d/'bin/cache').mkdir(parents=True)
-  (d/'bin/flutter').write_text('#!/bin/sh\necho "flutter $*" >> "$CALLS"\nmkdir -p "$HOME/development/flutter/bin/cache"\nprintf \'{"frameworkVersion":"3.47.2","dartSdkVersion":"3.13.2"}\\n\' > "$HOME/development/flutter/bin/cache/flutter.version.json"\n')
-  (d/'bin/flutter').write_text((d/'bin/flutter').read_text()+   'if [ -f "$STATE/precache-fail" ]; then exit 42; fi\nif [ -f "$STATE/precache-pause" ]; then touch "$STATE/precache-started"; sleep 120; fi\nprintf "a804b261645ef8c13eb3d5c44a5c2fb0340c5539\\n" > "$HOME/development/flutter/bin/cache/android-sdk.stamp"\n')
-  (d/'bin/flutter').chmod(0o755); (d/'HEAD').write_text('d3b14c876900e553bc736ca19295fc09e3853e8e')
+  metadata=json.dumps(dict(frameworkVersion=os.environ['FLUTTER_VERSION'],dartSdkVersion=os.environ['FLUTTER_DART_VERSION']))
+  (d/'bin/flutter').write_text('#!/bin/sh\necho "flutter $*" >> "$CALLS"\nmkdir -p "$HOME/development/flutter/bin/cache"\nprintf \''+metadata+'\\n\' > "$HOME/development/flutter/bin/cache/flutter.version.json"\n')
+  (d/'bin/flutter').write_text((d/'bin/flutter').read_text()+   'if [ -f "$STATE/precache-fail" ]; then exit 42; fi\nif [ -f "$STATE/precache-pause" ]; then touch "$STATE/precache-started"; sleep 120; fi\nprintf "'+os.environ['FLUTTER_ENGINE_REVISION']+'\\n" > "$HOME/development/flutter/bin/cache/android-sdk.stamp"\n')
+  (d/'bin/flutter').chmod(0o755); (d/'HEAD').write_text(os.environ['FLUTTER_REVISION'])
  elif 'rev-parse' in args:
   d=p(args[args.index('-C')+1]); print((d/'HEAD').read_text() if (d/'HEAD').exists() else 'abc123')
  elif 'status' in args:
@@ -122,9 +125,9 @@ run_tools() { run07 "${1:-check}"; }
 mutations() { grep -E '^(curl |git .*clone|sdkmanager .*--licenses|sdkmanager .*--install|sudo |flutter .*precache)' "$CALLS" || true; }
 
 mkdir -p "$TMP/payload/dart-sdk/bin"
-printf '#!/bin/sh\necho "Dart SDK version: 3.13.2 (stable)"\n' > "$TMP/payload/dart-sdk/bin/dart"
+printf '#!/bin/sh\necho "Dart SDK version: %s (stable)"\n' "$FLUTTER_DART_VERSION" > "$TMP/payload/dart-sdk/bin/dart"
 chmod +x "$TMP/payload/dart-sdk/bin/dart"
-printf '3.13.2\n' > "$TMP/payload/dart-sdk/version"
+printf '%s\n' "$FLUTTER_DART_VERSION" > "$TMP/payload/dart-sdk/version"
 /usr/bin/python3 - "$TMP" <<'PY2'
 import sys,pathlib,zipfile
 p=pathlib.Path(sys.argv[1])
@@ -152,7 +155,7 @@ cat > "$TMP/payload/flutter/bin/cache/dart-sdk/bin/dart" <<'PY'
 import json,os,pathlib,sys
 p=pathlib.Path; args=sys.argv[1:]
 if args==['--version']:
- print('Dart SDK version: 3.13.2 (stable)'); sys.exit(0)
+ print('Dart SDK version: '+os.environ['FLUTTER_DART_VERSION']+' (stable)'); sys.exit(0)
 with open(os.environ['CALLS'],'a') as out: out.write('release-dart '+' '.join(args)+'\n')
 cache=p(os.environ['PUB_CACHE']); state=p(os.environ['STATE'])
 if args[:3]==['pub','cache','preload']:
@@ -174,10 +177,10 @@ printf 'verified release package archive fixture\n' > "$TMP/payload/flutter/.pub
 "$TMP/bin/git" clone fixture "$TMP/clone-launcher"
 cp "$TMP/clone-launcher/bin/flutter" "$TMP/payload/flutter/bin/flutter"
 cp "$TMP/clone-launcher/bin/flutter" "$TMP/payload/flutter/bin/dart"
-printf 'd3b14c876900e553bc736ca19295fc09e3853e8e\n' > "$TMP/payload/flutter/HEAD"
+printf '%s\n' "$FLUTTER_REVISION" > "$TMP/payload/flutter/HEAD"
 printf 'compiled flutter_tools fixture\n' > "$TMP/payload/flutter/bin/cache/flutter_tools.snapshot"
-printf 'd3b14c876900e553bc736ca19295fc09e3853e8e:\n' > "$TMP/payload/flutter/bin/cache/flutter_tools.stamp"
-printf 'a804b261645ef8c13eb3d5c44a5c2fb0340c5539\n' > "$TMP/payload/flutter/bin/cache/engine-dart-sdk.stamp"
+printf '%s:\n' "$FLUTTER_REVISION" > "$TMP/payload/flutter/bin/cache/flutter_tools.stamp"
+printf '%s\n' "$FLUTTER_ENGINE_REVISION" > "$TMP/payload/flutter/bin/cache/engine-dart-sdk.stamp"
 printf '# vendor launcher support\n' > "$TMP/payload/flutter/bin/internal/shared.sh"
 printf 'name: flutter_tools\n' > "$TMP/payload/flutter/packages/flutter_tools/pubspec.yaml"
 cp "$TMP/payload/flutter/packages/flutter_tools/pubspec.yaml" "$TMP/payload/flutter/packages/flutter_tools/pubspec.lock"

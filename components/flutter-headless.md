@@ -3,7 +3,7 @@
 `component_flutter_headless=yes` enables this stack. Unset/no does nothing.
 The pin file is `manifests/tool-versions.conf`.
 
-- Flutter 3.47.2 and Dart 3.13.2 from the official Linux release archive,
+- Flutter 3.47.7 and Dart 3.13.5 from the official Linux release archive,
   checked against the SHA256 in Google's release metadata, at `$HOME/development/flutter`.
   The archive includes the compiled Flutter tool and vendored Pub package archives.
   Setup-kit preloads those packages into a private cache, resolves them with
@@ -49,7 +49,7 @@ receives it on first start. Other shells need to source the environment file.
 JDK 21 is an LTS within Gradle 9.3.1's supported JVM 17–25 range; AGP 9.1
 requires at least 17. Java 17 bytecode targets in t3-voice do not require the
 build JVM to be 17. Tools 22 retain the licenses interface used by Flutter
-3.47.2; tools 23 changed it. Sources: [Gradle compatibility](https://docs.gradle.org/9.3.1/userguide/compatibility.html),
+3.47.7; tools 23 changed it. Sources: [Gradle compatibility](https://docs.gradle.org/9.3.1/userguide/compatibility.html),
 [AGP 9.1 compatibility](https://developer.android.com/build/releases/agp-9-1-0-release-notes),
 [Google's download/checksum table](https://developer.android.com/studio),
 [Google's repository metadata](https://dl.google.com/android/repository/repository2-3.xml),
@@ -63,3 +63,5 @@ Supply the official release archive and an already verified pinned engine cache.
 It uses fresh HOME directories and bubblewrap network isolation, then proves the
 old Git bootstrap still reaches a private loopback registry. It never provisions
 the host or uses its Pub cache.
+
+2026-11-09: Raised Flutter to 3.47.7 stable to match raise-the-bar CI; reverified all 25 cache pins with `tests/flutter-cache-calibration.py`.

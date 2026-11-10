@@ -15,7 +15,7 @@ run_tools check
 assert 'doctor identifies Git bootstrap as incomplete without changing it' 'grep -q "WARN.*release" "$TMP/out" && [[ ! -s "$flutter/.setup-kit-release.json" ]] && [[ -z "$(mutations)" ]]'
 printf 'flutter.tar.xz.part\n' > "$STATE/checksum-fail-for"
 run_tools install
-assert 'release mismatch preserves existing clone without extracting or launching' 'grep -q "flutter_linux_3.47.2-stable.tar.xz" "$CALLS" && ! grep -q "tar .*flutter.tar.xz" "$CALLS" && ! grep -q "^flutter " "$CALLS" && [[ "$(cat "$flutter/bin/cache/setup-kit-android.complete")" == old ]]'
+assert 'release mismatch preserves existing clone without extracting or launching' 'grep -Fq "$FLUTTER_RELEASE_URL" "$CALLS" && ! grep -q "tar .*flutter.tar.xz" "$CALLS" && ! grep -q "^flutter " "$CALLS" && [[ "$(cat "$flutter/bin/cache/setup-kit-android.complete")" == old ]]'
 rm "$STATE/checksum-fail-for"
 touch "$STATE/pub-preload-fail"
 run_tools install
