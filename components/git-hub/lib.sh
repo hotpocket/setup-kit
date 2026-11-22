@@ -65,6 +65,7 @@ Before=shutdown.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+SuccessExitStatus=75
 TimeoutStartSec=60
 ExecStart=$helper \"$quoted\"
 StandardOutput=journal

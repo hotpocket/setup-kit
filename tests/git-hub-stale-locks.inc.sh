@@ -16,7 +16,8 @@ case "$*" in
     [[ -f "$SL/manual-run" ]] && echo 1 || echo "$PPID";;
   'show basic.target -p InactiveExitTimestampMonotonic --value')
     [[ ! -f "$SL/no-basic-state" ]] || exit 1
-    [[ -f "$SL/basic-started" ]] && echo 12345 || echo 0;;
+    if [[ -f "$SL/basic-state" ]]; then cat "$SL/basic-state"
+    elif [[ -f "$SL/basic-started" ]]; then echo 12345; else echo 0; fi;;
   'show systemd-user-sessions.service -p InactiveExitTimestampMonotonic --value')
     [[ ! -f "$SL/no-barrier-state" ]] || exit 1
     [[ -f "$SL/login-started" ]] && echo 12345 || echo 0;;
@@ -28,6 +29,18 @@ case "$*" in
       mkdir -p "$ud/$target.wants"
       ln -sfn ../git-hub-stale-locks.service "$ud/$target.wants/git-hub-stale-locks.service"
     done;;
+  'start git-hub-stale-locks.service')
+    "$SL/test-stale-locks" "$ROOT"; rc=$?
+    printf '%s\n' "$rc" > "$SL/unit-status"
+    if (( rc == 0 )) || grep -Eq "^SuccessExitStatus=([0-9]+ )*$rc( [0-9]+)*$" \
+        "$KIT_GIT_HUB_SYSTEM_ROOT/etc/systemd/system/git-hub-stale-locks.service"; then
+      echo success > "$SL/unit-result"
+    else echo exit-code > "$SL/unit-result"; exit 1; fi;;
+  'show git-hub-stale-locks.service -p Result --value') cat "$SL/unit-result";;
+  '--failed --no-legend --plain')
+    if [[ -f "$SL/unit-result" && "$(cat "$SL/unit-result")" != success ]]; then
+      echo 'git-hub-stale-locks.service loaded failed failed stale-lock sweep'
+    fi;;
   *git-hub-stale-locks*) exit 98;;
 esac
 S
@@ -57,6 +70,10 @@ slsweep() {
   if [[ -x "$SWEEP" ]]; then "$SWEEP_TEST" "$ROOT" > "$TMP/out" 2>&1 || SWEEP_RC=$?
   else echo 'boot sweep not installed; locks remain' > "$TMP/out"; SWEEP_RC=127; fi
 }
+slstart() {
+  START_RC=0
+  systemctl start git-hub-stale-locks.service > "$TMP/out" 2>&1 || START_RC=$?
+}
 slconf component_git_hub=no; slphase install
 assert 'SL1. non-hub install writes no boot sweep or unit' '[[ ! -e "$UNIT" && ! -e "$SWEEP" ]]'
 slconf component_git_hub=yes; slphase check
@@ -74,13 +91,13 @@ assert 'SL6. check detects disabled boot sweep without enabling it' \
   'grep -q "WARN.*git-hub-stale-locks.*not enabled" "$TMP/out" && [[ ! -e "$SL/enabled" ]]'
 slphase install
 assert 'SL7. interrupted enablement is repaired independently of file content' '[[ -f "$SL/enabled" ]]'
-[[ ! -f "$UNIT" ]] || printf '\n# drift\n' >> "$UNIT"
+[[ ! -f "$UNIT" ]] || sed -i '/^SuccessExitStatus=/d' "$UNIT"
 slphase check
-assert 'SL8. unit content drift is reported without writes' \
-  'grep -q "WARN.*git-hub-stale-locks.*drift" "$TMP/out" && grep -q "# drift" "$UNIT"'
+assert 'SL8. old unit without skip status is reported as drift without writes' \
+  'grep -q "WARN.*git-hub-stale-locks.*drift" "$TMP/out" && ! grep -q "^SuccessExitStatus=" "$UNIT"'
 : > "$SL/systemctl.calls"; slphase install
 assert 'SL9. changed unit is replaced whole and reloads system manager once' \
-  '[[ -f "$UNIT" ]] && ! grep -q "# drift" "$UNIT" && [[ "$(grep -cx daemon-reload "$SL/systemctl.calls")" == 1 ]]'
+  'grep -qx "SuccessExitStatus=75" "$UNIT" && [[ "$(grep -cx daemon-reload "$SL/systemctl.calls")" == 1 ]]'
 
 # Change only a private test copy's executable constant. The installed helper
 # keeps its trusted absolute executable; caller environment cannot select it.
@@ -216,10 +233,10 @@ assert 'SL27. symlinked hub root is refused without removing its target locks' \
   '(( ROOT_LINK_RC == 1 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]]'
 
 # Wants lets SSH survive failure. A later consumer may retry a failed sweep,
-# so the command must also refuse once the login barrier has started.
+# so the command must skip once the login barrier has started.
 touch "$SL/login-started"; slsweep
-assert 'SL28. retry after login barrier started refuses to delete potentially live locks' \
-  '(( SWEEP_RC == 1 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]] && grep -q "login barrier" "$TMP/out"'
+assert 'SL28. retry after login barrier skips with one journal line and preserves locks' \
+  '(( SWEEP_RC == 75 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve && "$(wc -l < "$TMP/out")" == 1 ]] && grep -qx "git-hub stale-lock cleanup skipped: not early boot (login barrier already started)" "$TMP/out"'
 rm "$SL/login-started"; printf preserve > "$ROOT/books.git/refs/heads/main.lock"
 touch "$SL/no-barrier-state"; slsweep
 assert 'SL29. unavailable boot-barrier state refuses cleanup' \
@@ -244,7 +261,7 @@ for scenario in service-only-ssh git-daemon root-manager; do
 done
 
 touch "$SL/basic-started"
-python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP_TEST" "$SL/live-basic" > "$SL/live-basic.json"
+python3 "$KIT_DIR/tests/git-hub-live-lock.py" "$SWEEP_TEST" "$SL/live-basic" 75 > "$SL/live-basic.json"
 LIVE_PROBE_RC=$?
 assert 'SL35. after basic.target a live prepared Git ref lock survives and commits' \
   '(( LIVE_PROBE_RC == 0 )) && python3 -c '\''import json,sys; sys.exit(not all(json.load(open(sys.argv[1])).values()))'\'' "$SL/live-basic.json"'
@@ -316,11 +333,44 @@ touch "$SL/basic-started"; printf preserve > "$ROOT/books.git/refs/heads/main.lo
 env PATH="$SL/shadow:$BIN:/usr/bin:/bin" "$SWEEP_TEST" "$ROOT" > "$TMP/out" 2>&1
 SHADOW_RC=$?
 assert 'SL45. managed basic-target query ignores a PATH shadow that claims boot has not started' \
-  '(( SHADOW_RC == 1 )) && [[ -f "$ROOT/books.git/refs/heads/main.lock" && ! -s "$SL/shadow.calls" ]] && grep -q "basic target" "$TMP/out"'
+  '(( SHADOW_RC == 75 )) && [[ -f "$ROOT/books.git/refs/heads/main.lock" && ! -s "$SL/shadow.calls" ]] && grep -q "basic target" "$TMP/out"'
 rm "$SL/basic-started"; touch "$SL/login-started"
 printf preserve > "$ROOT/books.git/refs/heads/main.lock"; : > "$SL/shadow.calls"
 env PATH="$SL/shadow:$BIN:/usr/bin:/bin" "$SWEEP_TEST" "$ROOT" > "$TMP/out" 2>&1
 SHADOW_RC=$?
 assert 'SL46. managed login-barrier query ignores a PATH shadow that claims boot has not started' \
-  '(( SHADOW_RC == 1 )) && [[ -f "$ROOT/books.git/refs/heads/main.lock" && ! -s "$SL/shadow.calls" ]] && grep -q "login barrier" "$TMP/out"'
+  '(( SHADOW_RC == 75 )) && [[ -f "$ROOT/books.git/refs/heads/main.lock" && ! -s "$SL/shadow.calls" ]] && grep -q "login barrier" "$TMP/out"'
 rm "$SL/login-started"
+
+# Class: managed starts after either boot barrier must skip successfully,
+# while every missing authorization, state or root still fails closed.
+slphase install
+touch "$SL/basic-started"; printf preserve > "$ROOT/books.git/refs/heads/main.lock"
+slstart
+assert 'SL47. late basic-target unit start succeeds without sweeping and logs the skip once' \
+  '(( START_RC == 0 )) && [[ "$(cat "$SL/unit-status")" == 75 && "$(systemctl show git-hub-stale-locks.service -p Result --value)" == success && "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve && "$(wc -l < "$TMP/out")" == 1 ]] && grep -qx "git-hub stale-lock cleanup skipped: not early boot (basic target already started)" "$TMP/out"'
+slverify
+assert 'SL48. independent verify accepts the skipped unit including calm failed-units check' \
+  'grep -q "PASS.*git-hub stale-lock sweep" "$TMP/out" && grep -q "PASS.*calm: system no failed units" "$TMP/out"'
+rm "$SL/basic-started"; touch "$SL/login-started"; slstart
+assert 'SL49. late login-barrier unit start succeeds without sweeping' \
+  '(( START_RC == 0 )) && [[ "$(cat "$SL/unit-status")" == 75 && "$(systemctl show git-hub-stale-locks.service -p Result --value)" == success && "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]]'
+touch "$SL/manual-run"; slstart
+assert 'SL50. manual late invocation still fails and the unit rejects ordinary failure' \
+  '(( START_RC == 1 )) && [[ "$(cat "$SL/unit-status")" == 1 && "$(systemctl show git-hub-stale-locks.service -p Result --value)" == exit-code && "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]]'
+rm "$SL/manual-run" "$SL/login-started"; touch "$SL/basic-started" "$SL/no-barrier-state"; slstart
+assert 'SL51. known late basic target cannot mask unavailable login state' \
+  '(( START_RC == 1 )) && [[ "$(cat "$SL/unit-status")" == 1 && "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]] && grep -q "state unavailable" "$TMP/out"'
+rm "$SL/no-barrier-state"; printf unknown > "$SL/basic-state"; slstart
+assert 'SL52. unknown successful state response fails instead of skipping' \
+  '(( START_RC == 1 )) && [[ "$(cat "$SL/unit-status")" == 1 && "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]] && grep -q "state unavailable" "$TMP/out"'
+rm "$SL/basic-state"
+"$SWEEP_TEST" "$SL/missing-root" > "$TMP/out" 2>&1; BAD_ROOT_RC=$?
+assert 'SL53. missing hub root still fails on a late managed start' \
+  '(( BAD_ROOT_RC == 1 )) && grep -q "sweep failed" "$TMP/out"'
+"$SWEEP_TEST" "$SL/root-link" > "$TMP/out" 2>&1; BAD_ROOT_RC=$?
+assert 'SL54. symlinked hub root still fails on a late managed start' \
+  '(( BAD_ROOT_RC == 1 )) && [[ "$(cat "$ROOT/books.git/refs/heads/main.lock")" == preserve ]]'
+rm "$SL/basic-started"; slstart
+assert 'SL55. early-boot unit start succeeds and sweeps the planted lock' \
+  '(( START_RC == 0 )) && [[ "$(cat "$SL/unit-status")" == 0 && "$(systemctl show git-hub-stale-locks.service -p Result --value)" == success && ! -e "$ROOT/books.git/refs/heads/main.lock" ]]'

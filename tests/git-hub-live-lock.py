@@ -7,7 +7,8 @@ import subprocess
 import sys
 import time
 
-sweep, root = map(Path, sys.argv[1:])
+sweep, root = map(Path, sys.argv[1:3])
+expected_status = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 root.mkdir(parents=True)
 repo = root / 'held.git'
 env = os.environ | dict(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_COUNT='0',
@@ -42,7 +43,7 @@ try:
     lock = repo / 'refs/heads/main.lock'
     assert lock.is_file() and proc.poll() is None, 'instrument must hold a real live Git lock'
     result = subprocess.run([str(sweep), str(root)], env=env, capture_output=True, text=True, timeout=20)
-    metrics = dict(sweep_refused=result.returncode == 1,
+    metrics = dict(sweep_refused=result.returncode == expected_status,
                    git_alive=proc.poll() is None, lock_survived=lock.is_file())
     proc.stdin.write(b'commit\n'); proc.stdin.flush()
     proc.communicate(timeout=10)

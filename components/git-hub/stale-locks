@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 SYSTEMCTL = '/usr/bin/systemctl'
+LATE_START_EXIT = 75  # SuccessExitStatus in git-hub-stale-locks.service.
 
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 TOP_LOCKS = ('HEAD.lock', 'packed-refs.lock', 'config.lock', 'shallow.lock', 'index.lock')
@@ -123,17 +124,22 @@ def main():
         raise ValueError(refusal)
     # Wants preserves SSH on failure, but can retry a failed unit when another
     # consumer starts. Ordinary services and root user managers may own Git
-    # locks as soon as basic starts, before the later login barrier. Refuse if
-    # either has ever started, including failed/stopped units. Root systemctl
-    # uses PID 1's private socket and needs no running D-Bus service.
+    # locks as soon as basic starts, before the later login barrier. Skip if
+    # either has ever started, including failed/stopped units, but unavailable
+    # state still fails. Root systemctl uses PID 1's private socket without D-Bus.
+    started = []
     for unit, label in (('basic.target', 'basic target'),
                         ('systemd-user-sessions.service', 'login barrier')):
         state = subprocess.run(
             [SYSTEMCTL, 'show', unit, '-p', 'InactiveExitTimestampMonotonic', '--value'],
             capture_output=True, text=True, timeout=10,
         )
-        if state.returncode or state.stdout.strip() != '0':
-            raise ValueError(f'{label} already started or state unavailable; boot cleanup refused')
+        timestamp = state.stdout.strip()
+        if state.returncode or (timestamp != '0' and not (
+                timestamp.isascii() and timestamp.isdecimal() and int(timestamp) > 0)):
+            raise ValueError(f'{label} state unavailable; boot cleanup refused')
+        if timestamp != '0':
+            started.append(label)
     root = os.path.normpath(sys.argv[1])
     anchor = os.open('/', DIR_FLAGS)
     try:
@@ -144,6 +150,10 @@ def main():
         raise ValueError('git_hub_root must be an existing real directory below /')
     removed = 0
     try:
+        if started:
+            print(f'git-hub stale-lock cleanup skipped: not early boot ({", ".join(started)} already started)',
+                  flush=True)
+            return LATE_START_EXIT
         for name in sorted(os.listdir(fd)):
             if not name.endswith('.git'):
                 continue
@@ -162,7 +172,7 @@ def main():
 
 if __name__ == '__main__':
     try:
-        main()
+        sys.exit(main())
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print(f'git-hub stale-lock sweep failed: {exc}', file=sys.stderr, flush=True)
         sys.exit(1)
