@@ -128,7 +128,7 @@ ccli release
 assert 'S15. gate release writes atomic request, gate lease, no t3x' \
   '[[ "$(head -1 "$RS/books.request")" == "books main $newer $sha" && "$(cut -d" " -f3 "$RS/books.lease")" == gate && ! -e "$TMP/relay.calls" ]]'
 assert 'S16. gate brief names remote clone, verdict, base gate and mandatory Sol' \
-  'grep -q "git-hub-gate:books.git" "$RS/books.request" && grep -q "ssh git-hub-gate verdict books $sha" "$RS/books.request" && grep -q "as defined at ${newer:0:9}" "$RS/books.request" && grep -q "reasoning xhigh" "$RS/books.request" && grep -q "Every release gets Sol" "$RS/books.request"'
+  'grep -q "git-hub-gate:books.git" "$RS/books.request" && grep -q "ssh git-hub-gate verdict books $sha" "$RS/books.request" && grep -q "as defined at ${newer:0:9}" "$RS/books.request" && grep -q "reasoning high" "$RS/books.request" && grep -q "Every release gets Sol" "$RS/books.request"'
 # Make owner_alive report dead if called; gate leases still wait for expiry.
 echo git_hub_review_grace_secs=0 >> "$CONF"; oldlease=$(cat "$RS/books.lease")
 env PATH="$BIN:/usr/bin:/bin" HOME="$HH" HOST_CONF="$CONF" KIT_LOG_DIR="$SL" \
