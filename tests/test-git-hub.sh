@@ -545,7 +545,7 @@ wcommit lib/small.py; cli release; CN="$(hubsha)"
 assert "R37a. the brief has no size-based Sol skip: every review gets Sol, at limit only by saying so" \
   'B="$(tail -1 "$TMP/t3x.calls")"; grep -q "Every release gets Sol, whatever its size" <<<"$B" && grep -q "reasoning high" <<<"$B" && grep -q "Only if Sol is at its usage limit" <<<"$B" && grep -q -- "--sol=" <<<"$B" && ! grep -qiE "judge it yourself|narrow" <<<"$B"'
 assert "R37a2. the brief's SSO step gives a reason (sso --phone refuses without --for), naming repo and sha" \
-  'B="$(tail -1 "$TMP/t3x.calls")"; grep -qF "sso --phone landry --for \"deploy books ${CN:0:9} after release review\"" <<<"$B" && ! grep -qE "sso --phone landry( and|\.|$)" <<<"$B"'
+  'B="$(tail -1 "$TMP/t3x.calls")"; grep -qF "sso --phone <the profile the deploy uses> --for \"deploy books ${CN:0:9} after release review\"" <<<"$B" && ! grep -qE "sso --phone landry( |\.|$)" <<<"$B"'
 assert "R37a3. the brief runs the gate on dev through dev-run, never on Beast, and never falls back to Beast" \
   'B="$(tail -1 "$TMP/t3x.calls")"; grep -qF "\$GIT_HOME/proxmox_setup_plan/scripts/dev-run sh -c" <<<"$B" && grep -q "never on Beast" <<<"$B" && grep -q "never fall back to Beast" <<<"$B" && grep -q "no dev-heavy" <<<"$B"'
 cli verdict books "$CN" pass "narrow, judged it myself"; rc=$?
