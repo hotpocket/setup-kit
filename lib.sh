@@ -618,6 +618,33 @@ android_sdk_resolve() {
   awk '{print $1}' | grep -E "$pat" | sort -t';' -k2 -V | tail -1
 }
 
+# ------------------------------------------------ github ssh card transport
+github_pinned_sk_count() {
+  local f n=0
+  [[ -r "$HOME/.ssh/config" ]] || { echo 0; return 0; }
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if [[ -s "$f.pub" ]]; then
+      awk 'NR==1 { exit ($1 ~ /^sk-/ ? 0 : 1) }' "$f.pub" 2>/dev/null || continue
+    else
+      [[ "$(basename "$f")" == github_yub_* || "$(basename "$f")" == *_sk* ]] || continue
+    fi
+    n=$((n + 1))
+  done < <(awk '/^[[:space:]]*Host[[:space:]]+github\.com([[:space:]]|$)/{g=1; next}
+                /^[[:space:]]*Host[[:space:]]/{g=0}
+                g && /^[[:space:]]*IdentityFile([[:space:]]+|=)/ {
+                  sub(/^[[:space:]]*IdentityFile([[:space:]]+|=)/, ""); sub(/[[:space:]]*(#.*)?$/, ""); gsub(/^"|"$/, ""); print
+                }' "$HOME/.ssh/config" 2>/dev/null | sed -E "s#^~/#$HOME/#")
+  echo "$n"
+}
+git_resolves_to_github_ssh() {
+  local eff=""
+  if [[ "${1:-}" == --dir ]]; then eff="$(git -C "$2" ls-remote --get-url 2>/dev/null || true)"
+  else eff="$(git ls-remote --get-url "$1" 2>/dev/null || true)"; [[ -n "$eff" ]] || eff="$1"; fi
+  [[ "$eff" =~ ^ssh://([^/@]+@)?(ssh\.)?github\.com([:/]|$) || "$eff" =~ ^([^/@:]+@)?(ssh\.)?github\.com: ]]
+}
+github_card_transport() { (( $(github_pinned_sk_count) > 0 )) && git_resolves_to_github_ssh "$@"; }
+
 # Stop at library load, before bootstrap's sudo/preamble or any direct phase.
 # A failure inside $(...) or < <(...) alone could be absorbed by its caller.
 reach_mode >/dev/null || exit 3

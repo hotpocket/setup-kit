@@ -16,15 +16,17 @@
 #   C. IdentityAgent none missing                        → WARN naming it
 #   D. resident key written as ~/.ssh/... counts as pinned (no "not pinned")
 set -uo pipefail
+unset GH_TOKEN GH_CONFIG_DIR
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-H="$TMP/home"; mkdir -p "$H/.ssh" "$H/git/.configs/.git"   # .git: step 3 exits early, no network
+H="$TMP/home"; B="$TMP/bin"; mkdir -p "$H/.ssh" "$H/git/.configs/.git" "$B"   # .git: step 3 exits early, no network
+printf '#!/bin/bash\nexit 4\n' > "$B/gh"; chmod +x "$B/gh"
 SK="$H/.ssh/id_ed25519_sk_rk_github"; : > "$SK"; : > "$SK.pub"; : > "$H/.ssh/gitkey_old"
 chmod 600 "$H/.ssh/"*
 pass=0; fail=0
 assert() { if eval "$2"; then ((pass++)); echo "  ok   $1"; else ((fail++)); echo "  FAIL $1"; fi; }
-stanza() { printf 'Host github.com\n  HostName ssh.github.com\n  Port 443\n  IdentitiesOnly yes\n  ControlMaster auto\n%s\n' "$1" > "$H/.ssh/config"; chmod 600 "$H/.ssh/config"; }
-run() { ( cd "$KIT_DIR" && HOME="$H" HOST_CONF=/dev/null KIT_LOG_DIR="$TMP/logs" KIT_QUIET=0 \
+stanza() { printf 'Host github.com\n  HostName ssh.github.com\n  Port 443\n  IdentitiesOnly yes\n%s\n' "$1" > "$H/.ssh/config"; chmod 600 "$H/.ssh/config"; }
+run() { ( cd "$KIT_DIR" && PATH="$B:$PATH" HOME="$H" HOST_CONF=/dev/null KIT_LOG_DIR="$TMP/logs" KIT_QUIET=0 \
           bash profiles/workstation/preamble-github-auth.sh check 2>&1 | grep -i stanza ); }
 
 echo "github stanza: identity order"

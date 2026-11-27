@@ -174,6 +174,7 @@ case "$cmd" in
     for pass in 1 2 3; do
       RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S)-p$pass.log"
       export KIT_RUN_LOG="$RUN_LOG"   # quiet mode routes [ OK ] detail here
+      export KIT_PASS="$pass"         # phases cap card ops at pass 1 (no card loop)
       # A phase exiting 3 means "do not continue" — the run is unsafe to
       # carry on with, not merely failed (00-disk-space when the install
       # can't fit). Everything after it would be writing into a condition

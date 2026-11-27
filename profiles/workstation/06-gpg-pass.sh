@@ -15,6 +15,10 @@
 # terminal-only step (no secret belongs in a repo). The phase reports the
 # missing entry with the exact command instead.
 #
+# Opt-in PAT check (touches YubiKey once): VERIFY_ADMIN_PAT=1 streams
+# `pass show github/admin-pat` into a verdict-only shape check (no secret in
+# shell vars or output). Default (0) uses no-card packet inspection only.
+#
 # Idempotent: re-run is success. check mode reports state, changes nothing.
 SCRIPT_NAME="ws-06-gpg-pass"
 source "$(dirname "$0")/../../lib.sh"
@@ -103,14 +107,21 @@ fi
 # Private key is card-resident; we only need the PUBLIC key on the host so gpg
 # can address it. Deterministic source first (pubkey.asc committed to .configs —
 # a public key is safe to commit), then the URL on the card, then a keyserver.
+card_fetched=0
 for FPR in $FPRS; do
 if gpg --list-keys "$FPR" >/dev/null 2>&1; then
   ok "public key present (${FPR: -8})"
 elif (( INSTALL )); then
   if [[ -f "$CONFIGS/gnupg/pubkey.asc" ]]; then
     do_or_say gpg --import "$CONFIGS/gnupg/pubkey.asc"
-  elif lsusb 2>/dev/null | grep -qiE 'yubico|fido' && printf 'fetch\nquit\n' | gpg --command-fd 0 --edit-card >/dev/null 2>&1; then
-    log "fetched public key via URL on card"
+  elif (( ${KIT_PASS:-1} == 1 && ! card_fetched )) && lsusb 2>/dev/null | grep -qiE 'yubico|fido'; then
+    card_fetched=1
+    log "fetching public key URL from card (YubiKey prompts expected: 0 PIN, 0 touch)..."
+    if printf 'fetch\nquit\n' | gpg --command-fd 0 --edit-card >/dev/null 2>&1; then
+      log "fetched public key via URL on card"
+    else
+      do_or_say gpg --recv-keys "$FPR" || true
+    fi
   else
     do_or_say gpg --recv-keys "$FPR" || true
   fi
@@ -136,18 +147,23 @@ FPR="${FPRS%% *}"
 
 # ---- 4. card stubs (route sign/decrypt to the YubiKey) ---------------------
 # `gpg --card-status` learns the card and writes the secret-key STUBS; without a
-# plugged card it just errors — harmless, we only warn.
+# plugged card it just errors — harmless, we only warn. Capped at once per
+# bootstrap run (pass 1 only) so missing stubs never loop card operations.
 # whichever listed key is on the plugged card is the one that gets stubs
 stubs_for() { local f; for f in $FPRS; do gpg -K "$f" 2>/dev/null | grep -q 'ssb>' && { echo "$f"; return 0; }; done; return 1; }
 if k="$(stubs_for)"; then
   ok "card stubs present (sign/decrypt → YubiKey, key ${k: -8})"
 elif (( INSTALL )); then
-  if lsusb 2>/dev/null | grep -qiE 'yubico|fido'; then
-    do_or_say gpg --card-status >/dev/null
+  if (( ${KIT_PASS:-1} > 1 )); then
+    warn "card stubs still absent (gpg --card-status already ran on pass 1 — skipping to avoid card loop)"
+  elif lsusb 2>/dev/null | grep -qiE 'yubico|fido'; then
+    log "reading YubiKey OpenPGP card stubs (YubiKey prompts expected: 0 PIN, 0 touch)..."
+    card_out="$(gpg --card-status)" || true
     if k="$(stubs_for)"; then ok "card stubs created (key ${k: -8})"
     else
       warn "card stubs not created — the plugged card's key is none of: $FPRS"
-      hint "card key: $(gpg --card-status 2>/dev/null | awk -F': ' '/^Signature key/{gsub(/ /,"",$2); print $2}') — add it to gpg_key_fpr in $HOST_CONF"
+      card_sig="$(awk -F': ' '/^Signature key/{gsub(/ /,"",$2); print $2}' <<<"$card_out")"
+      hint "card key: ${card_sig:-unknown} — add it to gpg_key_fpr in $HOST_CONF"
     fi
   else
     warn "no YubiKey plugged — skipping card stubs (plug in + re-run)"
@@ -156,14 +172,59 @@ else
   warn "card stubs absent (plug YubiKey + install)"
 fi
 
-# ---- 5. pass init ----------------------------------------------------------
+# ---- 5. pass init + per-entry recipient doctor (no card decrypt) -----------
+# Reads actual PKESK recipient keyids from each .gpg file via
+# `gpg --list-only --list-packets` and maps them to each listed key's
+# encryption subkey(s) from `gpg --list-keys --with-colons`. Checking only
+# `.gpg-id` misses entries that were never re-encrypted after adding a backup key.
 if [[ -f "$STORE/.gpg-id" ]]; then
   missing_ids=""
   for f in $FPRS; do grep -qi "$f" "$STORE/.gpg-id" || missing_ids+=" ${f: -8}"; done
-  if [[ -z "$missing_ids" ]]; then
-    ok "pass store encrypted to every listed key"
+
+  declare -A ENC_KIDS=() UNREADABLE=()
+  for f in $FPRS; do
+    ENC_KIDS["$f"]="$(gpg --list-keys --with-colons "$f" 2>/dev/null \
+      | awk -F: '($1=="pub" || $1=="sub") && $2!="r" && $2!="d" && $12 ~ /e/ { print toupper($5) }')"
+    UNREADABLE["$f"]=0
+  done
+
+  total_entries=0
+  while IFS= read -r -d '' entry; do
+    total_entries=$((total_entries + 1))
+    pkts="$(gpg --batch --list-only --list-packets "$entry" 2>/dev/null || true)"
+    entry_kids="$(awk '/:pubkey enc packet:/ {
+      for (i=1; i<=NF; i++) if ($i == "keyid") { k=$(i+1); sub(/,$/, "", k); print toupper(k) }
+    }' <<<"$pkts")"
+    for f in $FPRS; do
+      [[ -n "${ENC_KIDS[$f]}" ]] || continue
+      can_read=0
+      while IFS= read -r ek; do
+        [[ -n "$ek" ]] || continue
+        if grep -qxF "$ek" <<<"$entry_kids" 2>/dev/null; then can_read=1; break; fi
+      done <<<"${ENC_KIDS[$f]}"
+      (( can_read )) || UNREADABLE["$f"]=$(( UNREADABLE["$f"] + 1 ))
+    done
+  done < <(find "$STORE" -path "$STORE/.git" -prune -o -type f -name '*.gpg' -print0 2>/dev/null)
+
+  any_gap=0
+  if [[ -n "$missing_ids" ]]; then
+    warn "pass store .gpg-id missing:$missing_ids — future entries won't encrypt to that YubiKey"
+    any_gap=1
+  fi
+  if (( total_entries > 0 )); then
+    for f in $FPRS; do
+      if [[ -z "${ENC_KIDS[$f]}" ]]; then
+        warn "pass store: public key ${f: -8} not in keyring (or no encryption subkey) — cannot verify $total_entries entry(ies)"
+        any_gap=1
+      elif (( UNREADABLE["$f"] > 0 )); then
+        warn "pass store: key ${f: -8} cannot read ${UNREADABLE[$f]} of $total_entries entry(ies)"
+        any_gap=1
+      fi
+    done
+  fi
+  if (( ! any_gap )); then
+    ok "pass store: all $total_entries entry(ies) encrypted to every listed key"
   else
-    warn "pass store NOT encrypted to:$missing_ids — that YubiKey can't read any entry"
     hint "re-init to all keys (re-encrypts; needs a card that can decrypt the current entries): pass init $FPRS"
     hint "if no plugged card can decrypt them: pass rm <entry>, pass init $FPRS, pass insert <entry>"
   fi
@@ -180,12 +241,67 @@ fi
 
 # ---- 6. secret entries: report only, never provision -----------------------
 # The kit installs no secrets. Surface the gh-admin entry so a fresh box knows
-# the one remaining manual step.
+# the one remaining manual step. No-card packet-length check catches stub/short
+# non-tokens without touching the YubiKey; opt-in VERIFY_ADMIN_PAT=1 decrypts
+# once into memory to verify the prefix without printing the value.
+PAT_HINT="pass insert github/admin-pat   # paste a GitHub PAT (classic) w/ scope: repo,read:org,project,workflow"
 if [[ -f "$STORE/.gpg-id" ]]; then
   if [[ -f "$STORE/github/admin-pat.gpg" ]]; then
-    ok "pass entry github/admin-pat present"
+    pat_pkts="$(gpg --batch --list-only --list-packets "$STORE/github/admin-pat.gpg" 2>/dev/null || true)"
+    # SEIPD v1 (tag=18 with numeric plen and mdc_method):
+    # plen - 1 (version) - 18 (prefix) - 22 (MDC) - 8 (literal header) - 1 (trailing LF)
+    # ≈ single-line plaintext chars (plausibility check; multi-line entries measure the whole file).
+    pat_plen="$(awk '
+      /(^|[[:space:]])tag=18([[:space:]]|$)/ {
+        in18=1; plen=""
+        for (i=1; i<=NF; i++) if ($i ~ /^plen=[0-9]+$/) { plen=substr($i, 6) }
+        next
+      }
+      /^# off=/ { in18=0 }
+      in18 && /mdc_method:/ && plen != "" { print plen; exit }
+    ' <<<"$pat_pkts")"
+    if [[ -n "$pat_plen" ]]; then
+      pat_est=$(( pat_plen - 1 - 18 - 22 - 8 - 1 ))
+      if (( pat_est < 40 )); then
+        warn "pass entry github/admin-pat looks too short to be a GitHub token (estimated ${pat_est} bytes excl. newline; classic ghp_ is 40 chars, fine-grained github_pat_ is 93)"
+        hint "$PAT_HINT"
+      else
+        ok "pass entry github/admin-pat present (estimated ${pat_est} bytes excl. newline, plausible single-line PAT length)"
+      fi
+    else
+      warn "pass entry github/admin-pat present — length not judged (unknown or unsupported encrypted packet format)"
+    fi
+
+    if [[ "${VERIFY_ADMIN_PAT:-0}" == 1 ]]; then
+      if (( ${KIT_PASS:-1} > 1 )); then
+        warn "github/admin-pat prefix check skipped on pass $KIT_PASS (no card loop)"
+      else
+        log "verifying github/admin-pat prefix (YubiKey prompts expected: up to 1 PIN, 1 touch — 0 PIN if cached)..."
+        pat_verdict=""
+        if pat_verdict="$(pass show github/admin-pat | LC_ALL=C awk '
+          NR == 1 {
+            sub(/\r$/, "")
+            if (length($0) == 40 && $0 ~ /^ghp_[A-Za-z0-9]+$/) v = "classic"
+            else if (length($0) == 93 && $0 ~ /^github_pat_[A-Za-z0-9_]+$/) v = "fine-grained"
+            else v = "invalid"
+          }
+          END { print (v ? v : "invalid") }
+        ')"; then
+          case "$pat_verdict" in
+            classic)      ok "pass entry github/admin-pat: valid classic PAT (ghp_)" ;;
+            fine-grained) ok "pass entry github/admin-pat: valid fine-grained PAT (github_pat_)" ;;
+            *)
+              warn "pass entry github/admin-pat: decrypted value does not match expected GitHub PAT shape (ghp_ + 36 alnum, or github_pat_ + 82 chars)"
+              hint "$PAT_HINT" ;;
+          esac
+        else
+          warn "pass entry github/admin-pat: decrypt failed (is the right YubiKey plugged?)"
+        fi
+        unset pat_verdict
+      fi
+    fi
   else
     warn "pass entry github/admin-pat missing (gh-admin needs it)"
-    hint "pass insert github/admin-pat   # paste a GitHub PAT (classic) w/ scope: repo,read:org,project"
+    hint "$PAT_HINT"
   fi
 fi

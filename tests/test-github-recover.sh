@@ -14,6 +14,7 @@
 #   C. the other serial: github_yub_backup added, both pinned, primary first
 #   D. exits 0 when `ssh -T` greets; non-zero (and says so) when it does not
 set -uo pipefail
+unset GH_TOKEN GH_CONFIG_DIR
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 H="$TMP/home"; B="$TMP/bin"; mkdir -p "$H/.ssh" "$H/git/.configs/.git" "$B"
@@ -42,6 +43,10 @@ cat > "$B/ssh" <<'F'
 (( ${SSH_FAIL:-0} )) && { echo "git@ssh.github.com: Permission denied (publickey)." >&2; exit 255; }
 echo "Hi hotpocket! You've successfully authenticated, but GitHub does not provide shell access." >&2
 exit 1
+F
+cat > "$B/gh" <<'F'
+#!/bin/bash
+exit 4
 F
 chmod +x "$B"/*
 pass=0; fail=0

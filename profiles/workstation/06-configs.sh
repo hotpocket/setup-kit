@@ -29,6 +29,12 @@ if [[ -d "$DEST/.git" ]]; then
 else
   warn ".configs not cloned"
   if (( INSTALL )); then
+    if [[ "$(conf_get git_auth '')" != none ]] && github_card_transport "$REPO"; then
+      warn ".configs card-backed SSH clone belongs to the preamble — skipping in phase 06"
+      hint "run: profiles/workstation/preamble-github-auth.sh install"
+      miss ".configs: card clone belongs to preamble"
+      exit 1
+    fi
     mkdir -p "$(dirname "$DEST")"
     git clone "$REPO" "$DEST" 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
     # private repo + fresh box = no auth yet. At a real terminal, fix it

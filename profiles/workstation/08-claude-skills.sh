@@ -186,11 +186,10 @@ ensure_repo() {            # dir url  -> 0 if present after, 1 otherwise
   local dir="$1" url="$2" name; name="$(basename "$dir")"
   if [[ -d "$dir/.git" ]]; then
     if (( INSTALL )) && [[ -n "$url" ]] && repo_stale "$dir"; then
-      # ff-only + soft-fail: offline or locally-diverged just uses what's there.
-      # BatchMode: the phase loop is unaided (the preamble front-loads every
-      # PIN/touch); a key that needs one here must fail now, not hold the run
-      # on a prompt nobody is watching (2026-09-05: ~1 min per pass, x3).
-      if GIT_SSH_COMMAND='ssh -o BatchMode=yes' git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
+      if github_card_transport --dir "$dir"; then
+        warn "repo $name card-backed SSH pull belongs to the preamble / interactive shell — skipping in phase 08 (using as-is)"
+        hint "run: git -C $dir pull --ff-only"
+      elif GIT_SSH_COMMAND='ssh -o BatchMode=yes' git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
         ok "repo $name present (pulled — wanted path was missing)"
       else
         warn "repo $name present but not updated (offline / diverged) — using as-is"
@@ -206,6 +205,11 @@ ensure_repo() {            # dir url  -> 0 if present after, 1 otherwise
     return 1
   fi
   warn "repo $name not cloned"
+  if (( INSTALL )) && github_card_transport "$url"; then
+    warn "repo $name card-backed SSH clone belongs to the preamble — skipping in phase 08"
+    hint "run: profiles/workstation/preamble-github-auth.sh install"
+    return 1
+  fi
   do_or_say mkdir -p "$(dirname "$dir")"   # ~/git just needs to exist
   do_or_say git clone "$url" "$dir"
   (( INSTALL )) || return 1                 # check mode: nothing cloned, don't assert
