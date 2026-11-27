@@ -147,12 +147,30 @@ assert "F2 (F10): reports 1 distinct local pair without filename-based missing-s
 
 # G. Copy route (D4/F3/F6/F11): single announced ssh tar stream, filters strictly, never overwrites, exits nonzero on incomplete, ignores configs_repo
 new_env
+# A real-format, unencrypted OpenSSH sk private stub for a given .pub blob,
+# built without a card (`ssh-keygen -y` reads it like a downloaded stub).
+skstub() { python3 -I - "$1" "$2" <<'PY'
+import sys, struct, base64, hashlib
+path, blob = sys.argv[1], base64.b64decode(sys.argv[2])
+s = lambda b: struct.pack('>I', len(b)) + b
+def rd(b, o): n = struct.unpack('>I', b[o:o+4])[0]; return b[o+4:o+4+n], o+4+n
+kt, o = rd(blob, 0); pk, o = rd(blob, o); app, o = rd(blob, o)
+priv = struct.pack('>II', 7, 7) + s(kt) + s(pk) + s(app) + bytes([1]) + s(hashlib.sha256(blob).digest()) + s(b'') + s(b't')
+i = 1
+while len(priv) % 8: priv += bytes([i]); i += 1
+k = base64.b64encode(b'openssh-key-v1\0' + s(b'none') + s(b'none') + s(b'') + struct.pack('>I', 1) + s(blob) + s(priv)).decode()
+open(path, 'w').write('-----BEGIN OPENSSH PRIVATE KEY-----\n' + '\n'.join(k[j:j+70] for j in range(0, len(k), 70)) + '\n-----END OPENSSH PRIVATE KEY-----\n')
+PY
+chmod 600 "$1"; echo "sk-ssh-ed25519@openssh.com $2 ssh:github" > "$1.pub"; }
 REM_HOME="$TMP/remote-home"; REM="$REM_HOME/.ssh"
 rm -rf "$REM_HOME"; mkdir -p "$REM"
-echo "remote-primary" > "$REM/github_yub_primary"
-echo "sk-ssh-ed25519@openssh.com $BLOB_PRI ssh:github" > "$REM/github_yub_primary.pub"
-echo "remote-backup" > "$REM/github_yub_backup"
-echo "sk-ssh-ed25519@openssh.com $BLOB_BAK ssh:github" > "$REM/github_yub_backup.pub"
+skstub "$REM/github_yub_primary" "$BLOB_PRI"
+skstub "$REM/github_yub_backup" "$BLOB_BAK"
+# hostile source files: a name that lands outside the stub set, and a disk key
+# whose .pub claims to be a hardware stub
+skstub "$REM/authorized_keys" "$BLOB_BAK"   # valid stub: only the name check can stop it
+ssh-keygen -q -t ed25519 -N '' -C t -f "$REM/github_yub_spare" </dev/null
+echo "sk-ssh-ed25519@openssh.com $BLOB_UNREG ssh:github" > "$REM/github_yub_spare.pub"
 echo "remote-regular" > "$REM/id_ed25519"
 echo "ssh-ed25519 $BLOB_OTHER user@box" > "$REM/id_ed25519.pub"
 echo "remote-other-app" > "$REM/id_ed25519_sk_rk_other"
@@ -190,12 +208,16 @@ chmod +x "$B/ssh" "$B/scp"
 out="$(run_pre copy brandon@LinuxBeast)"; rc=$?
 assert "G1: copy route exits 0" \
   '[[ $rc -eq 0 ]]'
-assert "G2 (F3): single announced ssh connection (0 scp), accept-new + ConnectTimeout, notice before ssh" \
-  '[[ $(grep "^ssh " "$CALLS" | grep -vc -- " -G ") -eq 1 ]] && [[ $(grep -c "^scp " "$CALLS") -eq 0 ]] && grep -q "StrictHostKeyChecking=accept-new" "$CALLS" && grep -q "ConnectTimeout=" "$CALLS" && awk "/1 .*connection.*brandon@LinuxBeast.*YubiKey/{seen=1} /MARKER_COPY_SSH/{hit=1; exit !seen} END{exit !(seen && hit)}" <<<"$out"'
+assert "G2 (F3): single announced ssh connection (0 scp), known host key required + ConnectTimeout, notice before ssh" \
+  '[[ $(grep "^ssh " "$CALLS" | grep -vc -- " -G ") -eq 1 ]] && [[ $(grep -c "^scp " "$CALLS") -eq 0 ]] && grep -q "StrictHostKeyChecking=yes" "$CALLS" && ! grep -q "accept-new" "$CALLS" && grep -q "ConnectTimeout=" "$CALLS" && awk "/1 .*connection.*brandon@LinuxBeast.*YubiKey/{seen=1} /MARKER_COPY_SSH/{hit=1; exit !seen} END{exit !(seen && hit)}" <<<"$out"'
 assert "G3: backup github sk stub copied and pinned" \
-  '[[ -f "$H/.ssh/github_yub_backup" && -f "$H/.ssh/github_yub_backup.pub" ]] && grep -qx "remote-backup" "$H/.ssh/github_yub_backup" && grep -q "IdentityFile $H/.ssh/github_yub_backup" "$H/.ssh/config"'
+  '[[ -f "$H/.ssh/github_yub_backup" && -f "$H/.ssh/github_yub_backup.pub" ]] && [[ "$(ssh-keygen -y -P "" -f "$H/.ssh/github_yub_backup" </dev/null | cut -d" " -f2)" == "$BLOB_BAK" ]] && grep -q "IdentityFile $H/.ssh/github_yub_backup" "$H/.ssh/config"'
 assert "G4: non-github / non-sk keys NOT copied" \
   '[[ ! -e "$H/.ssh/id_ed25519" && ! -e "$H/.ssh/id_ed25519.pub" && ! -e "$H/.ssh/id_ed25519_sk_rk_other" && ! -e "$H/.ssh/id_ed25519_sk_rk_other.pub" ]]'
+assert "G8: a source file named authorized_keys never lands in ~/.ssh" \
+  '[[ ! -e "$H/.ssh/authorized_keys" && ! -e "$H/.ssh/authorized_keys.pub" ]]'
+assert "G9: a disk key with an sk-labelled .pub is not installed as a stub" \
+  '[[ ! -e "$H/.ssh/github_yub_spare" ]] && ! grep -q github_yub_spare "$H/.ssh/config"'
 assert "G5: existing stub file NEVER overwritten" \
   'grep -qx "local-existing-primary" "$H/.ssh/github_yub_primary"'
 
@@ -206,12 +228,35 @@ assert "G6 (F6): incomplete pair exits nonzero and installs no half-pair" \
   '[[ $rc -ne 0 ]] && [[ ! -e "$H/.ssh/github_yub_backup" && ! -e "$H/.ssh/github_yub_backup.pub" ]] && grep -qi "incomplete" <<<"$out" && ! grep -q "copy done" <<<"$out"'
 
 # G7 (F11): copy runs even when configs_repo is HTTPS
-echo "remote-backup" > "$REM/github_yub_backup"
+rm -f "$REM/authorized_keys"* "$REM/github_yub_spare"*; skstub "$REM/github_yub_backup" "$BLOB_BAK"
 printf 'configs_repo=https://github.com/hotpocket/.configs.git\n' > "$TMP/https.conf"
 out="$( cd "$KIT_DIR" && PATH="$B:/usr/bin:/bin" HOME="$H" HOST_CONF="$TMP/https.conf" KIT_LOG_DIR="$TMP/logs" KIT_QUIET=0 \
         bash profiles/workstation/preamble-github-auth.sh copy brandon@LinuxBeast 2>&1 )"; rc=$?
 assert "G7 (F11): copy runs and pins even when configs_repo is HTTPS" \
   '[[ $rc -eq 0 ]] && [[ -f "$H/.ssh/github_yub_backup" && -f "$H/.ssh/github_yub_backup.pub" ]]'
+
+# G10: hostile local stub names never reach ssh_config (awk -v expands \n; a
+# raw newline splits the line): no ProxyCommand may appear after install.
+nl=$'\n'
+for n in 'github_yub_a\nProxyCommand touch ykpwn' "github_yub_b${nl}ProxyCommand touch ykpwn"; do
+  skstub "$H/.ssh/$n" "$BLOB_UNREG"
+done
+out="$(run_pre install </dev/null)"
+assert "G10: hostile stub file names are never pinned (no injected ssh_config line)" \
+  '! grep -qi "ProxyCommand" "$H/.ssh/config"'
+rm -f "$H/.ssh/github_yub_a"* "$H/.ssh/github_yub_b"*
+skstub "$H/.ssh/github_yub_é" "$BLOB_UNREG"
+out="$(run_pre install </dev/null)"
+assert "G11: a non-ASCII stub name is never pinned (locale-independent match)" \
+  '! grep -q "github_yub_é" "$H/.ssh/config"'
+rm -f "$H/.ssh/github_yub_é"*
+# G12: a source whose only allowlisted pair is invalid must not report success
+rm -rf "$REM"; mkdir -p "$REM"
+ssh-keygen -q -t ed25519 -N '' -C t -f "$REM/github_yub_fake" </dev/null
+echo "sk-ssh-ed25519@openssh.com $BLOB_UNREG ssh:github" > "$REM/github_yub_fake.pub"
+out="$(run_pre copy brandon@LinuxBeast)"; rc=$?
+assert "G12: only an invalid pair on the source: copy fails, nothing installed" \
+  '[[ $rc -ne 0 && ! -e "$H/.ssh/github_yub_fake" ]] && ! grep -q "copy done" <<<"$out"'
 
 # H. Prompt counts (D2/F9): printed BEFORE ssh-keygen -K, ssh -T, git clone; counts only -sk keys; exact D2 wording; no BatchMode claim
 new_env
@@ -281,6 +326,7 @@ if [[ "\$1" == "ls-remote" || ( "\$1" == "-C" && "\$3" == "ls-remote" ) ]]; then
   exec /usr/bin/git "\$@"
 fi
 echo "git \$*" >> "$CALLS"
+echo "env ask=\${SSH_ASKPASS_REQUIRE:-}|\${SSH_ASKPASS:-}|\${DISPLAY:-}|ssh=\${GIT_SSH_COMMAND:-}|tty=\$(ps -o tty= -p \$\$ | tr -d ' ')" >> "$CALLS"
 exit 1
 F
 chmod +x "$B/git"
@@ -305,6 +351,14 @@ out="$( cd "$KIT_DIR" && PATH="$B:/usr/bin:/bin" HOME="$H" HOST_CONF=/dev/null K
         bash profiles/workstation/06-configs.sh install </dev/null 2>&1 )"
 assert "I4 (D1): phase 06 with plain SSH (no pinned -sk key) still clones on pass 2" \
   'grep -q "^git clone" "$CALLS"'
+# I6: whatever the ssh config holds, a phase's network git can't prompt: no GUI
+# askpass, ssh in batch mode, no controlling terminal (Beast forces askpass).
+: > "$CALLS"
+( cd "$KIT_DIR" && PATH="$B:/usr/bin:/bin" HOME="$H" HOST_CONF=/dev/null KIT_LOG_DIR="$TMP/logs" KIT_QUIET=0 KIT_PASS=2 \
+  SSH_ASKPASS=/x/askpass SSH_ASKPASS_REQUIRE=force DISPLAY=:9 \
+  bash profiles/workstation/06-configs.sh install </dev/null >/dev/null 2>&1 )
+assert "I6: phase clone runs card-free (askpass never, BatchMode, no sk algorithms, no controlling tty)" \
+  'grep -qF "env ask=never|||ssh=ssh -o BatchMode=yes -o PubkeyAcceptedAlgorithms=-sk-*|tty=?" "$CALLS"'
 
 # I5: phase 08 stale pull — skips when card transport (pass 1), still pulls when insteadOf HTTPS (pass 2)
 printf 'Host github.com\n  HostName ssh.github.com\n  Port 443\n  IdentityFile %s\n' "$H/.ssh/github_yub_primary" > "$H/.ssh/config"

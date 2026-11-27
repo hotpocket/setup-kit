@@ -86,7 +86,7 @@ fi
 # ---- 2. scdaemon.conf — owned by .configs, linked into ~/.gnupg ------------
 # Mirrors 06-configs' link-or-heal: a divergent REAL file is backed up loudly
 # (it may be newer), an identical one is replaced by the link.
-mkdir -p "$GNUPG"; chmod 700 "$GNUPG"
+(( INSTALL )) && { mkdir -p "$GNUPG"; chmod 700 "$GNUPG"; }
 SRC="$CONFIGS/gnupg/scdaemon.conf"; TGT="$GNUPG/scdaemon.conf"
 if [[ ! -e "$SRC" ]]; then
   warn ".configs/gnupg/scdaemon.conf absent — can't link card config"
@@ -230,6 +230,11 @@ if [[ -f "$STORE/.gpg-id" ]]; then
   fi
 elif ! command -v pass >/dev/null 2>&1; then
   warn "pass not installed — apt phase (cli-system) installs it; pass init deferred"
+elif [[ -n "${PASSWORD_STORE_SIGNING_KEY:-}" ]] || [[ -n "$(find -L "$STORE/" -iname '*.gpg' -print -quit 2>/dev/null)" ]]; then
+  # entries without a .gpg-id: `pass init` would DECRYPT them (YubiKey PIN) to
+  # re-encrypt. Never from a phase — a human runs it.
+  warn "pass store has entries (or a signing key is set) but no .gpg-id — not initializing (it needs your YubiKey)"
+  hint "run yourself (1 PIN, 1 touch per entry): pass init $FPRS"
 elif gpg --list-keys "$FPR" >/dev/null 2>&1 && (( INSTALL )); then
   # shellcheck disable=SC2086
   do_or_say pass init $FPRS
@@ -278,7 +283,7 @@ if [[ -f "$STORE/.gpg-id" ]]; then
       else
         log "verifying github/admin-pat prefix (YubiKey prompts expected: up to 1 PIN, 1 touch — 0 PIN if cached)..."
         pat_verdict=""
-        if pat_verdict="$(pass show github/admin-pat | LC_ALL=C awk '
+        if pat_verdict="$( { set +x; } 2>/dev/null; env -u SHELLOPTS -u BASH_XTRACEFD -u PS4 -u BASH_ENV -u ENV pass show github/admin-pat | LC_ALL=C awk '
           NR == 1 {
             sub(/\r$/, "")
             if (length($0) == 40 && $0 ~ /^ghp_[A-Za-z0-9]+$/) v = "classic"

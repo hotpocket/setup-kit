@@ -643,6 +643,18 @@ git_resolves_to_github_ssh() {
   else eff="$(git ls-remote --get-url "$1" 2>/dev/null || true)"; [[ -n "$eff" ]] || eff="$1"; fi
   [[ "$eff" =~ ^ssh://([^/@]+@)?(ssh\.)?github\.com([:/]|$) || "$eff" =~ ^([^/@:]+@)?(ssh\.)?github\.com: ]]
 }
+# Run a network git op so it can never reach Brandon's YubiKey prompts, whatever
+# the ssh config holds (Include, Host *, aliases): no controlling terminal, no
+# GUI askpass, ssh in batch mode. A key that needs a PIN fails instead of
+# asking; card work belongs to the preamble, which a human runs.
+# sk algorithms are dropped outright, so no key (file or agent) even asks for
+# a touch. The caller's own ssh command (env or core.sshCommand) is kept.
+card_free() {
+  local base="${GIT_SSH_COMMAND:-$(git config core.sshCommand 2>/dev/null || echo ssh)}"
+  env -u SSH_ASKPASS -u DISPLAY -u WAYLAND_DISPLAY SSH_ASKPASS_REQUIRE=never \
+    GIT_SSH_COMMAND="$base -o BatchMode=yes -o PubkeyAcceptedAlgorithms=-sk-*" GIT_TERMINAL_PROMPT=0 \
+    setsid -w "$@" </dev/null
+}
 github_card_transport() { (( $(github_pinned_sk_count) > 0 )) && git_resolves_to_github_ssh "$@"; }
 
 # Stop at library load, before bootstrap's sudo/preamble or any direct phase.

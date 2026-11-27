@@ -189,7 +189,7 @@ ensure_repo() {            # dir url  -> 0 if present after, 1 otherwise
       if github_card_transport --dir "$dir"; then
         warn "repo $name card-backed SSH pull belongs to the preamble / interactive shell — skipping in phase 08 (using as-is)"
         hint "run: git -C $dir pull --ff-only"
-      elif GIT_SSH_COMMAND='ssh -o BatchMode=yes' git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
+      elif card_free git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
         ok "repo $name present (pulled — wanted path was missing)"
       else
         warn "repo $name present but not updated (offline / diverged) — using as-is"
@@ -211,7 +211,7 @@ ensure_repo() {            # dir url  -> 0 if present after, 1 otherwise
     return 1
   fi
   do_or_say mkdir -p "$(dirname "$dir")"   # ~/git just needs to exist
-  do_or_say git clone "$url" "$dir"
+  do_or_say card_free git clone "$url" "$dir"
   (( INSTALL )) || return 1                 # check mode: nothing cloned, don't assert
   [[ -d "$dir/.git" ]] || { miss "claude-skills: clone $url failed"; return 1; }
 }

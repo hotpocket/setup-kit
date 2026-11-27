@@ -36,7 +36,7 @@ else
       exit 1
     fi
     mkdir -p "$(dirname "$DEST")"
-    git clone "$REPO" "$DEST" 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
+    card_free git clone "$REPO" "$DEST" 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
     # private repo + fresh box = no auth yet. At a real terminal, fix it
     # inline instead of bouncing the user out to re-run.
     if [[ ! -d "$DEST/.git" && "$(conf_get git_auth '')" != none ]] && [[ -t 0 ]] && command -v gh >/dev/null 2>&1; then
@@ -44,7 +44,7 @@ else
       read -rp "Authenticate with GitHub now (gh auth login)? [Y/n] " a
       if [[ ! "$a" =~ ^[Nn] ]]; then
         gh auth login && gh auth setup-git \
-          && git clone "$REPO" "$DEST" 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
+          && card_free git clone "$REPO" "$DEST" 2>&1 | tee -a "$LOG_DIR/$SCRIPT_NAME.log"
       fi
     fi
     if [[ ! -d "$DEST/.git" ]]; then

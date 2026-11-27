@@ -181,6 +181,39 @@ out="$(VERIFY_ADMIN_PAT=1 FAKE_PAT_PLAINTEXT="$BAD_SHAPE" run06 check)"
 assert "F7 (D3): wrong-length ghp_ token warns and never prints token" \
   'grep -qE "\[WARN\].*admin-pat" <<<"$out" && ! grep -qF "$BAD_SHAPE" <<<"$out"'
 
+# F8: xtrace INHERITED by child scripts (exported SHELLOPTS) must not trace the
+# decrypted value: the fake pass is bash and prints it with printf.
+: > "$TMP/xi.err"
+( cd "$KIT_DIR" && PATH="$B:/usr/bin:/bin" HOME="$H" GNUPGHOME="$H/.gnupg" \
+  PASSWORD_STORE_DIR="$STORE" HOST_CONF="$TMP/host.conf" KIT_LOG_DIR="$TMP/logs" KIT_QUIET=0 \
+  VERIFY_ADMIN_PAT=1 FAKE_PAT_PLAINTEXT="$SYNTH_PAT" \
+  bash -c 'set -x; export SHELLOPTS; exec bash profiles/workstation/06-gpg-pass.sh check' >/dev/null 2>"$TMP/xi.err" )
+assert "F8: inherited xtrace (exported SHELLOPTS) never traces the decrypted value" \
+  'grep -q "MARKER_PASS_SHOW" "$TMP/xi.err" && ! grep -qF "$SYNTH_PAT" "$TMP/xi.err"'
+
+# F10: BASH_ENV pointing at `set -x` must not trace the decrypted value either
+echo 'set -x' > "$TMP/xenv"; : > "$TMP/xe.err"
+( cd "$KIT_DIR" && PATH="$B:/usr/bin:/bin" HOME="$H" GNUPGHOME="$H/.gnupg" \
+  PASSWORD_STORE_DIR="$STORE" HOST_CONF="$TMP/host.conf" KIT_LOG_DIR="$TMP/logs" KIT_QUIET=0 \
+  VERIFY_ADMIN_PAT=1 FAKE_PAT_PLAINTEXT="$SYNTH_PAT" BASH_ENV="$TMP/xenv" \
+  bash profiles/workstation/06-gpg-pass.sh check >/dev/null 2>"$TMP/xe.err" )
+assert "F10: BASH_ENV with set -x never traces the decrypted value" \
+  'grep -q "MARKER_PASS_SHOW" "$TMP/xe.err" && ! grep -qF "$SYNTH_PAT" "$TMP/xe.err"'
+
+# F9: entries but no .gpg-id: install must NOT run pass init (it would decrypt = YubiKey PIN)
+mv "$STORE/.gpg-id" "$TMP/gpg-id.bak"
+out="$(run06 install)"
+assert "F9: populated store without .gpg-id: no pass init from a phase, hint names it" \
+  '! grep -q "^pass init" "$CALLS" && grep -q "pass init" <<<"$out"'
+# F11: an uppercase .GPG entry (pass matches -iname) counts as an entry too
+mkdir -p "$TMP/store2/x"; echo junk > "$TMP/store2/x/E.GPG"
+: > "$CALLS"
+out="$( cd "$KIT_DIR" && PATH="$B:/usr/bin:/bin" HOME="$H" GNUPGHOME="$H/.gnupg" \
+  PASSWORD_STORE_DIR="$TMP/store2" HOST_CONF="$TMP/host.conf" KIT_LOG_DIR="$TMP/logs" KIT_QUIET=0 \
+  bash profiles/workstation/06-gpg-pass.sh install 2>&1 )"
+assert "F11: uppercase .GPG entry, no .gpg-id: no pass init from a phase" '! grep -q "^pass init" "$CALLS"'
+mv "$TMP/gpg-id.bak" "$STORE/.gpg-id"
+
 # G. No card loop: gpg --card-status prints 0 PIN, 0 touch first, runs <=1 time in pass 1, 0 times in pass 2
 B_CARD="$TMP/bin-card"; mkdir -p "$B_CARD"
 CARD_CALLS="$TMP/card-calls"; : > "$CARD_CALLS"

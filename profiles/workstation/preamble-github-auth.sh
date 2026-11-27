@@ -64,7 +64,7 @@ if [[ "$(conf_get git_auth '')" == none ]]; then
 fi
 (( COPY || RECOVER )) || [[ "$REPO" == git@github.com:* ]] || { ok "configs_repo is not github-ssh — nothing to do"; exit 0; }
 
-mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+(( INSTALL )) && { mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"; }
 
 # gnome-keyring / gcr ssh-agent can't sign FIDO2 (-sk) keys and silently refuses
 # ("agent refused operation"), shadowing a working YubiKey — and it intercepts
@@ -93,6 +93,13 @@ disable_gnome_ssh_agent() {
 # into a temp dir and rename by serial instead. Mirrors the SK_KEY inventory
 # in .configs/bin/yubikey-audit (can't source it: this preamble runs before
 # .configs is cloned) — update both when keys rotate.
+# The only file names a GitHub sk stub may have (names reach ssh_config).
+SK_STUB_RE='^(github_yub_[A-Za-z0-9_-]+|id_(ed25519|ecdsa)_sk_rk[A-Za-z0-9_-]*)$'
+# A private file is a hardware stub only if the KEY says so (not its .pub label).
+# -P '' never prompts: an encrypted file just fails.
+stub_name_ok() { local LC_ALL=C; [[ "$1" =~ $SK_STUB_RE ]]; }
+stub_pub() { SSH_ASKPASS_REQUIRE=never ssh-keygen -y -P '' -f "$1" </dev/null 2>/dev/null; }
+is_sk_stub() { [[ "$(stub_pub "$1" | cut -d' ' -f1)" == sk-* ]]; }
 declare -A SK_NAME=(
   [37183681]="github_yub_primary"
   [37183574]="github_yub_backup"
@@ -104,19 +111,14 @@ SK_SERIALS=(37183681 37183574)
 # ssh-keygen -K default names next, then any other *.pub carrying an
 # sk-ssh-ed25519@openssh.com ... ssh:github key. Returns 1 if none.
 gh_resident_keys() {
-  local f p rc=1 _seen=""
-  # primary before backup (glob order would put backup first)
+  local f rc=1 _seen=""
+  # primary before backup (glob order would put backup first). Only names a
+  # stub can have: they reach ssh_config, so nothing else is ever pinned.
   for f in "$HOME"/.ssh/github_yub_primary "$HOME"/.ssh/github_yub_backup \
            "$HOME"/.ssh/github_yub_* "$HOME"/.ssh/id_*_sk_rk*; do
+    stub_name_ok "${f##*/}" || continue
     grep -qxF "$f" <<<"$_seen" 2>/dev/null && continue; _seen+="$f"$'\n'
-    [[ -f "$f" && "$f" != *.pub ]] && { printf '%s\n' "$f"; rc=0; }
-  done
-  for p in "$HOME"/.ssh/*.pub; do
-    [[ -f "$p" ]] || continue
-    awk 'NR==1 && $1 == "sk-ssh-ed25519@openssh.com" && $2 != "" && $3 == "ssh:github" { ok=1 } END { exit !ok }' "$p" 2>/dev/null || continue
-    f="${p%.pub}"
-    grep -qxF "$f" <<<"$_seen" 2>/dev/null && continue; _seen+="$f"$'\n'
-    [[ -f "$f" ]] && { printf '%s\n' "$f"; rc=0; }
+    [[ -f "$f" && ! -L "$f" ]] && { printf '%s\n' "$f"; rc=0; }
   done
   return $rc
 }
@@ -197,8 +199,8 @@ copy_resident_keys() {
   remote_cmd="$cd_expr"' && sh -c '\''set --; for p in *.pub; do [ -f "$p" ] || continue; read -r t b a _ < "$p" || [ -n "$t" ] || continue; [ "$t" = "sk-ssh-ed25519@openssh.com" ] && [ -n "$b" ] && [ "$a" = "ssh:github" ] || continue; k="${p%.pub}"; set -- "$@" "$p"; [ -f "$k" ] && set -- "$@" "$k"; done; [ "$#" -gt 0 ] || exit 3; tar cf - -- "$@"'\'''
   tmp="$(mktemp -d "$HOME/.ssh/copy.XXXXXX")"; chmod 700 "$tmp"
   _COPY_TMP="$tmp"; trap 'rm -rf "${_COPY_TMP:-}"' EXIT
-  log "copying GitHub FIDO2 stubs from $host: 1 ssh connection; YubiKey: 0 PIN, 0 touch if ssh to $host uses a disk key, else up to 2 touches + 1 PIN per YubiKey key it offers..."
-  ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -- "$host" "$remote_cmd" \
+  log "copying GitHub FIDO2 stubs from $host (its host key must already be known): 1 ssh connection; YubiKey: 0 PIN, 0 touch if ssh to $host uses a disk key, else up to 2 touches + 1 PIN per YubiKey key it offers..."
+  ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -- "$host" "$remote_cmd" \
     | tar -xf - -C "$tmp" --no-same-owner --no-same-permissions
   ps=("${PIPESTATUS[@]}")
   if (( ps[0] == 3 )); then
@@ -209,10 +211,17 @@ copy_resident_keys() {
   for pub in "$tmp"/*.pub; do
     [[ -f "$pub" && ! -L "$pub" ]] || continue
     awk 'NR==1 && $1=="sk-ssh-ed25519@openssh.com" && $2!="" && $3=="ssh:github"{ok=1} END{exit !ok}' "$pub" 2>/dev/null || continue
-    matched=$((matched + 1)); name="$(basename "${pub%.pub}")"; dst="$HOME/.ssh/$name"
+    name="$(basename "${pub%.pub}")"
+    stub_name_ok "$name" || { warn "ignoring ${name@Q} from $COPY_SRC (not a stub file name)"; continue; }
+    dst="$HOME/.ssh/$name"
     if [[ ! -f "$tmp/$name" || -L "$tmp/$name" ]]; then
       warn "incomplete transfer for $name (private stub missing from $COPY_SRC) — skipping"; incomplete=1; continue
     fi
+    chmod 600 "$tmp/$name"
+    if ! is_sk_stub "$tmp/$name" || [[ "$(stub_pub "$tmp/$name" | cut -d' ' -f1,2)" != "$(cut -d' ' -f1,2 "$pub")" ]]; then
+      warn "$name from $COPY_SRC is not a hardware (sk) stub matching its .pub — not installed"; continue
+    fi
+    matched=$((matched + 1))
     if [[ -e "$dst" || -e "$dst.pub" ]]; then
       warn "$name already exists — keeping it (not overwriting)"; skipped=$((skipped + 1)); continue
     fi
@@ -225,7 +234,7 @@ copy_resident_keys() {
     fi
   done
   rm -rf "$tmp"; _COPY_TMP=""
-  (( matched > 0 )) || { fail "no sk-ssh-ed25519@openssh.com ssh:github stubs found on $COPY_SRC"; return 1; }
+  (( matched > 0 || incomplete )) || { fail "no valid sk-ssh-ed25519@openssh.com ssh:github stub found on $COPY_SRC"; return 1; }
   GH_SKS="$(gh_resident_keys || true)"
   pin_resident_keys && log "pinned copied resident key(s) in github stanza" || true
   (( ! incomplete )) || { fail "copy incomplete: +$added new, $skipped existing kept"; return 1; }
@@ -269,12 +278,12 @@ pin_resident_keys() {
     stanza_has_identity "$f" && continue
     # append BELOW the stanza's last IdentityFile (or its Host line), so an
     # already-pinned primary stays first — ssh tries identities in order
-    awk -v add="  IdentityFile $f" '
+    ADD="  IdentityFile $f" awk '
       { L[NR]=$0 }
       /^[[:space:]]*Host[[:space:]]+github\.com([[:space:]]|$)/ { g=1; at=NR; next }
       g && /^[[:space:]]*Host[[:space:]]/ { g=0 }
       g && /^[[:space:]]*IdentityFile[[:space:]]/ { at=NR }
-      END { for (i=1;i<=NR;i++) { print L[i]; if (i==at) print add } }' "$CFG" > "$CFG.tmp" \
+      END { add=ENVIRON["ADD"]; for (i=1;i<=NR;i++) { print L[i]; if (i==at) print add } }' "$CFG" > "$CFG.tmp" \
       && mv "$CFG.tmp" "$CFG" && chmod 600 "$CFG"
     pinned=1
   done < <(gh_resident_keys || true)
@@ -344,7 +353,7 @@ for host in "github.com" "[ssh.github.com]:443"; do
     fi
   done
 done
-chmod 600 "$HOME/.ssh/known_hosts" 2>/dev/null || true
+(( INSTALL )) && chmod 600 "$HOME/.ssh/known_hosts" 2>/dev/null || true
 (( seeded )) && log "pinned GitHub host keys into known_hosts"
 ok "known_hosts: GitHub host keys"
 
